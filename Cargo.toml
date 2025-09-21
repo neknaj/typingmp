@@ -1,7 +1,16 @@
 [package]
-name = "textrender"
+name = "hybrid-text-app"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
+
+[features]
+default = ["gui"]
+gui = ["minifb"]
+tui = ["crossterm"]
 
 [dependencies]
 ab_glyph = "0.2"
+
+# Optional dependencies for backends
+minifb = { version = "0.28", optional = true }
+crossterm = { version = "0.29", optional = true }
