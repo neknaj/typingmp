@@ -143,7 +143,7 @@ impl App {
             let base_pixel_font_size = crate::renderer::calculate_pixel_font_size(base_font_size_enum, width, height);
 
             if let Some(current_line_content) = model.content.lines.get(model.status.line as usize) {
-                // 1. Calculate the total width of the current line's BASE text
+                // 1. Calculate the total width of the current line's BASE text for centering
                 let total_width = current_line_content.segments.iter().map(|seg| {
                     let text = match seg {
                         crate::model::Segment::Plain { text } => text.as_str(),
@@ -152,8 +152,9 @@ impl App {
                     gui_renderer::measure_text(font, text, base_pixel_font_size).0 as f32
                 }).sum::<f32>();
 
-                // 2. Calculate the width up to the cursor, based on the BASE text width
+                // 2. Calculate the width up to the cursor
                 let mut cursor_x_offset = 0.0;
+                // Add width of completed segments (based on BASE text)
                 for i in 0..model.status.segment as usize {
                     if let Some(seg) = current_line_content.segments.get(i) {
                          let text = match seg {
@@ -163,27 +164,28 @@ impl App {
                         cursor_x_offset += gui_renderer::measure_text(font, text, base_pixel_font_size).0 as f32;
                     }
                 }
-                // For the current segment, calculate progress within the reading and apply it to the base width
+                
+                // For the current segment, add the width of the typed READING text
                 if let Some(seg) = current_line_content.segments.get(model.status.segment as usize) {
-                    let (base_text, reading_text) = match seg {
-                        crate::model::Segment::Plain { text } => (text, text),
-                        crate::model::Segment::Annotated { base, reading } => (base, reading),
+                    let reading_text = match seg {
+                        crate::model::Segment::Plain { text } => text,
+                        crate::model::Segment::Annotated { reading, .. } => reading,
                     };
+                    // Get the substring of the reading text that has been typed so far.
                     let typed_reading_part = reading_text.chars().take(model.status.char_ as usize).collect::<String>();
+                    // Measure the actual pixel width of the typed part.
                     let typed_reading_width = gui_renderer::measure_text(font, &typed_reading_part, base_pixel_font_size).0 as f32;
-                    let total_reading_width = gui_renderer::measure_text(font, reading_text, base_pixel_font_size).0 as f32;
-                    let total_base_width = gui_renderer::measure_text(font, base_text, base_pixel_font_size).0 as f32;
-                    let progress_ratio = if total_reading_width > 0.0 { typed_reading_width / total_reading_width } else { 0.0 };
-                    cursor_x_offset += total_base_width * progress_ratio;
+                    // Add this width to the cursor offset.
+                    cursor_x_offset += typed_reading_width;
                 }
 
                 // 3. Calculate target scroll position so the cursor is centered
                 let target_scroll = cursor_x_offset - total_width / 2.0;
 
-                // 4. Smoothly update the scroll value using an easing function
+                // 4. Smoothly update the scroll value
                 let now = model.scroll.scroll as f32;
                 let d = target_scroll - now;
-                model.scroll.scroll += (d * (d.powi(2)) / (50000.0 + d.powi(2))) as f64;
+                model.scroll.scroll += (d * (d.powi(2)) / (1000000.0 + d.powi(2))) as f64;
             }
         }
     }

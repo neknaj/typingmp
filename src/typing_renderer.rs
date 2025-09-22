@@ -130,16 +130,15 @@ pub fn build_typing_renderables(
         lower_pen_x += base_w as f32;
     }
 
+
     // Draw current segment (typed part)
     if let Some(seg) = content_line.segments.get(status.segment as usize) {
-        let (base_text, reading_text) = match seg {
-            Segment::Plain { text } => (text.as_str(), text.as_str()),
-            Segment::Annotated { base, reading } => (base.as_str(), reading.as_str()),
+        let reading_text = match seg {
+            Segment::Plain { text } => text.as_str(),
+            Segment::Annotated { base: _, reading } => reading.as_str(),
         };
 
-        // Calculate total widths for the current segment once, before the loop
-        let (total_base_width, ..) = gui_renderer::measure_text(font, base_text, base_pixel_font_size);
-        let (total_reading_width, ..) = gui_renderer::measure_text(font, reading_text, base_pixel_font_size);
+        let mut reading_width_before: u32 = 0;
 
         for (char_idx, character) in reading_text.chars().enumerate().take(status.char_ as usize) {
             let char_str = character.to_string();
@@ -147,30 +146,32 @@ pub fn build_typing_renderables(
                 TypingCorrectnessChar::Correct => CORRECT_COLOR,
                 _ => INCORRECT_COLOR,
             };
-            
-            // Draw the typed character (from reading text) at the current pen position.
-            renderables.push(Renderable::BigText { text: char_str.clone(), anchor: Anchor::TopLeft, shift: Shift { x: lower_pen_x/width as f32, y: lower_y/ height as f32}, align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top}, font_size: base_font_size, color });
 
-            if let Segment::Annotated{..} = seg {
-                let (char_reading_w, ..) = gui_renderer::measure_text(font, &char_str, base_pixel_font_size);
-                let (small_reading_w, ..) = gui_renderer::measure_text(font, &char_str, small_ruby_pixel_font_size);
-                let ruby_x = lower_pen_x + (char_reading_w as f32 - small_reading_w as f32) / 2.0;
-                let ruby_y = lower_y - small_ruby_pixel_font_size * RUBY_Y_OFFSET_FACTOR;
-                renderables.push(Renderable::Text { text: char_str.clone(), anchor: Anchor::TopLeft, shift: Shift { x: ruby_x / width as f32, y: ruby_y / height as f32 }, align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top}, font_size: FontSize::WindowHeight(0.125 * 0.3), color });
-            }
-            
-            // Advance the pen proportionally to match the base text's total width.
-            let (char_reading_width, ..) = gui_renderer::measure_text(font, &char_str, base_pixel_font_size);
-            
-            // This is the proportional advance logic.
-            let progress_ratio = if total_reading_width > 0 { // FIX: Compare u32 with integer
-                char_reading_width as f32 / total_reading_width as f32
-            } else {
-                0.0
-            };
-            lower_pen_x += total_base_width as f32 * progress_ratio;
+            // Render the typed character (from reading text) at the current pen position.
+            renderables.push(Renderable::BigText {
+                text: char_str.clone(),
+                anchor: Anchor::TopLeft,
+                shift: Shift { x: lower_pen_x / width as f32, y: lower_y / height as f32 },
+                align: Align { horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top },
+                font_size: base_font_size,
+                color,
+            });
+
+            // Calculate the actual advance width for this character, including kerning,
+            // by measuring the difference in substring widths.
+            let reading_part_up_to_char = reading_text.chars().take(char_idx + 1).collect::<String>();
+            let (reading_width_up_to_char, ..) = gui_renderer::measure_text(font, &reading_part_up_to_char, base_pixel_font_size);
+            let char_advance_width = (reading_width_up_to_char - reading_width_before) as f32;
+
+            // DELETED: The redundant drawing of a smaller ruby on top of the large, unconfirmed ruby text has been removed.
+
+            // Advance the pen by the calculated width of the character we just drew.
+            lower_pen_x += char_advance_width;
+            reading_width_before = reading_width_up_to_char;
         }
     }
+
+
     
     // --- Draw Cursor & Extras ---
     let cursor_y = lower_y;
