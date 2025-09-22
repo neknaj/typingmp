@@ -7,7 +7,9 @@ extern crate alloc;
 #[cfg(feature = "uefi")]
 use alloc::{string::String, vec, vec::Vec};
 #[cfg(not(feature = "uefi"))]
-use std::string::{String, Vec};
+use std::string::String;
+#[cfg(not(feature = "uefi"))]
+use std::vec::Vec; // Vecはstringではなくvecクレートから
 
 #[cfg(not(feature = "uefi"))]
 use std::fmt;
@@ -17,7 +19,8 @@ use core::fmt;
 
 use crate::layout_data;
 
-// --- Data models for parsed content ---
+// (Content, Line, Segment, Model, TypingModel, etc. の定義は変更なし)
+// ...
 
 #[derive(Debug, Clone)]
 pub struct Content {
@@ -53,8 +56,6 @@ impl fmt::Display for Segment {
         }
     }
 }
-
-// --- Data models for typing game state ---
 
 #[derive(Debug, Clone)]
 pub enum Model {
@@ -141,7 +142,6 @@ pub struct Scroll {
     pub max: f64,
 }
 
-// LayoutのDefault実装を全面的に差し替え
 impl Default for Layout {
     fn default() -> Self {
         Layout {

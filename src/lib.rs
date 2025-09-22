@@ -1,6 +1,5 @@
 // ./src/lib.rs
 
-// uefi featureが有効な場合、no_stdとno_mainでコンパイルする
 #![cfg_attr(feature = "uefi", no_std)]
 #![cfg_attr(feature = "uefi", no_main)]
 
@@ -11,6 +10,10 @@ mod uefi_setup {
     #[global_allocator]
     static ALLOCATOR: uefi::allocator::Allocator = uefi::allocator::Allocator;
 }
+
+// uefi featureが有効な場合、標準のallocクレートをインポート
+#[cfg(feature = "uefi")]
+extern crate alloc;
 
 // アプリケーションの共通モジュールを宣言
 pub mod app;

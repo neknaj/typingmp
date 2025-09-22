@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(feature = "uefi")]
 #[uefi::entry]
- fn efi_main() -> uefi::prelude::Status {
+fn efi_main() -> uefi::prelude::Status {
     // ここで `run` 関数を呼び出すか、`run` 関数の内容を直接記述します。
     // `run` 関数のシグネチャを合わせる必要があるかもしれません。
     rust_multibackend_app::uefi::run()

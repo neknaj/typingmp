@@ -15,9 +15,15 @@ pub fn now() -> f64 {
 }
 
 // UEFIでは正確なSystemTimeは取れないため、BootServicesのタイマー等を利用するか、
-// ここでは単純なカウンターで代用する。より正確な実装には`uefi-services`のTimerProtocolなどが必要。
+// ここではuefi-services経由でタイマーを利用する
 #[cfg(feature = "uefi")]
 pub fn now() -> f64 {
-    // 簡単のため、ここではブートからの経過時間(マイクロ秒)をミリ秒に変換して返す。
-    uefi::boot::running_boot_services().timer().get_time().as_micros() as f64 / 1000.0
+    // uefi-servicesクレート経由でBootServicesを取得して時刻を取得
+    // handle()は一度しか呼べないので注意が必要だが、ここでは簡略化のため毎回呼ぶ
+    // 本来は一度だけ取得してstatic変数などに保持するのが望ましい
+    if let Ok(st) = uefi::system_table() {
+        st.boot_services().get_time().as_micros() as f64 / 1000.0
+    } else {
+        0.0 // エラー時は0を返す
+    }
 }

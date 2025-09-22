@@ -4,6 +4,10 @@
 #[cfg(feature = "uefi")]
 extern crate alloc;
 
+
+#[cfg(feature = "uefi")]
+use core_maths::CoreFloat;
+
 // uefi と std で使用する Vec と vec! を切り替える
 #[cfg(feature = "uefi")]
 use alloc::{vec, vec::Vec};

@@ -3,7 +3,7 @@
 extern crate alloc;
 
 use crate::app::{App, AppEvent};
-use crate::renderer::{calculate_pixel_font_size, gui_renderer, BG_COLOR};
+use crate::renderer::{calculate_pixel_font_size, gui_renderer};
 use crate::ui::{self, Renderable};
 use ab_glyph::{point, Font, FontRef, OutlinedGlyph, PxScale, ScaleFont};
 use alloc::vec::Vec;
@@ -31,7 +31,6 @@ pub fn run() -> Status {
 
         let keys: Vec<Key> = uefi::system::with_stdin(|stdin| {
             let mut collected_keys = Vec::new();
-            // Non-blocking read
             loop {
                 match stdin.read_key() {
                     Ok(Some(key)) => collected_keys.push(key),
@@ -45,13 +44,9 @@ pub fn run() -> Status {
             match key {
                 Key::Printable(c) => {
                     let ch: char = c.into();
-                    if ch == '\u{0008}' {
-                        app.on_event(AppEvent::Backspace);
-                    } else if ch == '\r' {
-                        app.on_event(AppEvent::Enter);
-                    } else if ch != '\u{0000}' {
-                        app.on_event(AppEvent::Char(ch));
-                    }
+                    if ch == '\u{0008}' { app.on_event(AppEvent::Backspace); } 
+                    else if ch == '\r' { app.on_event(AppEvent::Enter); } 
+                    else if ch != '\u{0000}' { app.on_event(AppEvent::Char(ch)); }
                 }
                 Key::Special(scan) => match scan {
                     ScanCode::ESCAPE => app.on_event(AppEvent::Escape),
@@ -62,16 +57,13 @@ pub fn run() -> Status {
             }
         }
 
-        // Render
         let mut pixel_buffer: Vec<BltPixel> = alloc::vec![BltPixel::new(0, 0, 0); width * height];
 
-        // build_uiの呼び出しを修正
         let render_list = ui::build_ui(&app, &font, width, height);
 
         for item in render_list {
             match item {
                 Renderable::Background { gradient } => {
-                    // 背景描画ロジックは簡略化
                     let start_r = ((gradient.start_color >> 16) & 0xFF) as u8;
                     let start_g = ((gradient.start_color >> 8) & 0xFF) as u8;
                     let start_b = (gradient.start_color & 0xFF) as u8;
@@ -82,16 +74,10 @@ pub fn run() -> Status {
                 Renderable::BigText { text, anchor, shift, align, font_size, color }
                 | Renderable::Text { text, anchor, shift, align, font_size, color } => {
                     let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
-                    let (text_width, text_height, _ascent) =
-                        gui_renderer::measure_text(&font, &text, pixel_font_size);
+                    let (text_width, text_height, _ascent) = gui_renderer::measure_text(&font, &text, pixel_font_size);
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
-                    let (x, y) =
-                        ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
-                    draw_text(
-                        &mut pixel_buffer, width, &font, &text,
-                        (x as f32, y as f32), pixel_font_size, color,
-                    );
-                    }
+                    let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
+                    draw_text(&mut pixel_buffer, width, &font, &text, (x as f32, y as f32), pixel_font_size, color);
                 }
             }
         }
@@ -101,8 +87,7 @@ pub fn run() -> Status {
             src: BltRegion::Full,
             dest: (0, 0),
             dims: (width, height),
-        })
-        .unwrap();
+        }).unwrap();
     }
 
     Status::SUCCESS

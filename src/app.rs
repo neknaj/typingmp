@@ -9,9 +9,13 @@ extern crate alloc;
 use alloc::{
     format,
     string::{String, ToString},
+    vec::Vec,
 };
 #[cfg(not(feature = "uefi"))]
-use std::string::{String, ToString};
+use std::{
+    string::{String, ToString},
+    vec::Vec,
+};
 
 use crate::model::{Model, ResultModel, Scroll, TypingModel, TypingStatus};
 use crate::parser;
@@ -166,7 +170,12 @@ impl App {
                         #[cfg(any(not(feature = "tui"), feature = "gui"))]
                         {
                             #[cfg(not(target_arch = "wasm32"))]
-                            println!("[APP] Received char: '{}'", c);
+                            {
+                                #[cfg(not(feature = "uefi"))]
+                                println!("[APP] Received char: '{}'", c);
+                                #[cfg(feature = "uefi")]
+                                uefi::println!("[APP] Received char: '{}'", c);
+                            }
                             #[cfg(target_arch = "wasm32")]
                             web_sys::console::log_1(&format!("[APP] Received char: '{}'", c).into());
                         }

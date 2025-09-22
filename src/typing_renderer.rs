@@ -23,13 +23,9 @@ const WRONG_KEY_COLOR: u32 = 0xFF_F55252;
 const CURSOR_COLOR: u32 = 0xFF_FFFFFF;
 
 // --- Layout Control Constants ---
-// 上段が画面中央からどれだけ上に配置されるか (大きいほど上へ)
 const UPPER_ROW_Y_OFFSET_FACTOR: f32 = 1.2;
-// 下段が画面中央からどれだけ下に配置されるか (大きいほど下へ)
 const LOWER_ROW_Y_OFFSET_FACTOR: f32 = 0.5;
-// Baseテキストとその上のRubyテキストの間隔 (小さいほど近づく)
 const RUBY_Y_OFFSET_FACTOR: f32 = 1.0;
-
 
 /// Helper to check if all characters in a segment were typed correctly.
 fn is_segment_correct(segment: &TypingCorrectnessSegment) -> bool {
