@@ -4,18 +4,14 @@ RustでGUI、TUI、WASMの3つのバックエンドを持つテキスト入力�
 
 ## 実行方法
 
-### GUI (Desktop, default)
-```bash
-cargo run
-```
-または
+### GUI (Desktop)
 ```bash
 cargo run --features gui
 ```
 
 ### TUI (Terminal)
 ```bash
-cargo run --no-default-features --features tui
+cargo run --features tui
 ```
 
 ### WASM (Web Browser)
@@ -27,7 +23,7 @@ cargo run --no-default-features --features tui
 
 2.  **WASMへのコンパイル**
     ```bash
-    wasm-pack build --target web -- --no-default-features --features wasm
+    wasm-pack build --target web -- --features wasm
     ```
 
 3.  **ローカルサーバーの起動**
@@ -39,3 +35,9 @@ cargo run --no-default-features --features tui
 
 4.  **ブラウザでアクセス**
     ブラウザを開き、 `http://localhost:8000` にアクセスします。
+
+
+### QEMU windows
+```powershell
+.\run_uefi.ps1
+```

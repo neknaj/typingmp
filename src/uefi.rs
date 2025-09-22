@@ -85,7 +85,7 @@ pub fn run() -> Status {
                     );
                 }
                 Renderable::Text { text, anchor, margin } => {
-                    let pos = ui::calculate_position(anchor, margin, width, height);
+                    let pos = ui::calculate_position(anchor, margin, width, height-10);
                     draw_text(
                         &mut pixel_buffer, width, &font, text,
                         (pos.0 as f32, pos.1 as f32), NORMAL_FONT_SIZE,

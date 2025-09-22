@@ -60,8 +60,3 @@ panic = "abort"
 
 [profile.dev]
 panic = "abort"
-
-[[bin]]
-name = "rust_multibackend_app"
-path = "src/main.rs"
-required-features = []
