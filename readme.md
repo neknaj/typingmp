@@ -1,6 +1,6 @@
-# Rust Multi-Backend App (GUI / TUI / WASM)
+# Typing Multi-Platform app (GUI / EFI / TUI / WASM)
 
-RustでGUI、TUI、WASMの3つのバックエンドを持つテキスト入力アプリケーションのサンプルです。
+RustでGUI、EFI、TUI、WASMの4つのバックエンドを持つテキスト入力アプリケーションのサンプルです。
 
 ## 実行方法
 
