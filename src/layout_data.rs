@@ -4,11 +4,11 @@
 extern crate alloc;
 
 #[cfg(feature = "uefi")]
-use alloc::{string::String, vec, vec::Vec};
+use alloc::{string::String, vec::Vec};
 #[cfg(not(feature = "uefi"))]
-use std::{string::String, vec, vec::Vec};
+use std::{string::String, vec::Vec};
 
-use phf::{phf_map};
+use phf::phf_map;
 
 // PHF doesn't support Vec<String> directly in its static map.
 // We define it as a static map of string slices and convert it at runtime.
