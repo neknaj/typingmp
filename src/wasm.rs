@@ -1,7 +1,7 @@
 use crate::app::App;
 use crate::renderer::{gui_renderer, BG_COLOR};
 use crate::ui::{self, Renderable};
-use ab_glyph::{Font, FontRef};
+use ab_glyph::{FontRef};
 use std::cell::RefCell;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
@@ -91,7 +91,7 @@ pub fn start() -> Result<(), JsValue> {
         for item in render_list {
             match item {
                 Renderable::BigText { text, anchor, shift, align } => {
-                    let (text_width, text_height) = gui_renderer::measure_text(&font, text, big_font_size);
+                    let (text_width, text_height, _) = gui_renderer::measure_text(&font, text, big_font_size);
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
                     let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     gui_renderer::draw_text(
@@ -104,7 +104,7 @@ pub fn start() -> Result<(), JsValue> {
                     );
                 }
                 Renderable::Text { text, anchor, shift, align } => {
-                    let (text_width, text_height) = gui_renderer::measure_text(&font, text, NORMAL_FONT_SIZE);
+                    let (text_width, text_height, _) = gui_renderer::measure_text(&font, text, NORMAL_FONT_SIZE);
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
                     let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     gui_renderer::draw_text(

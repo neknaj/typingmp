@@ -55,29 +55,45 @@ impl App {
 use crate::app::App;
 use crate::renderer::{gui_renderer, BG_COLOR};
 use crate::ui::{self, Renderable};
-use ab_glyph::{Font, FontRef};
+use ab_glyph::FontRef;
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
 
-const WIDTH: usize = 800;
-const HEIGHT: usize = 100;
-const BIG_FONT_SIZE: f32 = 48.0;
 const NORMAL_FONT_SIZE: f32 = 16.0;
 
 /// GUIアプリケーションのメイン関数
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let font_data = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
-    let font = FontRef::try_from_slice(font_data)?;
+    let font = FontRef::try_from_slice(font_data).map_err(|_| "Failed to load font from slice")?;
 
-    let mut window = Window::new("GUI Text Input", WIDTH, HEIGHT, WindowOptions::default())?;
-    window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
+    let mut width = 800;
+    let mut height = 300;
+
+    let mut window = Window::new(
+        "GUI Text Input",
+        width,
+        height,
+        WindowOptions {
+            resize: true,
+            ..WindowOptions::default()
+        },
+    )?;
+    window.set_target_fps(60);
     let mut app = App::new();
+    let mut big_font_size = height as f32 * 0.5;
 
     // メインループ
     while window.is_open() && !app.should_quit {
+        let (new_width, new_height) = window.get_size();
+        if new_width != width || new_height != height {
+            width = new_width;
+            height = new_height;
+            big_font_size = height as f32 * 0.5;
+        }
+
         handle_input(&mut window, &mut app);
 
         // 1. 背景色でピクセルバッファをクリア
-        let mut pixel_buffer = vec![BG_COLOR; WIDTH * HEIGHT];
+        let mut pixel_buffer = vec![BG_COLOR; width * height];
 
         // 2. UI定義から描画リストを取得
         let render_list = ui::build_ui(&app);
@@ -85,25 +101,29 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         // 3. 描画リストの各要素を解釈して描画
         for item in render_list {
             match item {
-                Renderable::BigText { text, anchor, margin } => {
-                    let pos = ui::calculate_position(anchor, margin, WIDTH, HEIGHT);
+                Renderable::BigText { text, anchor, shift, align } => {
+                    let (text_width, text_height, _ascent) = gui_renderer::measure_text(&font, text, big_font_size);
+                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
+                    let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     gui_renderer::draw_text(
-                        &mut pixel_buffer, WIDTH, &font, text,
-                        (pos.0 as f32, pos.1 as f32), BIG_FONT_SIZE,
+                        &mut pixel_buffer, width, &font, text,
+                        (x as f32, y as f32), big_font_size,
                     );
                 }
-                Renderable::Text { text, anchor, margin } => {
-                    let pos = ui::calculate_position(anchor, margin, WIDTH, HEIGHT);
+                Renderable::Text { text, anchor, shift, align } => {
+                    let (text_width, text_height, ascent) = gui_renderer::measure_text(&font, text, NORMAL_FONT_SIZE);
+                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
+                    let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     gui_renderer::draw_text(
-                        &mut pixel_buffer, WIDTH, &font, text,
-                        (pos.0 as f32, pos.1 as f32), NORMAL_FONT_SIZE,
+                        &mut pixel_buffer, width, &font, text,
+                        (x as f32, y as f32), NORMAL_FONT_SIZE,
                     );
                 }
             }
         }
         
         // 4. 完成したバッファをウィンドウに表示
-        window.update_with_buffer(&pixel_buffer, WIDTH, HEIGHT)?;
+        window.update_with_buffer(&pixel_buffer, width, height)?;
     }
     Ok(())
 }
@@ -176,6 +196,7 @@ fn key_to_char(key: Key, is_shift: bool) -> Option<char> {
         _ => None,
     }
 }
+
 ---
 
 ./src\lib.rs
@@ -188,16 +209,6 @@ fn key_to_char(key: Key, is_shift: bool) -> Option<char> {
 // uefi featureが有効な場合にのみ必要となる設定
 #[cfg(feature = "uefi")]
 mod uefi_setup {
-    use core::panic::PanicInfo;
-
-    /// no_std環境ではパニック時の処理を自分で定義する必要がある
-    #[panic_handler]
-    fn panic_handler(_info: &PanicInfo) -> ! { // FIX: info -> _info to suppress unused variable warning
-        // logクレートの初期化を行っていないため、ここでの呼び出しは削除します。
-        // log::error!("[PANIC] {}", info);
-        loop {}
-    }
-
     /// uefiクレートが提供するアロケータをグローバルアロケータとして設定
     #[global_allocator]
     static ALLOCATOR: uefi::allocator::Allocator = uefi::allocator::Allocator;
@@ -226,7 +237,11 @@ pub mod uefi;
 ---
 
 ./src\main.rs
+#![cfg_attr(feature = "uefi", no_std)]
+#![cfg_attr(feature = "uefi", no_main)]
+
 /// main関数 - featureフラグに応じて各バックエンドを起動
+#[cfg(not(feature = "uefi"))]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // "gui" featureが有効な場合にコンパイルされるブロック
     #[cfg(feature = "gui")]
@@ -239,7 +254,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(all(not(feature = "gui"), feature = "tui"))]
     {
         println!("Starting TUI version... (Press 'q' to exit)");
-        std::thread::sleep(std::time::Duration::from_secs(2));
+        // std::thread::sleep(std::time::Duration::from_secs(2));
         return rust_multibackend_app::tui::run();
     }
 
@@ -249,6 +264,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("No desktop backend feature enabled. Please run with --features gui or --features tui");
         return Ok(());
     }
+}
+
+
+#[cfg(feature = "uefi")]
+#[uefi::entry]
+ fn efi_main() -> uefi::prelude::Status {
+    // ここで `run` 関数を呼び出すか、`run` 関数の内容を直接記述します。
+    // `run` 関数のシグネチャを合わせる必要があるかもしれません。
+    rust_multibackend_app::uefi::run()
 }
 ---
 
@@ -268,7 +292,7 @@ use std::vec::Vec;
 #[cfg(feature = "uefi")]
 use core_maths::CoreFloat;
 
-use ab_glyph::{point, Font, FontRef, OutlinedGlyph};
+use ab_glyph::{point, Font, FontRef, OutlinedGlyph, PxScale, ScaleFont};
 
 /// テキストの描画色
 pub const TEXT_COLOR: u32 = 0x00_FFFFFF;
@@ -284,21 +308,29 @@ pub mod gui_renderer {
         buffer: &mut [u32], stride: usize, font: &FontRef, text: &str,
         pos: (f32, f32), font_size: f32,
     ) {
-        let scale = font_size / (font.ascent_unscaled() - font.descent_unscaled());
+        let scale = PxScale::from(font_size);
+        let scaled_font = font.as_scaled(scale);
+        let ascent = scaled_font.ascent();
         let mut pen_x = pos.0;
-        let pen_y = pos.1;
+        let pen_y = pos.1 + ascent;
 
+        let mut last_glyph = None;
         for character in text.chars() {
-            let glyph = font.glyph_id(character).with_scale_and_position(font_size, point(pen_x, pen_y));
+            let glyph_id = font.glyph_id(character);
+            if let Some(last) = last_glyph {
+                pen_x += scaled_font.kern(last, glyph_id);
+            }
+            let glyph = glyph_id.with_scale_and_position(scale, point(pen_x, pen_y));
             if let Some(outlined) = font.outline_glyph(glyph) {
                 draw_glyph_to_pixel_buffer(buffer, stride, &outlined);
             }
-            pen_x += font.h_advance_unscaled(font.glyph_id(character)) * scale;
+            pen_x += scaled_font.h_advance(glyph_id);
+            last_glyph = Some(glyph_id);
         }
     }
     
     /// アウトライン化されたグリフをピクセルバッファに描画する（内部関数）
-        fn draw_glyph_to_pixel_buffer(buffer: &mut [u32], stride: usize, outlined: &OutlinedGlyph) {
+    fn draw_glyph_to_pixel_buffer(buffer: &mut [u32], stride: usize, outlined: &OutlinedGlyph) {
         let bounds = outlined.px_bounds();
         outlined.draw(|x, y, c| {
             let buffer_x = bounds.min.x as i32 + x as i32;
@@ -309,15 +341,37 @@ pub mod gui_renderer {
                 let text_r = ((TEXT_COLOR >> 16) & 0xFF) as f32;
                 let text_g = ((TEXT_COLOR >> 8) & 0xFF) as f32;
                 let text_b = (TEXT_COLOR & 0xFF) as f32;
-                let bg_r = ((BG_COLOR >> 16) & 0xFF) as f32;
-                let bg_g = ((BG_COLOR >> 8) & 0xFF) as f32;
-                let bg_b = (BG_COLOR & 0xFF) as f32;
+                let bg_r = ((buffer[index] >> 16) & 0xFF) as f32;
+                let bg_g = ((buffer[index] >> 8) & 0xFF) as f32;
+                let bg_b = (buffer[index] & 0xFF) as f32;
                 let r = (text_r * c + bg_r * (1.0 - c)) as u32;
                 let g = (text_g * c + bg_g * (1.0 - c)) as u32;
                 let b = (text_b * c + bg_b * (1.0 - c)) as u32;
                 buffer[index] = (r << 16) | (g << 8) | b;
             }
         });
+    }
+
+    /// テキストの描画サイズ（幅と高さ）を計算する
+    pub fn measure_text(font: &FontRef, text: &str, size: f32) -> (u32, u32, f32) {
+        let scale = PxScale::from(size);
+        let scaled_font = font.as_scaled(scale);
+        let mut total_width = 0.0;
+
+        let mut last_glyph_id = None;
+        for c in text.chars() {
+            if c == '\n' {
+                continue;
+            }
+            let glyph = font.glyph_id(c);
+            if let Some(last_id) = last_glyph_id {
+                total_width += scaled_font.kern(last_id, glyph);
+            }
+            total_width += scaled_font.h_advance(glyph);
+            last_glyph_id = Some(glyph);
+        }
+        let height = scaled_font.ascent() - scaled_font.descent();
+        (total_width as u32, height as u32, scaled_font.ascent())
     }
 }
 
@@ -353,11 +407,20 @@ pub mod tui_renderer {
             if buffer_x < width && buffer_y < height {
                 let index = buffer_y * width + buffer_x;
                 let coverage_char = match (c * 4.0).round() as u8 {
-                    0 => ' ', 1 => '.', 2 => '*', 3 => '#', _ => '@',
+                    0 => ' ',
+                    1 => '.',
+                    2 => '*',
+                    3 => '#',
+                    _ => '@',
                 };
                 if buffer[index] == ' ' { buffer[index] = coverage_char; }
             }
         });
+    }
+
+    /// テキストの描画サイズ（幅と高さ）を計算する
+    pub fn measure_text(text: &str) -> (u32, u32) {
+        (text.chars().count() as u32, 1)
     }
 }
 ---
@@ -366,7 +429,7 @@ pub mod tui_renderer {
 use crate::app::App;
 use crate::renderer::tui_renderer;
 use crate::ui::{self, Renderable};
-use ab_glyph::{Font, FontRef};
+use ab_glyph::FontRef;
 use crossterm::{
     cursor, event, execute,
     event::{Event, KeyCode, KeyEventKind},
@@ -379,7 +442,7 @@ use std::time::Duration;
 /// TUIアプリケーションのメイン関数
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let font_data = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
-    let font = FontRef::try_from_slice(font_data)?;
+    let font = FontRef::try_from_slice(font_data).map_err(|_| "Failed to load font from slice")?;
 
     let mut stdout = stdout();
     terminal::enable_raw_mode()?;
@@ -407,11 +470,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Renderable::Text {
                     text,
                     anchor,
-                    margin,
+                    shift,
+                    align,
                 } => {
-                    let pos = ui::calculate_position(anchor, margin, cols, rows);
-                    let mut x = pos.0;
-                    let y = pos.1;
+                    // TUIでは複雑なアライメントは実装が難しいため、単純な位置計算に留める
+                    let (text_width, text_height) = tui_renderer::measure_text(text);
+                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, cols, rows);
+                    let (mut x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
+
                     if y < 0 || y >= rows as i32 {
                         continue;
                     }
@@ -473,32 +539,28 @@ fn handle_input(app: &mut App) -> std::io::Result<()> {
 extern crate alloc;
 
 use uefi::prelude::*;
-use uefi::proto::console::gop::{BltOp, BltRegion, GraphicsOutput, Pixel};
-use uefi::proto::console::text::ScanCode;
-use uefi::table::boot::{BootServices, EventType, TimerTrigger, Tpl};
-use uefi::table::Boot;
+use uefi::proto::console::gop::{BltOp, BltPixel, BltRegion, GraphicsOutput};
+use uefi::proto::console::text::Key;
+use uefi::boot::{EventType, TimerTrigger, Tpl};
 use crate::app::App;
-use crate::renderer::TEXT_COLOR;
+use crate::renderer::{TEXT_COLOR, BG_COLOR};
 use crate::ui::{self, Renderable};
 use ab_glyph::{Font, FontRef, point, OutlinedGlyph, PxScale, ScaleFont};
 use alloc::vec::Vec;
 
-const BIG_FONT_SIZE: f32 = 48.0;
 const NORMAL_FONT_SIZE: f32 = 16.0;
-const BG_COLOR: u32 = 0x00101010;
 
-#[no_mangle]
-pub extern "efiapi" fn efi_main(image: Handle, st: SystemTable<Boot>) -> Status {
-
-    let bt = st.boot_services();
+pub fn run() -> Status {
+    uefi::helpers::init().unwrap();
 
     // Get Graphics Output Protocol
-    let gop_handle = bt.get_handle_for_protocol::<GraphicsOutput>().unwrap();
-    let mut gop = bt.open_protocol_exclusive::<GraphicsOutput>(gop_handle).unwrap();
+    let gop_handle = uefi::boot::get_handle_for_protocol::<GraphicsOutput>().unwrap();
+    let mut gop = uefi::boot::open_protocol_exclusive::<GraphicsOutput>(gop_handle).unwrap();
 
     // Get current mode info
     let mode_info = gop.current_mode_info();
     let (width, height) = mode_info.resolution();
+    let big_font_size = height as f32 * 0.5;
 
     // Load font
     let font_data: &[u8] = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
@@ -506,55 +568,66 @@ pub extern "efiapi" fn efi_main(image: Handle, st: SystemTable<Boot>) -> Status 
 
     let mut app = App::new();
 
-    // Get input
-    let input = st.stdin();
+    // Create timer event for the main loop tick
+    let timer_event = unsafe { uefi::boot::create_event(EventType::TIMER, Tpl::APPLICATION, None, None).unwrap() };
+    uefi::boot::set_timer(&timer_event, TimerTrigger::Relative(100_000)).unwrap(); // 10ms tick
 
-    // Create timer event
-    let timer_event = unsafe { bt.create_event(EventType::TIMER, Tpl::APPLICATION, None, None).unwrap() };
-    bt.set_timer(&timer_event, TimerTrigger::Relative(100_000)).unwrap(); // 10ms
-
-    let mut events = [input.wait_for_key_event(), timer_event];
+    let mut events = [timer_event];
 
     while !app.should_quit {
-        // Wait for event
-        let index = bt.wait_for_event(&mut events).unwrap().unwrap();
+        // Wait for the timer tick
+        uefi::boot::wait_for_event(&mut events).unwrap();
 
-        if index == 0 {
-            // Key event
-            while let Ok(Some(key)) = input.read_key() {
-                if key.unicode_char != '\0' {
-                    if key.unicode_char == '\x08' {
+        // Read all available keys by returning them from the closure
+        let keys: Vec<Key> = uefi::system::with_stdin(|stdin| {
+            let mut collected_keys = Vec::new();
+            while let Ok(Some(key)) = stdin.read_key() {
+                collected_keys.push(key);
+            }
+            collected_keys
+        });
+
+        // Process the collected keys
+        for key in keys {
+            match key {
+                Key::Printable(c) => {
+                    let ch: char = c.into();
+                    if ch == '\u{0008}' { // Backspace
                         app.on_backspace();
                     } else {
-                        app.on_key(key.unicode_char);
+                        app.on_key(ch);
                     }
-                } else {
-                    if key.scan_code == ScanCode::ESCAPE {
-                        app.should_quit = true;
-                    }
-                }
+                },
+                Key::Special(scan) if scan == uefi::proto::console::text::ScanCode::ESCAPE => {
+                    app.should_quit = true;
+                },
+                _ => {},
             }
         }
 
         // Render
-        let mut pixel_buffer: Vec<Pixel> = alloc::vec![Pixel(((BG_COLOR >> 16) & 0xFF) as u8, ((BG_COLOR >> 8) & 0xFF) as u8, (BG_COLOR & 0xFF) as u8); width * height];
+        let mut pixel_buffer: alloc::vec::Vec<BltPixel> = alloc::vec![BltPixel::new(((BG_COLOR) & 0xFF) as u8, ((BG_COLOR >> 8) & 0xFF) as u8, ((BG_COLOR >> 16) & 0xFF) as u8); width * height];
 
         let render_list = ui::build_ui(&app);
 
         for item in render_list {
             match item {
-                Renderable::BigText { text, anchor, margin } => {
-                    let pos = ui::calculate_position(anchor, margin, width, height);
+                Renderable::BigText { text, anchor, shift, align } => {
+                    let (text_width, text_height, _ascent) = measure_text(&font, text, big_font_size);
+                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
+                    let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     draw_text(
                         &mut pixel_buffer, width, &font, text,
-                        (pos.0 as f32, pos.1 as f32), BIG_FONT_SIZE,
+                        (x as f32, y as f32), big_font_size,
                     );
                 }
-                Renderable::Text { text, anchor, margin } => {
-                    let pos = ui::calculate_position(anchor, margin, width, height);
+                Renderable::Text { text, anchor, shift, align } => {
+                    let (text_width, text_height, _ascent) = measure_text(&font, text, NORMAL_FONT_SIZE);
+                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
+                    let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     draw_text(
                         &mut pixel_buffer, width, &font, text,
-                        (pos.0 as f32, pos.1 as f32), NORMAL_FONT_SIZE,
+                        (x as f32, y as f32), NORMAL_FONT_SIZE,
                     );
                 }
             }
@@ -568,17 +641,15 @@ pub extern "efiapi" fn efi_main(image: Handle, st: SystemTable<Boot>) -> Status 
             dims: (width, height),
         }).unwrap();
 
-        // Reset timer if it was the timer event
-        if index == 1 {
-            bt.set_timer(&timer_event, TimerTrigger::Relative(100_000)).unwrap();
-        }
+        // Reset timer for the next tick
+        uefi::boot::set_timer(&events[0], TimerTrigger::Relative(100_000)).unwrap();
     }
 
     Status::SUCCESS
 }
 
 fn draw_text(
-    buffer: &mut [Pixel], stride: usize, font: &FontRef, text: &str,
+    buffer: &mut [BltPixel], stride: usize, font: &FontRef, text: &str,
     pos: (f32, f32), font_size: f32,
 ) {
     let scale = PxScale::from(font_size);
@@ -587,17 +658,22 @@ fn draw_text(
     let mut pen_x = pos.0;
     let pen_y = pos.1 + ascent;
 
+    let mut last_glyph = None;
     for character in text.chars() {
         let glyph_id = font.glyph_id(character);
+        if let Some(last) = last_glyph {
+            pen_x += scaled_font.kern(last, glyph_id);
+        }
         let glyph = glyph_id.with_scale_and_position(scale, point(pen_x, pen_y));
         if let Some(outlined) = font.outline_glyph(glyph) {
             draw_glyph_to_pixel_buffer(buffer, stride, &outlined);
         }
         pen_x += scaled_font.h_advance(glyph_id);
+        last_glyph = Some(glyph_id);
     }
 }
 
-fn draw_glyph_to_pixel_buffer(buffer: &mut [Pixel], stride: usize, outlined: &OutlinedGlyph) {
+fn draw_glyph_to_pixel_buffer(buffer: &mut [BltPixel], stride: usize, outlined: &OutlinedGlyph) {
     let bounds = outlined.px_bounds();
     outlined.draw(|x, y, c| {
         let buffer_x = bounds.min.x as i32 + x as i32;
@@ -605,19 +681,42 @@ fn draw_glyph_to_pixel_buffer(buffer: &mut [Pixel], stride: usize, outlined: &Ou
         let height = buffer.len() / stride;
         if buffer_x >= 0 && buffer_x < stride as i32 && buffer_y >= 0 && buffer_y < height as i32 {
             let index = (buffer_y as usize) * stride + (buffer_x as usize);
-            let text_r = ((TEXT_COLOR >> 16) & 0xFF) as f32;
-            let text_g = ((TEXT_COLOR >> 8) & 0xFF) as f32;
             let text_b = (TEXT_COLOR & 0xFF) as f32;
-            let bg_r = buffer[index].0 as f32;
-            let bg_g = buffer[index].1 as f32;
-            let bg_b = buffer[index].2 as f32;
-            let r = (text_r * c + bg_r * (1.0 - c)) as u8;
-            let g = (text_g * c + bg_g * (1.0 - c)) as u8;
+            let text_g = ((TEXT_COLOR >> 8) & 0xFF) as f32;
+            let text_r = ((TEXT_COLOR >> 16) & 0xFF) as f32;
+            let bg_b = buffer[index].blue as f32;
+            let bg_g = buffer[index].green as f32;
+            let bg_r = buffer[index].red as f32;
             let b = (text_b * c + bg_b * (1.0 - c)) as u8;
-            buffer[index] = Pixel(r, g, b);
+            let g = (text_g * c + bg_g * (1.0 - c)) as u8;
+            let r = (text_r * c + bg_r * (1.0 - c)) as u8;
+            buffer[index] = BltPixel::new(b, g, r);
         }
     });
 }
+
+/// テキストの描画サイズを計算する
+fn measure_text(font: &FontRef, text: &str, size: f32) -> (u32, u32, f32) {
+    let scale = PxScale::from(size);
+    let scaled_font = font.as_scaled(scale);
+    let mut total_width = 0.0;
+
+    let mut last_glyph_id = None;
+    for c in text.chars() {
+        if c == '\n' {
+            continue;
+        }
+        let glyph = font.glyph_id(c);
+        if let Some(last_id) = last_glyph_id {
+            total_width += scaled_font.kern(last_id, glyph);
+        }
+        total_width += scaled_font.h_advance(glyph);
+        last_glyph_id = Some(glyph);
+    }
+    let height = scaled_font.ascent() - scaled_font.descent();
+    (total_width as u32, height as u32, scaled_font.ascent())
+}
+
 ---
 
 ./src\ui.rs
@@ -649,11 +748,34 @@ pub enum Anchor {
     BottomRight,
 }
 
-/// Anchorからのオフセット（余白）を定義する構造体
+/// Anchorからのオフセット（移動量）を定義する構造体
 #[derive(Clone, Copy)]
-pub struct Margin {
-    pub x: i32,
-    pub y: i32,
+pub struct Shift {
+    pub x: f32,
+    pub y: f32,
+}
+
+/// 水平方向の揃え
+#[derive(Clone, Copy)]
+pub enum HorizontalAlign {
+    Left,
+    Center,
+    Right,
+}
+
+/// 垂直方向の揃え
+#[derive(Clone, Copy)]
+pub enum VerticalAlign {
+    Top,
+    Center,
+    Bottom,
+}
+
+/// テキストの揃え方を定義する構造体
+#[derive(Clone, Copy)]
+pub struct Align {
+    pub horizontal: HorizontalAlign,
+    pub vertical: VerticalAlign,
 }
 
 /// 画面に描画すべき要素の種類とレイアウト情報を定義するenum
@@ -662,13 +784,15 @@ pub enum Renderable<'a> {
     Text {
         text: &'a str,
         anchor: Anchor,
-        margin: Margin,
+        shift: Shift,
+        align: Align,
     },
     /// 大きなフォントサイズで描画されるテキスト
     BigText {
         text: &'a str,
         anchor: Anchor,
-        margin: Margin,
+        shift: Shift,
+        align: Align,
     },
 }
 
@@ -679,19 +803,27 @@ pub fn build_ui<'a>(app: &'a App) -> Vec<Renderable<'a>> {
         Renderable::BigText {
             text: &app.input_text,
             anchor: Anchor::CenterLeft,
-            margin: Margin { x: 0, y: 0 },
+            shift: Shift { x: 0.02, y: 0.0 }, // 画面幅の2%右にずらす
+            align: Align {
+                horizontal: HorizontalAlign::Left,
+                vertical: VerticalAlign::Center,
+            },
         },
         // 画面左下に表示するステータステキスト
         Renderable::Text {
             text: &app.status_text,
             anchor: Anchor::BottomLeft,
-            margin: Margin { x: 5, y: -5 },
+            shift: Shift { x: 0.01, y: -0.02 }, // 画面幅の1%右、画面高さの2%上にずらす
+            align: Align {
+                horizontal: HorizontalAlign::Left,
+                vertical: VerticalAlign::Bottom,
+            },
         },
     ]
 }
 
-/// AnchorとMarginから、具体的な描画開始座標(x, y)を計算する
-pub fn calculate_position(anchor: Anchor, margin: Margin, width: usize, height: usize) -> (i32, i32) {
+/// AnchorとShiftから、基準となる座標(x, y)を計算する
+pub fn calculate_anchor_position(anchor: Anchor, shift: Shift, width: usize, height: usize) -> (i32, i32) {
     let (w, h) = (width as i32, height as i32);
     let base_pos = match anchor {
         Anchor::TopLeft => (0, 0),
@@ -704,7 +836,34 @@ pub fn calculate_position(anchor: Anchor, margin: Margin, width: usize, height: 
         Anchor::BottomCenter => (w / 2, h),
         Anchor::BottomRight => (w, h),
     };
-    (base_pos.0 + margin.x, base_pos.1 + margin.y)
+    let shift_x = (width as f32 * shift.x) as i32;
+    let shift_y = (height as f32 * shift.y) as i32;
+    (base_pos.0 + shift_x, base_pos.1 + shift_y)
+}
+
+/// 基準点、テキストの寸法、揃え方から、最終的な描画開始座標（左上）を計算する
+pub fn calculate_aligned_position(
+    anchor_pos: (i32, i32),
+    text_width: u32,
+    text_height: u32,
+    align: Align,
+) -> (i32, i32) {
+    let (tw, th) = (text_width as i32, text_height as i32);
+    let (ax, ay) = anchor_pos;
+
+    let x = match align.horizontal {
+        HorizontalAlign::Left => ax,
+        HorizontalAlign::Center => ax - tw / 2,
+        HorizontalAlign::Right => ax - tw,
+    };
+
+    let y = match align.vertical {
+        VerticalAlign::Top => ay,
+        VerticalAlign::Center => ay - th / 2,
+        VerticalAlign::Bottom => ay - th,
+    };
+
+    (x, y)
 }
 ---
 
@@ -719,9 +878,6 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::Clamped;
 use web_sys::{CanvasRenderingContext2d, ImageData, KeyboardEvent};
 
-const WIDTH: usize = 800;
-const HEIGHT: usize = 100;
-const BIG_FONT_SIZE: f32 = 48.0;
 const NORMAL_FONT_SIZE: f32 = 16.0;
 
 /// WASMモジュールのエントリーポイント
@@ -732,16 +888,44 @@ pub fn start() -> Result<(), JsValue> {
     let document = window.document().unwrap();
     let body = document.body().unwrap();
 
-    let canvas = document.create_element("canvas")?.dyn_into::<web_sys::HtmlCanvasElement>()?;
-    canvas.set_width(WIDTH as u32);
-    canvas.set_height(HEIGHT as u32);
+    let canvas = document
+        .create_element("canvas")?
+        .dyn_into::<web_sys::HtmlCanvasElement>()?;
     body.append_child(&canvas)?;
-    let context = canvas.get_context("2d")?.unwrap().dyn_into::<CanvasRenderingContext2d>()?;
+    let context =
+        canvas.get_context("2d")?.unwrap().dyn_into::<CanvasRenderingContext2d>()?;
 
     let font = FontRef::try_from_slice(include_bytes!("../fonts/NotoSerifJP-Regular.ttf"))
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     let app = Rc::new(RefCell::new(App::new()));
+
+    let size = Rc::new(RefCell::new((0, 0)));
+
+    // 初期サイズ設定とリサイズハンドラ
+    {
+        let window_clone = window.clone();
+        let canvas_clone = canvas.clone();
+        let size_clone = size.clone();
+        let resize_handler = Closure::<dyn FnMut()>::new(move || {
+            let width = window_clone.inner_width().unwrap().as_f64().unwrap() as u32;
+            let height = window_clone.inner_height().unwrap().as_f64().unwrap() as u32;
+            canvas_clone.set_width(width);
+            canvas_clone.set_height(height);
+            *size_clone.borrow_mut() = (width as usize, height as usize);
+        });
+        window.add_event_listener_with_callback("resize", resize_handler.as_ref().unchecked_ref())?;
+        resize_handler.forget();
+        // 初期サイズを設定するために一度呼び出す
+        let window_clone = window.clone();
+        let canvas_clone = canvas.clone();
+        let size_clone = size.clone();
+        let width = window_clone.inner_width().unwrap().as_f64().unwrap() as u32;
+        let height = window_clone.inner_height().unwrap().as_f64().unwrap() as u32;
+        canvas_clone.set_width(width);
+        canvas_clone.set_height(height);
+        *size_clone.borrow_mut() = (width as usize, height as usize);
+    }
 
     // キーボードイベントのリスナーを設定
     {
@@ -763,10 +947,12 @@ pub fn start() -> Result<(), JsValue> {
     let f = Rc::new(RefCell::new(None));
     let g = f.clone();
     *g.borrow_mut() = Some(Closure::<dyn FnMut()>::new(move || {
+        let (width, height) = *size.borrow();
+        let big_font_size = height as f32 * 0.5;
         let app = app.borrow(); // 描画中は不変借用
 
         // 1. 背景色でピクセルバッファをクリア
-        let mut pixel_buffer = vec![BG_COLOR; WIDTH * HEIGHT];
+        let mut pixel_buffer = vec![BG_COLOR; width * height];
 
         // 2. UI定義から描画リストを取得
         let render_list = ui::build_ui(&app);
@@ -774,29 +960,51 @@ pub fn start() -> Result<(), JsValue> {
         // 3. 描画リストを解釈して描画
         for item in render_list {
             match item {
-                 Renderable::BigText { text, anchor, margin } => {
-                    let pos = ui::calculate_position(anchor, margin, WIDTH, HEIGHT);
+                Renderable::BigText { text, anchor, shift, align } => {
+                    let (text_width, text_height) = gui_renderer::measure_text(&font, text, big_font_size);
+                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
+                    let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     gui_renderer::draw_text(
-                        &mut pixel_buffer, WIDTH, &font, text,
-                        (pos.0 as f32, pos.1 as f32), BIG_FONT_SIZE,
+                        &mut pixel_buffer,
+                        width,
+                        &font,
+                        text,
+                        (x as f32, y as f32),
+                        big_font_size,
                     );
                 }
-                Renderable::Text { text, anchor, margin } => {
-                    let pos = ui::calculate_position(anchor, margin, WIDTH, HEIGHT);
+                Renderable::Text { text, anchor, shift, align } => {
+                    let (text_width, text_height) = gui_renderer::measure_text(&font, text, NORMAL_FONT_SIZE);
+                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
+                    let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     gui_renderer::draw_text(
-                        &mut pixel_buffer, WIDTH, &font, text,
-                        (pos.0 as f32, pos.1 as f32), NORMAL_FONT_SIZE,
+                        &mut pixel_buffer,
+                        width,
+                        &font,
+                        text,
+                        (x as f32, y as f32),
+                        NORMAL_FONT_SIZE,
                     );
                 }
             }
         }
-        
+
         // 4. 完成したバッファをCanvasに転送
-        let mut u8_buffer = Vec::with_capacity(WIDTH * HEIGHT * 4);
+        let mut u8_buffer = Vec::with_capacity(width * height * 4);
         for pixel in pixel_buffer.iter() {
-            u8_buffer.extend_from_slice(&[((*pixel >> 16) & 0xFF) as u8, ((*pixel >> 8) & 0xFF) as u8, (*pixel & 0xFF) as u8, 255]);
+            u8_buffer.extend_from_slice(&[
+                ((*pixel >> 16) & 0xFF) as u8,
+                ((*pixel >> 8) & 0xFF) as u8,
+                (*pixel & 0xFF) as u8,
+                255,
+            ]);
         }
-        let image_data = ImageData::new_with_u8_clamped_array_and_sh(Clamped(&u8_buffer), WIDTH as u32, HEIGHT as u32).unwrap();
+        let image_data = ImageData::new_with_u8_clamped_array_and_sh(
+            Clamped(&u8_buffer),
+            width as u32,
+            height as u32,
+        )
+        .unwrap();
         context.put_image_data(&image_data, 0.0, 0.0).unwrap();
 
         // 次のフレームを要求
@@ -809,7 +1017,11 @@ pub fn start() -> Result<(), JsValue> {
 
 /// requestAnimationFrameを呼び出すヘルパー関数
 fn request_animation_frame(f: &Closure<dyn FnMut()>) {
-    web_sys::window().unwrap().request_animation_frame(f.as_ref().unchecked_ref()).unwrap();
+    web_sys::window()
+        .unwrap()
+        .request_animation_frame(f.as_ref().unchecked_ref())
+        .unwrap();
 }
+
 ---
 

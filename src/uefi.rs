@@ -77,7 +77,7 @@ pub fn run() -> Status {
         for item in render_list {
             match item {
                 Renderable::BigText { text, anchor, shift, align } => {
-                    let (text_width, text_height) = measure_text(&font, text, big_font_size);
+                    let (text_width, text_height, _ascent) = measure_text(&font, text, big_font_size);
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
                     let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     draw_text(
@@ -86,7 +86,7 @@ pub fn run() -> Status {
                     );
                 }
                 Renderable::Text { text, anchor, shift, align } => {
-                    let (text_width, text_height) = measure_text(&font, text, NORMAL_FONT_SIZE);
+                    let (text_width, text_height, _ascent) = measure_text(&font, text, NORMAL_FONT_SIZE);
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
                     let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     draw_text(
@@ -122,13 +122,18 @@ fn draw_text(
     let mut pen_x = pos.0;
     let pen_y = pos.1 + ascent;
 
+    let mut last_glyph = None;
     for character in text.chars() {
         let glyph_id = font.glyph_id(character);
+        if let Some(last) = last_glyph {
+            pen_x += scaled_font.kern(last, glyph_id);
+        }
         let glyph = glyph_id.with_scale_and_position(scale, point(pen_x, pen_y));
         if let Some(outlined) = font.outline_glyph(glyph) {
             draw_glyph_to_pixel_buffer(buffer, stride, &outlined);
         }
         pen_x += scaled_font.h_advance(glyph_id);
+        last_glyph = Some(glyph_id);
     }
 }
 
@@ -155,11 +160,10 @@ fn draw_glyph_to_pixel_buffer(buffer: &mut [BltPixel], stride: usize, outlined: 
 }
 
 /// テキストの描画サイズを計算する
-fn measure_text(font: &FontRef, text: &str, size: f32) -> (u32, u32) {
+fn measure_text(font: &FontRef, text: &str, size: f32) -> (u32, u32, f32) {
     let scale = PxScale::from(size);
     let scaled_font = font.as_scaled(scale);
     let mut total_width = 0.0;
-    let mut max_height = 0.0;
 
     let mut last_glyph_id = None;
     for c in text.chars() {
@@ -170,14 +174,9 @@ fn measure_text(font: &FontRef, text: &str, size: f32) -> (u32, u32) {
         if let Some(last_id) = last_glyph_id {
             total_width += scaled_font.kern(last_id, glyph);
         }
-        if let Some(outlined_glyph) = font.outline_glyph(glyph.with_scale(scale)) {
-            let bounds = outlined_glyph.px_bounds();
-            total_width += bounds.width();
-            if bounds.height() > max_height {
-                max_height = bounds.height();
-            }
-        }
+        total_width += scaled_font.h_advance(glyph);
         last_glyph_id = Some(glyph);
     }
-    (total_width as u32, max_height as u32)
+    let height = scaled_font.ascent() - scaled_font.descent();
+    (total_width as u32, height as u32, scaled_font.ascent())
 }

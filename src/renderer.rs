@@ -29,21 +29,29 @@ pub mod gui_renderer {
         buffer: &mut [u32], stride: usize, font: &FontRef, text: &str,
         pos: (f32, f32), font_size: f32,
     ) {
-        let scale = font_size / (font.ascent_unscaled() - font.descent_unscaled());
+        let scale = PxScale::from(font_size);
+        let scaled_font = font.as_scaled(scale);
+        let ascent = scaled_font.ascent();
         let mut pen_x = pos.0;
-        let pen_y = pos.1;
+        let pen_y = pos.1 + ascent;
 
+        let mut last_glyph = None;
         for character in text.chars() {
-            let glyph = font.glyph_id(character).with_scale_and_position(font_size, point(pen_x, pen_y));
+            let glyph_id = font.glyph_id(character);
+            if let Some(last) = last_glyph {
+                pen_x += scaled_font.kern(last, glyph_id);
+            }
+            let glyph = glyph_id.with_scale_and_position(scale, point(pen_x, pen_y));
             if let Some(outlined) = font.outline_glyph(glyph) {
                 draw_glyph_to_pixel_buffer(buffer, stride, &outlined);
             }
-            pen_x += font.h_advance_unscaled(font.glyph_id(character)) * scale;
+            pen_x += scaled_font.h_advance(glyph_id);
+            last_glyph = Some(glyph_id);
         }
     }
     
     /// アウトライン化されたグリフをピクセルバッファに描画する（内部関数）
-        fn draw_glyph_to_pixel_buffer(buffer: &mut [u32], stride: usize, outlined: &OutlinedGlyph) {
+    fn draw_glyph_to_pixel_buffer(buffer: &mut [u32], stride: usize, outlined: &OutlinedGlyph) {
         let bounds = outlined.px_bounds();
         outlined.draw(|x, y, c| {
             let buffer_x = bounds.min.x as i32 + x as i32;
@@ -54,9 +62,9 @@ pub mod gui_renderer {
                 let text_r = ((TEXT_COLOR >> 16) & 0xFF) as f32;
                 let text_g = ((TEXT_COLOR >> 8) & 0xFF) as f32;
                 let text_b = (TEXT_COLOR & 0xFF) as f32;
-                let bg_r = ((BG_COLOR >> 16) & 0xFF) as f32;
-                let bg_g = ((BG_COLOR >> 8) & 0xFF) as f32;
-                let bg_b = (BG_COLOR & 0xFF) as f32;
+                let bg_r = ((buffer[index] >> 16) & 0xFF) as f32;
+                let bg_g = ((buffer[index] >> 8) & 0xFF) as f32;
+                let bg_b = (buffer[index] & 0xFF) as f32;
                 let r = (text_r * c + bg_r * (1.0 - c)) as u32;
                 let g = (text_g * c + bg_g * (1.0 - c)) as u32;
                 let b = (text_b * c + bg_b * (1.0 - c)) as u32;
@@ -66,11 +74,10 @@ pub mod gui_renderer {
     }
 
     /// テキストの描画サイズ（幅と高さ）を計算する
-    pub fn measure_text(font: &FontRef, text: &str, size: f32) -> (u32, u32) {
+    pub fn measure_text(font: &FontRef, text: &str, size: f32) -> (u32, u32, f32) {
         let scale = PxScale::from(size);
         let scaled_font = font.as_scaled(scale);
         let mut total_width = 0.0;
-        let mut max_height = 0.0;
 
         let mut last_glyph_id = None;
         for c in text.chars() {
@@ -81,16 +88,11 @@ pub mod gui_renderer {
             if let Some(last_id) = last_glyph_id {
                 total_width += scaled_font.kern(last_id, glyph);
             }
-            if let Some(outlined_glyph) = font.outline_glyph(glyph.with_scale(scale)) {
-                let bounds = outlined_glyph.px_bounds();
-                total_width += bounds.width();
-                if bounds.height() > max_height {
-                    max_height = bounds.height();
-                }
-            }
+            total_width += scaled_font.h_advance(glyph);
             last_glyph_id = Some(glyph);
         }
-        (total_width as u32, max_height as u32)
+        let height = scaled_font.ascent() - scaled_font.descent();
+        (total_width as u32, height as u32, scaled_font.ascent())
     }
 }
 
@@ -104,7 +106,7 @@ pub mod tui_renderer {
         let font_size = height as f32 * 0.8;
         let scale = font_size / (font.ascent_unscaled() - font.descent_unscaled());
         let mut pen_x = 2.0;
-        let mut pen_y = height as f32 * 0.7;
+        let pen_y = height as f32 * 0.7;
 
         for character in text.chars() {
             let glyph = font.glyph_id(character).with_scale_and_position(font_size, point(pen_x, pen_y));
@@ -126,7 +128,11 @@ pub mod tui_renderer {
             if buffer_x < width && buffer_y < height {
                 let index = buffer_y * width + buffer_x;
                 let coverage_char = match (c * 4.0).round() as u8 {
-                    0 => ' ', 1 => '.', 2 => '*', 3 => '#', _ => '@',
+                    0 => ' ',
+                    1 => '.',
+                    2 => '*',
+                    3 => '#',
+                    _ => '@',
                 };
                 if buffer[index] == ' ' { buffer[index] = coverage_char; }
             }
