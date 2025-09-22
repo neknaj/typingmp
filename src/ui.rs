@@ -1,3 +1,15 @@
+// uefi featureが有効な場合、標準のallocクレートをインポート
+#[cfg(feature = "uefi")]
+extern crate alloc;
+
+// uefi と std で使用する Vec と vec! を切り替える
+#[cfg(feature = "uefi")]
+use alloc::vec::Vec;
+#[cfg(feature = "uefi")]
+use alloc::vec;
+#[cfg(not(feature = "uefi"))]
+use std::vec::Vec;
+
 use crate::app::App;
 
 /// 画面上の描画基準点を定義するenum

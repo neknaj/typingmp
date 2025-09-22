@@ -3,7 +3,7 @@
 use crate::app::App;
 use crate::renderer::{gui_renderer, BG_COLOR};
 use crate::ui::{self, Renderable};
-use ab_glyph::{Font, FontRef};
+use ab_glyph::FontRef;
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
 
 const WIDTH: usize = 800;
@@ -14,10 +14,10 @@ const NORMAL_FONT_SIZE: f32 = 16.0;
 /// GUIアプリケーションのメイン関数
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let font_data = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
-    let font = FontRef::try_from_slice(font_data)?;
+    let font = FontRef::try_from_slice(font_data).map_err(|_| "Failed to load font from slice")?;
 
     let mut window = Window::new("GUI Text Input", WIDTH, HEIGHT, WindowOptions::default())?;
-    window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
+    window.set_target_fps(60);
     let mut app = App::new();
 
     // メインループ

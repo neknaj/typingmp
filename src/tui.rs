@@ -1,7 +1,7 @@
 use crate::app::App;
 use crate::renderer::tui_renderer;
 use crate::ui::{self, Renderable};
-use ab_glyph::{Font, FontRef};
+use ab_glyph::FontRef;
 use crossterm::{
     cursor, event, execute,
     event::{Event, KeyCode, KeyEventKind},
@@ -14,7 +14,7 @@ use std::time::Duration;
 /// TUIアプリケーションのメイン関数
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let font_data = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
-    let font = FontRef::try_from_slice(font_data)?;
+    let font = FontRef::try_from_slice(font_data).map_err(|_| "Failed to load font from slice")?;
 
     let mut stdout = stdout();
     terminal::enable_raw_mode()?;

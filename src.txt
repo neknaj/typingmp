@@ -1,4 +1,17 @@
 ./src\app.rs
+// ./src/app.rs
+
+// uefi featureが有効な場合、標準のallocクレートをインポート
+#[cfg(feature = "uefi")]
+extern crate alloc;
+
+// uefi と std で使用する String と format! を切り替える
+#[cfg(feature = "uefi")]
+use alloc::{format, string::{String, ToString}};
+#[cfg(not(feature = "uefi"))]
+use std::string::{String, ToString};
+
+
 /// アプリケーション全体で共有される状態を保持する構造体
 pub struct App {
     /// ユーザーが入力したテキスト
@@ -13,16 +26,18 @@ impl App {
     /// Appの新しいインスタンスを生成する
     pub fn new() -> Self {
         Self {
-            input_text: "Hello, World!".to_string(),
-            status_text: "Press any key. (ESC or 'q' to quit)".to_string(),
+            input_text: "Hello, UEFI!".to_string(),
+            status_text: "Press any key. (ESC to quit)".to_string(),
             should_quit: false,
         }
     }
 
     /// 文字キーが押された時の処理
     pub fn on_key(&mut self, c: char) {
-        self.input_text.push(c);
-        self.status_text = format!("Pressed: '{}', Length: {}", c, self.input_text.len());
+        if c != '\u{0}' { // NUL文字は無視する
+            self.input_text.push(c);
+            self.status_text = format!("Pressed: '{}', Length: {}", c, self.input_text.len());
+        }
     }
 
     /// バックスペースキーが押された時の処理
@@ -164,6 +179,30 @@ fn key_to_char(key: Key, is_shift: bool) -> Option<char> {
 ---
 
 ./src\lib.rs
+// ./src/lib.rs
+
+// uefi featureが有効な場合、no_stdとno_mainでコンパイルする
+#![cfg_attr(feature = "uefi", no_std)]
+#![cfg_attr(feature = "uefi", no_main)]
+
+// uefi featureが有効な場合にのみ必要となる設定
+#[cfg(feature = "uefi")]
+mod uefi_setup {
+    use core::panic::PanicInfo;
+
+    /// no_std環境ではパニック時の処理を自分で定義する必要がある
+    #[panic_handler]
+    fn panic_handler(_info: &PanicInfo) -> ! { // FIX: info -> _info to suppress unused variable warning
+        // logクレートの初期化を行っていないため、ここでの呼び出しは削除します。
+        // log::error!("[PANIC] {}", info);
+        loop {}
+    }
+
+    /// uefiクレートが提供するアロケータをグローバルアロケータとして設定
+    #[global_allocator]
+    static ALLOCATOR: uefi::allocator::Allocator = uefi::allocator::Allocator;
+}
+
 // アプリケーションの共通モジュールを宣言
 pub mod app;
 pub mod renderer;
@@ -180,6 +219,10 @@ pub mod tui;
 // "wasm" featureが有効な時だけコンパイルされるWASMバックエンドモジュール
 #[cfg(feature = "wasm")]
 pub mod wasm;
+
+// "uefi" featureが有効な時だけコンパイルされるUEFIバックエンドモジュール
+#[cfg(feature = "uefi")]
+pub mod uefi;
 ---
 
 ./src\main.rs
@@ -210,6 +253,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ---
 
 ./src\renderer.rs
+// uefi featureが有効な場合、標準のallocクレートをインポート
+#[cfg(feature = "uefi")]
+extern crate alloc;
+
+// uefi と std で使用する Vec と vec! を切り替える
+#[cfg(feature = "uefi")]
+use alloc::vec::Vec;
+#[cfg(feature = "uefi")]
+use alloc::vec;
+#[cfg(not(feature = "uefi"))]
+use std::vec::Vec;
+
+#[cfg(feature = "uefi")]
+use core_maths::CoreFloat;
+
 use ab_glyph::{point, Font, FontRef, OutlinedGlyph};
 
 /// テキストの描画色
@@ -223,7 +281,7 @@ pub mod gui_renderer {
 
     /// 指定されたピクセルバッファの指定位置にテキストを描画する
     pub fn draw_text(
-        buffer: &mut [u32], width: usize, font: &FontRef, text: &str,
+        buffer: &mut [u32], stride: usize, font: &FontRef, text: &str,
         pos: (f32, f32), font_size: f32,
     ) {
         let scale = font_size / (font.ascent_unscaled() - font.descent_unscaled());
@@ -233,21 +291,21 @@ pub mod gui_renderer {
         for character in text.chars() {
             let glyph = font.glyph_id(character).with_scale_and_position(font_size, point(pen_x, pen_y));
             if let Some(outlined) = font.outline_glyph(glyph) {
-                draw_glyph_to_pixel_buffer(buffer, width, &outlined);
+                draw_glyph_to_pixel_buffer(buffer, stride, &outlined);
             }
             pen_x += font.h_advance_unscaled(font.glyph_id(character)) * scale;
         }
     }
     
     /// アウトライン化されたグリフをピクセルバッファに描画する（内部関数）
-    fn draw_glyph_to_pixel_buffer(buffer: &mut [u32], width: usize, outlined: &OutlinedGlyph) {
+        fn draw_glyph_to_pixel_buffer(buffer: &mut [u32], stride: usize, outlined: &OutlinedGlyph) {
         let bounds = outlined.px_bounds();
         outlined.draw(|x, y, c| {
             let buffer_x = bounds.min.x as i32 + x as i32;
             let buffer_y = bounds.min.y as i32 + y as i32;
-            let height = buffer.len() / width;
-            if buffer_x >= 0 && buffer_x < width as i32 && buffer_y >= 0 && buffer_y < height as i32 {
-                let index = (buffer_y as usize) * width + (buffer_x as usize);
+            let height = buffer.len() / stride;
+            if buffer_x >= 0 && buffer_x < stride as i32 && buffer_y >= 0 && buffer_y < height as i32 {
+                let index = (buffer_y as usize) * stride + (buffer_x as usize);
                 let text_r = ((TEXT_COLOR >> 16) & 0xFF) as f32;
                 let text_g = ((TEXT_COLOR >> 8) & 0xFF) as f32;
                 let text_b = (TEXT_COLOR & 0xFF) as f32;
@@ -409,7 +467,172 @@ fn handle_input(app: &mut App) -> std::io::Result<()> {
 }
 ---
 
+./src\uefi.rs
+// src/uefi.rs
+
+extern crate alloc;
+
+use uefi::prelude::*;
+use uefi::proto::console::gop::{BltOp, BltRegion, GraphicsOutput, Pixel};
+use uefi::proto::console::text::ScanCode;
+use uefi::table::boot::{BootServices, EventType, TimerTrigger, Tpl};
+use uefi::table::Boot;
+use crate::app::App;
+use crate::renderer::TEXT_COLOR;
+use crate::ui::{self, Renderable};
+use ab_glyph::{Font, FontRef, point, OutlinedGlyph, PxScale, ScaleFont};
+use alloc::vec::Vec;
+
+const BIG_FONT_SIZE: f32 = 48.0;
+const NORMAL_FONT_SIZE: f32 = 16.0;
+const BG_COLOR: u32 = 0x00101010;
+
+#[no_mangle]
+pub extern "efiapi" fn efi_main(image: Handle, st: SystemTable<Boot>) -> Status {
+
+    let bt = st.boot_services();
+
+    // Get Graphics Output Protocol
+    let gop_handle = bt.get_handle_for_protocol::<GraphicsOutput>().unwrap();
+    let mut gop = bt.open_protocol_exclusive::<GraphicsOutput>(gop_handle).unwrap();
+
+    // Get current mode info
+    let mode_info = gop.current_mode_info();
+    let (width, height) = mode_info.resolution();
+
+    // Load font
+    let font_data: &[u8] = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
+    let font = FontRef::try_from_slice(font_data).expect("Failed to load font");
+
+    let mut app = App::new();
+
+    // Get input
+    let input = st.stdin();
+
+    // Create timer event
+    let timer_event = unsafe { bt.create_event(EventType::TIMER, Tpl::APPLICATION, None, None).unwrap() };
+    bt.set_timer(&timer_event, TimerTrigger::Relative(100_000)).unwrap(); // 10ms
+
+    let mut events = [input.wait_for_key_event(), timer_event];
+
+    while !app.should_quit {
+        // Wait for event
+        let index = bt.wait_for_event(&mut events).unwrap().unwrap();
+
+        if index == 0 {
+            // Key event
+            while let Ok(Some(key)) = input.read_key() {
+                if key.unicode_char != '\0' {
+                    if key.unicode_char == '\x08' {
+                        app.on_backspace();
+                    } else {
+                        app.on_key(key.unicode_char);
+                    }
+                } else {
+                    if key.scan_code == ScanCode::ESCAPE {
+                        app.should_quit = true;
+                    }
+                }
+            }
+        }
+
+        // Render
+        let mut pixel_buffer: Vec<Pixel> = alloc::vec![Pixel(((BG_COLOR >> 16) & 0xFF) as u8, ((BG_COLOR >> 8) & 0xFF) as u8, (BG_COLOR & 0xFF) as u8); width * height];
+
+        let render_list = ui::build_ui(&app);
+
+        for item in render_list {
+            match item {
+                Renderable::BigText { text, anchor, margin } => {
+                    let pos = ui::calculate_position(anchor, margin, width, height);
+                    draw_text(
+                        &mut pixel_buffer, width, &font, text,
+                        (pos.0 as f32, pos.1 as f32), BIG_FONT_SIZE,
+                    );
+                }
+                Renderable::Text { text, anchor, margin } => {
+                    let pos = ui::calculate_position(anchor, margin, width, height);
+                    draw_text(
+                        &mut pixel_buffer, width, &font, text,
+                        (pos.0 as f32, pos.1 as f32), NORMAL_FONT_SIZE,
+                    );
+                }
+            }
+        }
+
+        // Blt to video
+        gop.blt(BltOp::BufferToVideo {
+            buffer: &pixel_buffer,
+            src: BltRegion::Full,
+            dest: (0, 0),
+            dims: (width, height),
+        }).unwrap();
+
+        // Reset timer if it was the timer event
+        if index == 1 {
+            bt.set_timer(&timer_event, TimerTrigger::Relative(100_000)).unwrap();
+        }
+    }
+
+    Status::SUCCESS
+}
+
+fn draw_text(
+    buffer: &mut [Pixel], stride: usize, font: &FontRef, text: &str,
+    pos: (f32, f32), font_size: f32,
+) {
+    let scale = PxScale::from(font_size);
+    let scaled_font = font.as_scaled(scale);
+    let ascent = scaled_font.ascent();
+    let mut pen_x = pos.0;
+    let pen_y = pos.1 + ascent;
+
+    for character in text.chars() {
+        let glyph_id = font.glyph_id(character);
+        let glyph = glyph_id.with_scale_and_position(scale, point(pen_x, pen_y));
+        if let Some(outlined) = font.outline_glyph(glyph) {
+            draw_glyph_to_pixel_buffer(buffer, stride, &outlined);
+        }
+        pen_x += scaled_font.h_advance(glyph_id);
+    }
+}
+
+fn draw_glyph_to_pixel_buffer(buffer: &mut [Pixel], stride: usize, outlined: &OutlinedGlyph) {
+    let bounds = outlined.px_bounds();
+    outlined.draw(|x, y, c| {
+        let buffer_x = bounds.min.x as i32 + x as i32;
+        let buffer_y = bounds.min.y as i32 + y as i32;
+        let height = buffer.len() / stride;
+        if buffer_x >= 0 && buffer_x < stride as i32 && buffer_y >= 0 && buffer_y < height as i32 {
+            let index = (buffer_y as usize) * stride + (buffer_x as usize);
+            let text_r = ((TEXT_COLOR >> 16) & 0xFF) as f32;
+            let text_g = ((TEXT_COLOR >> 8) & 0xFF) as f32;
+            let text_b = (TEXT_COLOR & 0xFF) as f32;
+            let bg_r = buffer[index].0 as f32;
+            let bg_g = buffer[index].1 as f32;
+            let bg_b = buffer[index].2 as f32;
+            let r = (text_r * c + bg_r * (1.0 - c)) as u8;
+            let g = (text_g * c + bg_g * (1.0 - c)) as u8;
+            let b = (text_b * c + bg_b * (1.0 - c)) as u8;
+            buffer[index] = Pixel(r, g, b);
+        }
+    });
+}
+---
+
 ./src\ui.rs
+// uefi featureが有効な場合、標準のallocクレートをインポート
+#[cfg(feature = "uefi")]
+extern crate alloc;
+
+// uefi と std で使用する Vec と vec! を切り替える
+#[cfg(feature = "uefi")]
+use alloc::vec::Vec;
+#[cfg(feature = "uefi")]
+use alloc::vec;
+#[cfg(not(feature = "uefi"))]
+use std::vec::Vec;
+
 use crate::app::App;
 
 /// 画面上の描画基準点を定義するenum
@@ -455,7 +678,7 @@ pub fn build_ui<'a>(app: &'a App) -> Vec<Renderable<'a>> {
         // 画面中央に表示する大きなテキスト
         Renderable::BigText {
             text: &app.input_text,
-            anchor: Anchor::Center,
+            anchor: Anchor::CenterLeft,
             margin: Margin { x: 0, y: 0 },
         },
         // 画面左下に表示するステータステキスト

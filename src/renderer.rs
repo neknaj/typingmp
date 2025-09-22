@@ -1,3 +1,18 @@
+// uefi featureが有効な場合、標準のallocクレートをインポート
+#[cfg(feature = "uefi")]
+extern crate alloc;
+
+// uefi と std で使用する Vec と vec! を切り替える
+#[cfg(feature = "uefi")]
+use alloc::vec::Vec;
+#[cfg(feature = "uefi")]
+use alloc::vec;
+#[cfg(not(feature = "uefi"))]
+use std::vec::Vec;
+
+#[cfg(feature = "uefi")]
+use core_maths::CoreFloat;
+
 use ab_glyph::{point, Font, FontRef, OutlinedGlyph};
 
 /// テキストの描画色
@@ -11,7 +26,7 @@ pub mod gui_renderer {
 
     /// 指定されたピクセルバッファの指定位置にテキストを描画する
     pub fn draw_text(
-        buffer: &mut [u32], width: usize, font: &FontRef, text: &str,
+        buffer: &mut [u32], stride: usize, font: &FontRef, text: &str,
         pos: (f32, f32), font_size: f32,
     ) {
         let scale = font_size / (font.ascent_unscaled() - font.descent_unscaled());
@@ -21,21 +36,21 @@ pub mod gui_renderer {
         for character in text.chars() {
             let glyph = font.glyph_id(character).with_scale_and_position(font_size, point(pen_x, pen_y));
             if let Some(outlined) = font.outline_glyph(glyph) {
-                draw_glyph_to_pixel_buffer(buffer, width, &outlined);
+                draw_glyph_to_pixel_buffer(buffer, stride, &outlined);
             }
             pen_x += font.h_advance_unscaled(font.glyph_id(character)) * scale;
         }
     }
     
     /// アウトライン化されたグリフをピクセルバッファに描画する（内部関数）
-    fn draw_glyph_to_pixel_buffer(buffer: &mut [u32], width: usize, outlined: &OutlinedGlyph) {
+        fn draw_glyph_to_pixel_buffer(buffer: &mut [u32], stride: usize, outlined: &OutlinedGlyph) {
         let bounds = outlined.px_bounds();
         outlined.draw(|x, y, c| {
             let buffer_x = bounds.min.x as i32 + x as i32;
             let buffer_y = bounds.min.y as i32 + y as i32;
-            let height = buffer.len() / width;
-            if buffer_x >= 0 && buffer_x < width as i32 && buffer_y >= 0 && buffer_y < height as i32 {
-                let index = (buffer_y as usize) * width + (buffer_x as usize);
+            let height = buffer.len() / stride;
+            if buffer_x >= 0 && buffer_x < stride as i32 && buffer_y >= 0 && buffer_y < height as i32 {
+                let index = (buffer_y as usize) * stride + (buffer_x as usize);
                 let text_r = ((TEXT_COLOR >> 16) & 0xFF) as f32;
                 let text_g = ((TEXT_COLOR >> 8) & 0xFF) as f32;
                 let text_b = (TEXT_COLOR & 0xFF) as f32;
