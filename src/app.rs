@@ -54,6 +54,8 @@ pub struct App {
     pub input_text: String,
     /// 画面下部に表示されるステータスメッセージ
     pub status_text: String,
+    /// 画面右下に表示される操作方法テキスト
+    pub instructions_text: String,
     /// アプリケーションが終了すべきかどうかを示すフラグ
     pub should_quit: bool,
 }
@@ -66,6 +68,7 @@ impl App {
             selected_menu_item: 0,
             input_text: String::new(),
             status_text: String::new(),
+            instructions_text: String::new(),
             should_quit: false,
         }
     }
@@ -75,6 +78,7 @@ impl App {
         match self.state {
             AppState::Menu => {
                 self.status_text = "Welcome to Neknaj Typing Multi-Platform".to_string();
+                self.instructions_text = "ESC: Menu | Enter: Select | Up/Down: Navigate".to_string();
                 match event {
                     AppEvent::Up => {
                         if self.selected_menu_item > 0 {
@@ -102,11 +106,22 @@ impl App {
                             _ => {}
                         }
                     }
+                    AppEvent::ChangeScene => {
+                        match self.state {
+                            AppState::Menu => {
+                                self.instructions_text = "Up/Down: Select | Enter: Choose | Q: Quit".to_string();
+                            }
+                            AppState::Editing => {
+                                self.instructions_text = "Type: Input | Backspace: Delete | ESC: Menu".to_string();
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
             AppState::Editing => {
                 self.status_text = "Start typing! (ESC to return to menu)".to_string();
+                self.instructions_text = "Type: Input | Backspace: Delete | ESC: Menu".to_string();
                 match event {
                     AppEvent::Char(c) => {
                         if c != '\u{0}' { // NUL文字は無視する

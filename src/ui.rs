@@ -118,7 +118,7 @@ pub fn build_ui(app: &App) -> Vec<Renderable> {
         end_color: 0xFF_000000,
     };
     let editing_gradient = Gradient {
-        start_color: 0xFF_001000,
+        start_color: 0xFF_000B00,
         end_color: 0xFF_000000,
     };
 
@@ -162,6 +162,16 @@ pub fn build_ui(app: &App) -> Vec<Renderable> {
                 },
                 font_size: FontSize::WindowHeight(0.05),
             });
+            render_list.push(Renderable::Text {
+                text: app.instructions_text.clone(),
+                anchor: Anchor::BottomRight,
+                shift: Shift { x: -0.01, y: -0.02 },
+                align: Align {
+                    horizontal: HorizontalAlign::Right,
+                    vertical: VerticalAlign::Bottom,
+                },
+                font_size: FontSize::WindowHeight(0.05),
+            });
         }
         AppState::Editing => {
             render_list.push(Renderable::Background { gradient: editing_gradient });
@@ -181,6 +191,16 @@ pub fn build_ui(app: &App) -> Vec<Renderable> {
                 shift: Shift { x: 0.01, y: -0.02 },
                 align: Align {
                     horizontal: HorizontalAlign::Left,
+                    vertical: VerticalAlign::Bottom,
+                },
+                font_size: FontSize::WindowHeight(0.05),
+            });
+            render_list.push(Renderable::Text {
+                text: app.instructions_text.clone(),
+                anchor: Anchor::BottomRight,
+                shift: Shift { x: -0.01, y: -0.02 },
+                align: Align {
+                    horizontal: HorizontalAlign::Right,
                     vertical: VerticalAlign::Bottom,
                 },
                 font_size: FontSize::WindowHeight(0.05),
