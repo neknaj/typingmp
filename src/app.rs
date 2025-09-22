@@ -39,8 +39,8 @@ const MENU_ITEM_COUNT: usize = 2;
 pub enum AppEvent {
     Start,
     ChangeScene,
-    /// 文字入力イベント
-    Char(char),
+    /// 文字入力イベント (タイムスタンプも受け取るように変更)
+    Char { c: char, timestamp: f64 },
     /// バックスペースイベント
     Backspace,
     /// 上キーイベント
@@ -166,7 +166,7 @@ impl App {
             AppState::Typing => {
                 self.status_text = "Start typing!".to_string();
                 match event {
-                    AppEvent::Char(c) => {
+                    AppEvent::Char { c, timestamp } => {
                         #[cfg(any(not(feature = "tui"), feature = "gui"))]
                         {
                             #[cfg(not(target_arch = "wasm32"))]
@@ -181,7 +181,7 @@ impl App {
                         }
 
                         if let Some(model) = self.typing_model.take() {
-                            match typing::key_input(model, c) {
+                            match typing::key_input(model, c, timestamp) {
                                 Model::Typing(new_model) => {
                                     self.typing_model = Some(new_model);
                                 }

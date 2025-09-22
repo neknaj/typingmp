@@ -14,16 +14,12 @@ pub fn now() -> f64 {
     js_sys::Date::now()
 }
 
-// UEFIでは正確なSystemTimeは取れないため、BootServicesのタイマー等を利用するか、
-// ここではuefi-services経由でタイマーを利用する
+// UEFI環境では高解像度の単調タイマーを簡単に取得できないため、
+// uefi.rs のメインループで時間を管理する。
+// この関数は理論上呼ばれないが、万が一のために0.0を返す。
 #[cfg(feature = "uefi")]
 pub fn now() -> f64 {
-    // uefi-servicesクレート経由でBootServicesを取得して時刻を取得
-    // handle()は一度しか呼べないので注意が必要だが、ここでは簡略化のため毎回呼ぶ
-    // 本来は一度だけ取得してstatic変数などに保持するのが望ましい
-    if let Ok(st) = uefi::system_table() {
-        st.boot_services().get_time().as_micros() as f64 / 1000.0
-    } else {
-        0.0 // エラー時は0を返す
-    }
+    // この実装は使われない。
+    // uefi.rsで直接タイムスタンプを生成してTypingInputに渡す。
+    0.0
 }

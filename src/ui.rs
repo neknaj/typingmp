@@ -4,7 +4,7 @@
 #[cfg(feature = "uefi")]
 extern crate alloc;
 
-
+// uefi で f64::floor() を使うために必要
 #[cfg(feature = "uefi")]
 use core_maths::CoreFloat;
 

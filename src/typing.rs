@@ -11,7 +11,6 @@ use std::vec::Vec;
 
 use crate::model::{Model, TypingModel, ResultModel, TypingCorrectnessContent, TypingSession, TypingInput, TypingCorrectnessLine, TypingCorrectnessSegment, TypingCorrectnessChar, TypingMetrics};
 use crate::model::{Content, Segment};
-use crate::timestamp::now;
 
 // Helper function for logging to handle both native and wasm targets.
 fn log(message: &str) {
@@ -31,12 +30,12 @@ fn log(message: &str) {
 }
 
 
-pub fn key_input(mut model_: TypingModel, input: char) -> Model {
+pub fn key_input(mut model_: TypingModel, input: char, timestamp: f64) -> Model {
     log(&format!("\n--- key_input: '{}' ---", input));
     log(&format!("  [State Before] line: {}, seg: {}, char: {}, unconfirmed: {:?}",
         model_.status.line, model_.status.segment, model_.status.char_, model_.status.unconfirmed));
 
-    let current_time = now();
+    let current_time = timestamp;
     let current_line = model_.status.line;
     
     if model_.content.lines.len() <= current_line as usize {

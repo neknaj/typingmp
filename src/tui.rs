@@ -118,7 +118,7 @@ fn handle_input(app: &mut App) -> std::io::Result<()> {
         if let Event::Key(key) = event::read()? {
             if key.kind == KeyEventKind::Press {
                 match key.code {
-                    KeyCode::Char(c) => app.on_event(AppEvent::Char(c)),
+                    KeyCode::Char(c) => app.on_event(AppEvent::Char { c, timestamp: crate::timestamp::now() }),
                     KeyCode::Backspace => app.on_event(AppEvent::Backspace),
                     KeyCode::Up => app.on_event(AppEvent::Up),
                     KeyCode::Down => app.on_event(AppEvent::Down),

@@ -67,7 +67,7 @@ pub fn start() -> Result<(), JsValue> {
                 "Backspace" => app.on_event(AppEvent::Backspace),
                 "Enter" => app.on_event(AppEvent::Enter),
                 "Escape" => app.on_event(AppEvent::Escape),
-                key if key.len() == 1 => app.on_event(AppEvent::Char(key.chars().next().unwrap())),
+                key if key.len() == 1 => app.on_event(AppEvent::Char { c: key.chars().next().unwrap(), timestamp: crate::timestamp::now() }),
                 _ => {}
             }
         });

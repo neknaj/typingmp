@@ -102,7 +102,7 @@ fn handle_input(window: &mut Window, app: &mut App) {
             Key::Enter => app.on_event(AppEvent::Enter),
             _ => {
                 if let Some(char_key) = key_to_char(key, window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift)) {
-                    app.on_event(AppEvent::Char(char_key));
+                    app.on_event(AppEvent::Char { c: char_key, timestamp: crate::timestamp::now() });
                 }
             }
         }

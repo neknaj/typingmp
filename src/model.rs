@@ -5,7 +5,7 @@
 extern crate alloc;
 
 #[cfg(feature = "uefi")]
-use alloc::{string::String, vec, vec::Vec};
+use alloc::{string::String, vec::Vec};
 #[cfg(not(feature = "uefi"))]
 use std::string::String;
 #[cfg(not(feature = "uefi"))]
