@@ -1,4 +1,4 @@
 /target
 /pkg
 /src.txt
-*/*.EFI
+/uefi_image
