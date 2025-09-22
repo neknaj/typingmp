@@ -65,7 +65,6 @@ pub struct Align {
 
 /// 画面に描画すべき要素の種類とレイアウト情報を定義するenum
 
-#[cfg(feature = "uefi")]
 pub enum Renderable {
     /// 通常のフォントサイズで描画されるテキスト
     Text {
@@ -83,24 +82,6 @@ pub enum Renderable {
     },
 }
 
-#[cfg(not(feature = "uefi"))]
-pub enum Renderable<'a> {
-    /// 通常のフォントサイズで描画されるテキスト
-    Text {
-        text: &'a str,
-        anchor: Anchor,
-        shift: Shift,
-        align: Align,
-    },
-    /// 大きなフォントサイズで描画されるテキスト
-    BigText {
-        text: &'a str,
-        anchor: Anchor,
-        shift: Shift,
-        align: Align,
-    },
-}
-
 #[cfg(target_arch = "wasm32")]
 const MENU_ITEMS: [&str; 1] = ["Start Editing"];
 
@@ -108,7 +89,6 @@ const MENU_ITEMS: [&str; 1] = ["Start Editing"];
 const MENU_ITEMS: [&str; 2] = ["Start Editing", "Quit"];
 
 /// Appの状態を受け取り、描画リスト（UIレイアウト）を構築する
-#[cfg(feature = "uefi")]
 pub fn build_ui(app: &App) -> Vec<Renderable> {
     let mut render_list = Vec::new();
 
@@ -121,7 +101,7 @@ pub fn build_ui(app: &App) -> Vec<Renderable> {
                     item.to_string()
                 };
                 render_list.push(Renderable::Text {
-                    text: text, // Use owned String for UEFI
+                    text: text,
                     anchor: Anchor::Center,
                     shift: Shift { x: 0.0, y: -0.1 + (i as f32 * 0.1) },
                     align: Align {
@@ -131,7 +111,7 @@ pub fn build_ui(app: &App) -> Vec<Renderable> {
                 });
             }
             render_list.push(Renderable::Text {
-                text: app.status_text.clone(), // Clone String for UEFI
+                text: app.status_text.clone(),
                 anchor: Anchor::BottomLeft,
                 shift: Shift { x: 0.01, y: -0.02 },
                 align: Align {
@@ -142,7 +122,7 @@ pub fn build_ui(app: &App) -> Vec<Renderable> {
         }
         AppState::Editing => {
             render_list.push(Renderable::BigText {
-                text: app.input_text.clone(), // Clone String for UEFI
+                text: app.input_text.clone(),
                 anchor: Anchor::CenterLeft,
                 shift: Shift { x: 0.02, y: 0.0 },
                 align: Align {
@@ -151,64 +131,7 @@ pub fn build_ui(app: &App) -> Vec<Renderable> {
                 },
             });
             render_list.push(Renderable::Text {
-                text: app.status_text.clone(), // Clone String for UEFI
-                anchor: Anchor::BottomLeft,
-                shift: Shift { x: 0.01, y: -0.02 },
-                align: Align {
-                    horizontal: HorizontalAlign::Left,
-                    vertical: VerticalAlign::Bottom,
-                },
-            });
-        }
-    }
-
-    render_list
-}
-
-#[cfg(not(feature = "uefi"))]
-pub fn build_ui<'a>(app: &'a App) -> Vec<Renderable<'a>> {
-    let mut render_list = Vec::new();
-
-    match app.state {
-        AppState::Menu => {
-            for (i, item) in MENU_ITEMS.iter().enumerate() {
-                let text = if i == app.selected_menu_item {
-                    format!("> {} <", item)
-                } else {
-                    item.to_string()
-                };
-                render_list.push(Renderable::Text {
-                    text: Box::leak(text.into_boxed_str()), // Keep original for non-UEFI
-                    anchor: Anchor::Center,
-                    shift: Shift { x: 0.0, y: -0.1 + (i as f32 * 0.1) },
-                    align: Align {
-                        horizontal: HorizontalAlign::Center,
-                        vertical: VerticalAlign::Center,
-                    },
-                });
-            }
-            render_list.push(Renderable::Text {
-                text: &app.status_text,
-                anchor: Anchor::BottomLeft,
-                shift: Shift { x: 0.01, y: -0.02 },
-                align: Align {
-                    horizontal: HorizontalAlign::Left,
-                    vertical: VerticalAlign::Bottom,
-                },
-            });
-        }
-        AppState::Editing => {
-            render_list.push(Renderable::BigText {
-                text: &app.input_text,
-                anchor: Anchor::CenterLeft,
-                shift: Shift { x: 0.02, y: 0.0 },
-                align: Align {
-                    horizontal: HorizontalAlign::Left,
-                    vertical: VerticalAlign::Center,
-                },
-            });
-            render_list.push(Renderable::Text {
-                text: &app.status_text,
+                text: app.status_text.clone(),
                 anchor: Anchor::BottomLeft,
                 shift: Shift { x: 0.01, y: -0.02 },
                 align: Align {

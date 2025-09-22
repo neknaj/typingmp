@@ -96,27 +96,27 @@ pub fn start() -> Result<(), JsValue> {
         for item in render_list {
             match item {
                 Renderable::BigText { text, anchor, shift, align } => {
-                    let (text_width, text_height, _) = gui_renderer::measure_text(&font, text, big_font_size);
+                    let (text_width, text_height, _) = gui_renderer::measure_text(&font, &text, big_font_size);
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
                     let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     gui_renderer::draw_text(
                         &mut pixel_buffer,
                         width,
                         &font,
-                        text,
+                        &text,
                         (x as f32, y as f32),
                         big_font_size,
                     );
                 }
                 Renderable::Text { text, anchor, shift, align } => {
-                    let (text_width, text_height, _) = gui_renderer::measure_text(&font, text, NORMAL_FONT_SIZE);
+                    let (text_width, text_height, _) = gui_renderer::measure_text(&font, &text, NORMAL_FONT_SIZE);
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
                     let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     gui_renderer::draw_text(
                         &mut pixel_buffer,
                         width,
                         &font,
-                        text,
+                        &text,
                         (x as f32, y as f32),
                         NORMAL_FONT_SIZE,
                     );

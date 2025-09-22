@@ -49,7 +49,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         for item in render_list {
             match item {
                 Renderable::BigText { text, .. } => {
-                    let text_layer = tui_renderer::render(&font, text, cols, rows);
+                    let text_layer = tui_renderer::render(&font, &text, cols, rows);
                     for (i, ch) in text_layer.iter().enumerate() {
                         if *ch != ' ' {
                             char_buffer[i] = *ch;
@@ -63,7 +63,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     align,
                 } => {
                     // TUIでは複雑なアライメントは実装が難しいため、単純な位置計算に留める
-                    let (text_width, text_height) = tui_renderer::measure_text(text);
+                    let (text_width, text_height) = tui_renderer::measure_text(&text);
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, cols, rows);
                     let (mut x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
 
