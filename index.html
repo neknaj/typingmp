@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <title>Rust WASM App</title>
+    <style>
+        body {
+            background-color: #101010;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+    </style>
+</head>
+
+<body>
+
+</body>
+
+</html>
+<script type="module">
+
+import init from './pkg/rust_multibackend_app.js';
+
+async function run() {
+    // init関数を実行してWASMモジュールを初期化する。
+    // これが完了すると、Rust側の #[wasm_bindgen(start)] が付いた関数が自動的に実行される。
+    await init();
+}
+
+run();
+
+</script>
