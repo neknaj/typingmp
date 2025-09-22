@@ -58,8 +58,6 @@ pub fn run() -> Status {
                     let ch: char = c.into();
                     if ch == '\u{0008}' { // Backspace
                         app.on_event(AppEvent::Backspace);
-                    } else if ch == 'q' { // 'q' for quit
-                        app.on_event(AppEvent::Quit);
                     } else if ch == '\r' { // Enter
                         app.on_event(AppEvent::Enter);
                     } else {
@@ -85,20 +83,20 @@ pub fn run() -> Status {
         for item in render_list {
             match item {
                 Renderable::BigText { text, anchor, shift, align } => {
-                    let (text_width, text_height, _ascent) = measure_text(&font, text, big_font_size);
+                    let (text_width, text_height, _ascent) = measure_text(&font, text.as_str(), big_font_size);
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
                     let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     draw_text(
-                        &mut pixel_buffer, width, &font, text,
+                        &mut pixel_buffer, width, &font, text.as_str(),
                         (x as f32, y as f32), big_font_size,
                     );
                 }
                 Renderable::Text { text, anchor, shift, align } => {
-                    let (text_width, text_height, _ascent) = measure_text(&font, text, NORMAL_FONT_SIZE);
+                    let (text_width, text_height, _ascent) = measure_text(&font, text.as_str(), NORMAL_FONT_SIZE);
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
                     let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     draw_text(
-                        &mut pixel_buffer, width, &font, text,
+                        &mut pixel_buffer, width, &font, text.as_str(),
                         (x as f32, y as f32), NORMAL_FONT_SIZE,
                     );
                 }

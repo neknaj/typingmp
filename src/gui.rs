@@ -21,7 +21,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let font = FontRef::try_from_slice(font_data).map_err(|_| "Failed to load font from slice")?;
 
     let mut width = 800;
-    let mut height = 300;
+    let mut height = 500;
 
     let mut window = Window::new(
         "GUI Text Input",
@@ -98,7 +98,6 @@ fn handle_input(window: &mut Window, app: &mut App) {
             Key::Backspace => app.on_event(AppEvent::Backspace),
             Key::Enter => app.on_event(AppEvent::Enter),
             Key::Space => app.on_event(AppEvent::Char(' ')),
-            Key::Q => app.on_event(AppEvent::Quit),
             _ => {
                 if let Some(char_key) = key_to_char(key, window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift)) {
                     app.on_event(AppEvent::Char(char_key));

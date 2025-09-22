@@ -57,7 +57,7 @@ impl App {
             state: AppState::Menu,
             selected_menu_item: 0,
             input_text: String::new(),
-            status_text: "Press Enter to start editing, or Q to quit.".to_string(),
+            status_text: "Welcome to Neknaj Typing Multi-Platform".to_string(),
             should_quit: false,
         }
     }
@@ -88,8 +88,6 @@ impl App {
                             _ => {}
                         }
                     }
-                    AppEvent::Quit => self.should_quit = true,
-                    AppEvent::Escape => self.should_quit = true, // Escape also quits from menu
                     _ => {}
                 }
             }
@@ -108,7 +106,7 @@ impl App {
                     }
                     AppEvent::Escape => {
                         self.state = AppState::Menu;
-                        self.status_text = "Press Enter to start editing, or Q to quit.".to_string();
+                        self.status_text = "Welcome to Neknaj Typing Multi-Platform".to_string();
                     }
                     _ => {}
                 }
