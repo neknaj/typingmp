@@ -1,7 +1,7 @@
 // src/gui.rs
 
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
-use crate::app::{App, AppState, AppEvent};
+use crate::app::{App, AppEvent}; // AppState は未使用なので削除しました
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
 use crate::renderer::{gui_renderer, draw_linear_gradient};
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
@@ -10,6 +10,26 @@ use crate::ui::{self, Renderable};
 use ab_glyph::FontRef;
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
+
+// --- Windows固有のインポートと処理 ---
+// target_osがwindowsの場合のみコンパイルされる
+#[cfg(all(target_os = "windows", not(feature = "uefi")))]
+// raw-window-handle 0.6系に合わせて HasWindowHandle, WindowHandle, RawWindowHandle を使用
+use raw_window_handle::{HasWindowHandle, WindowHandle, RawWindowHandle}; // RawWindowHandle もインポート
+#[cfg(all(target_os = "windows", not(feature = "uefi")))]
+use winapi::um::dwmapi::DwmSetWindowAttribute;
+#[cfg(all(target_os = "windows", not(feature = "uefi")))]
+use winapi::shared::windef::HWND;
+#[cfg(all(target_os = "windows", not(feature = "uefi")))]
+use winapi::shared::minwindef::{BOOL, TRUE};
+#[cfg(all(target_os = "windows", not(feature = "uefi")))]
+use winapi::ctypes::c_void; // winapi::ctypes::c_void を明示的にインポート
+
+// DWMWA_USE_IMMERSIVE_DARK_MODE の値 (winapiに直接エクスポートされていない場合を考慮)
+#[cfg(all(target_os = "windows", not(feature = "uefi")))]
+const DWMWA_USE_IMMERSIVE_DARK_MODE: u32 = 20;
+// --- End Windows固有のインポートと処理 ---
+
 
 /// GUIアプリケーションのメイン関数
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
@@ -30,6 +50,55 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         },
     )?;
     window.set_target_fps(60);
+
+    // --- Windows固有のタイトルバーカスタマイズ ---
+    // target_osがwindowsの場合のみこのブロックがコンパイル・実行される
+    #[cfg(all(target_os = "windows", not(feature = "uefi")))]
+    {
+        // minifbのウィンドウハンドルを取得
+        // raw-window-handle 0.6系では window_handle() メソッドを使う
+        // これは Result<WindowHandle, HandleError> を返す
+        match window.window_handle() {
+            Ok(handle_wrapper) => { // handle_wrapper は WindowHandle 構造体
+                // WindowHandle 構造体から内部の RawWindowHandle enum を取得
+                if let RawWindowHandle::Win32(handle) = handle_wrapper.as_raw() { // as_raw() を使用
+                    // RawWindowHandleからHWND (Windowsのウィンドウハンドル) を取得
+                    // handle.hwnd は NonZeroIsize をラップしているので .get() で値を取り出す
+                    let hwnd = handle.hwnd.get() as HWND; 
+                    // タイトルバーをダークモードに設定する属性
+                    let attribute = DWMWA_USE_IMMERSIVE_DARK_MODE;
+                    // ダークモードを有効にする値 (TRUE)
+                    let value: BOOL = TRUE;
+
+                    // DwmSetWindowAttribute関数を呼び出し
+                    // unsafeブロックが必要なのは、外部関数インターフェース (FFI) を使用するため
+                    let result = unsafe {
+                        DwmSetWindowAttribute(
+                            hwnd,
+                            attribute,
+                            &value as *const _ as *const c_void, // winapi::ctypes::c_void にキャスト
+                            std::mem::size_of_val(&value) as u32,         // 値のサイズ
+                        )
+                    };
+
+                    // DwmSetWindowAttributeは成功時に0 (S_OK) を返す
+                    if result != 0 {
+                        eprintln!("Failed to set DWMWA_USE_IMMERSIVE_DARK_MODE: {}", result);
+                    } else {
+                        println!("Successfully attempted to set DWMWA_USE_IMMERSIVE_DARK_MODE for Windows title bar.");
+                    }
+                } else {
+                    // Win32 以外のハンドルが返された場合（理論的にはWindowsでは発生しないはずだが、念のため）
+                    eprintln!("Non-Win32 raw window handle obtained, skipping DWM attribute set.");
+                }
+            },
+            Err(e) => {
+                eprintln!("Failed to retrieve Windows window handle: {:?}", e);
+            }
+        }
+    }
+    // --- Windows固有のカスタマイズ終了 ---
+
     let mut app = App::new();
     App::on_event(&mut app, AppEvent::Start);
 

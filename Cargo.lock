@@ -596,7 +596,7 @@ dependencies = [
 
 [[package]]
 name = "rust_multibackend_app"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ab_glyph",
  "console_error_panic_hook",
@@ -605,9 +605,11 @@ dependencies = [
  "getrandom 0.2.16",
  "log",
  "minifb",
+ "raw-window-handle",
  "uefi",
  "wasm-bindgen",
  "web-sys",
+ "winapi",
 ]
 
 [[package]]
