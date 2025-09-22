@@ -156,12 +156,12 @@ jobs:
           mkdir release-files
           find artifacts -type f -name "tui-artifact*" | while read -r file; do
             target_name=$(basename "$(dirname "$file")" | sed 's/binaries-//')
-            ext=$(echo "$file" | grep -oE '\.[^.]*$|' | sed 's/\.//')
+            ext=$(echo "$file" | grep -oE '\.[^.]*$|')
             mv "$file" "release-files/${{ env.APP_NAME }}-tui-${target_name}${ext}"
           done
           find artifacts -type f -name "gui-artifact*" | while read -r file; do
             target_name=$(basename "$(dirname "$file")" | sed 's/binaries-//')
-            ext=$(echo "$file" | grep -oE '\.[^.]*$|' | sed 's/\.//')
+            ext=$(echo "$file" | grep -oE '\.[^.]*$|')
             mv "$file" "release-files/${{ env.APP_NAME }}-gui-${target_name}${ext}"
           done
           mv artifacts/uefi-binary/${{ env.APP_NAME }}.efi release-files/
