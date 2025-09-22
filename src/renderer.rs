@@ -14,11 +14,23 @@ use std::vec::Vec;
 use core_maths::CoreFloat;
 
 use ab_glyph::{point, Font, FontRef, OutlinedGlyph, PxScale, ScaleFont};
+use crate::ui::FontSize;
 
 /// テキストの描画色
 pub const TEXT_COLOR: u32 = 0x00_FFFFFF;
 /// 背景の描画色
 pub const BG_COLOR: u32 = 0x00_101010;
+
+/// Calculates the actual pixel font size based on the FontSize enum and window dimensions.
+pub fn calculate_pixel_font_size(font_size: FontSize, width: usize, height: usize) -> f32 {
+    match font_size {
+        FontSize::WindowHeight(ratio) => height as f32 * ratio,
+        FontSize::WindowAreaSqrt(ratio) => {
+            let area = (width * height) as f32;
+            area.sqrt() * ratio
+        }
+    }
+}
 
 /// GUI/WASMバックエンド用のピクセルベースレンダラ
 pub mod gui_renderer {
@@ -101,9 +113,9 @@ pub mod tui_renderer {
     use super::*;
     
     /// 全画面に大きなテキストを描画し、文字バッファを返す
-    pub fn render(font: &FontRef, text: &str, width: usize, height: usize) -> Vec<char> {
+    pub fn render(font: &FontRef, text: &str, width: usize, height: usize, ui_font_size: FontSize) -> Vec<char> {
         let mut buffer = vec![' '; width * height];
-        let font_size = height as f32 * 0.8;
+        let font_size = super::calculate_pixel_font_size(ui_font_size, width, height);
         let scale = font_size / (font.ascent_unscaled() - font.descent_unscaled());
         let mut pen_x = 2.0;
         let pen_y = height as f32 * 0.7;

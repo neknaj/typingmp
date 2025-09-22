@@ -95,8 +95,9 @@ pub fn start() -> Result<(), JsValue> {
         // 3. 描画リストを解釈して描画
         for item in render_list {
             match item {
-                Renderable::BigText { text, anchor, shift, align } => {
-                    let (text_width, text_height, _) = gui_renderer::measure_text(&font, &text, big_font_size);
+                Renderable::BigText { text, anchor, shift, align, font_size } => {
+                    let pixel_font_size = crate::renderer::calculate_pixel_font_size(font_size, width, height);
+                    let (text_width, text_height, _) = gui_renderer::measure_text(&font, &text, pixel_font_size);
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
                     let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     gui_renderer::draw_text(
@@ -105,11 +106,12 @@ pub fn start() -> Result<(), JsValue> {
                         &font,
                         &text,
                         (x as f32, y as f32),
-                        big_font_size,
+                        pixel_font_size,
                     );
                 }
-                Renderable::Text { text, anchor, shift, align } => {
-                    let (text_width, text_height, _) = gui_renderer::measure_text(&font, &text, NORMAL_FONT_SIZE);
+                Renderable::Text { text, anchor, shift, align, font_size } => {
+                    let pixel_font_size = crate::renderer::calculate_pixel_font_size(font_size, width, height);
+                    let (text_width, text_height, _) = gui_renderer::measure_text(&font, &text, pixel_font_size);
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
                     let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     gui_renderer::draw_text(
@@ -118,7 +120,7 @@ pub fn start() -> Result<(), JsValue> {
                         &font,
                         &text,
                         (x as f32, y as f32),
-                        NORMAL_FONT_SIZE,
+                        pixel_font_size,
                     );
                 }
             }

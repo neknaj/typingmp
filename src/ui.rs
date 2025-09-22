@@ -63,6 +63,15 @@ pub struct Align {
     pub vertical: VerticalAlign,
 }
 
+/// フォントサイズの基準を定義するenum
+#[derive(Clone, Copy)]
+pub enum FontSize {
+    /// ウィンドウの高さに対する比率
+    WindowHeight(f32),
+    /// ウィンドウの面積の平方根に対する比率
+    WindowAreaSqrt(f32),
+}
+
 /// 画面に描画すべき要素の種類とレイアウト情報を定義するenum
 
 pub enum Renderable {
@@ -72,6 +81,7 @@ pub enum Renderable {
         anchor: Anchor,
         shift: Shift,
         align: Align,
+        font_size: FontSize,
     },
     /// 大きなフォントサイズで描画されるテキスト
     BigText {
@@ -79,6 +89,7 @@ pub enum Renderable {
         anchor: Anchor,
         shift: Shift,
         align: Align,
+        font_size: FontSize,
     },
 }
 
@@ -94,6 +105,16 @@ pub fn build_ui(app: &App) -> Vec<Renderable> {
 
     match app.state {
         AppState::Menu => {
+            render_list.push(Renderable::Text {
+                text: "Neknaj Typing MP".to_string(),
+                anchor: Anchor::Center,
+                shift: Shift { x: 0.0, y: -0.3 },
+                align: Align {
+                    horizontal: HorizontalAlign::Center,
+                    vertical: VerticalAlign::Center,
+                },
+                font_size: FontSize::WindowHeight(0.1),
+            });
             for (i, item) in MENU_ITEMS.iter().enumerate() {
                 let text = if i == app.selected_menu_item {
                     format!("> {} <", item)
@@ -108,6 +129,7 @@ pub fn build_ui(app: &App) -> Vec<Renderable> {
                         horizontal: HorizontalAlign::Center,
                         vertical: VerticalAlign::Center,
                     },
+                    font_size: FontSize::WindowHeight(0.05),
                 });
             }
             render_list.push(Renderable::Text {
@@ -118,6 +140,7 @@ pub fn build_ui(app: &App) -> Vec<Renderable> {
                     horizontal: HorizontalAlign::Left,
                     vertical: VerticalAlign::Bottom,
                 },
+                font_size: FontSize::WindowHeight(0.05),
             });
         }
         AppState::Editing => {
@@ -129,6 +152,7 @@ pub fn build_ui(app: &App) -> Vec<Renderable> {
                     horizontal: HorizontalAlign::Left,
                     vertical: VerticalAlign::Center,
                 },
+                font_size: FontSize::WindowHeight(0.3),
             });
             render_list.push(Renderable::Text {
                 text: app.status_text.clone(),
@@ -138,6 +162,7 @@ pub fn build_ui(app: &App) -> Vec<Renderable> {
                     horizontal: HorizontalAlign::Left,
                     vertical: VerticalAlign::Bottom,
                 },
+                font_size: FontSize::WindowHeight(0.05),
             });
         }
     }

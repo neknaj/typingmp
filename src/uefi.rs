@@ -7,12 +7,11 @@ use uefi::proto::console::gop::{BltOp, BltPixel, BltRegion, GraphicsOutput};
 use uefi::proto::console::text::{Key, ScanCode};
 use uefi::boot::{EventType, TimerTrigger, Tpl};
 use crate::app::{App, AppEvent};
-use crate::renderer::{TEXT_COLOR, BG_COLOR};
+use crate::renderer::{TEXT_COLOR, BG_COLOR, gui_renderer, calculate_pixel_font_size};
 use crate::ui::{self, Renderable};
 use ab_glyph::{Font, FontRef, point, OutlinedGlyph, PxScale, ScaleFont};
 use alloc::vec::Vec;
 
-const NORMAL_FONT_SIZE: f32 = 25.0;
 
 pub fn run() -> Status {
     uefi::helpers::init().unwrap();
@@ -24,7 +23,6 @@ pub fn run() -> Status {
     // Get current mode info
     let mode_info = gop.current_mode_info();
     let (width, height) = mode_info.resolution();
-    let big_font_size = height as f32 * 0.5;
 
     // Load font
     let font_data: &[u8] = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
@@ -82,22 +80,24 @@ pub fn run() -> Status {
 
         for item in render_list {
             match item {
-                Renderable::BigText { text, anchor, shift, align } => {
-                    let (text_width, text_height, _ascent) = measure_text(&font, text.as_str(), big_font_size);
+                Renderable::BigText { text, anchor, shift, align, font_size } => {
+                    let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
+                    let (text_width, text_height, _ascent) = gui_renderer::measure_text(&font, text.as_str(), pixel_font_size);
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
                     let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     draw_text(
                         &mut pixel_buffer, width, &font, text.as_str(),
-                        (x as f32, y as f32), big_font_size,
+                        (x as f32, y as f32), pixel_font_size,
                     );
                 }
-                Renderable::Text { text, anchor, shift, align } => {
-                    let (text_width, text_height, _ascent) = measure_text(&font, text.as_str(), NORMAL_FONT_SIZE);
+                Renderable::Text { text, anchor, shift, align, font_size } => {
+                    let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
+                    let (text_width, text_height, _ascent) = gui_renderer::measure_text(&font, text.as_str(), pixel_font_size);
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
                     let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     draw_text(
                         &mut pixel_buffer, width, &font, text.as_str(),
-                        (x as f32, y as f32), NORMAL_FONT_SIZE,
+                        (x as f32, y as f32), pixel_font_size,
                     );
                 }
             }
@@ -165,24 +165,3 @@ fn draw_glyph_to_pixel_buffer(buffer: &mut [BltPixel], stride: usize, outlined: 
     });
 }
 
-/// テキストの描画サイズを計算する
-fn measure_text(font: &FontRef, text: &str, size: f32) -> (u32, u32, f32) {
-    let scale = PxScale::from(size);
-    let scaled_font = font.as_scaled(scale);
-    let mut total_width = 0.0;
-
-    let mut last_glyph_id = None;
-    for c in text.chars() {
-        if c == '\n' {
-            continue;
-        }
-        let glyph = font.glyph_id(c);
-        if let Some(last_id) = last_glyph_id {
-            total_width += scaled_font.kern(last_id, glyph);
-        }
-        total_width += scaled_font.h_advance(glyph);
-        last_glyph_id = Some(glyph);
-    }
-    let height = scaled_font.ascent() - scaled_font.descent();
-    (total_width as u32, height as u32, scaled_font.ascent())
-}

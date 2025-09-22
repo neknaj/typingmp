@@ -11,9 +11,6 @@ use ab_glyph::FontRef;
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
 
-#[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
-const NORMAL_FONT_SIZE: f32 = 25.0;
-
 /// GUIアプリケーションのメイン関数
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -24,7 +21,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut height = 500;
 
     let mut window = Window::new(
-        "GUI Text Input",
+        "Neknaj Typing Multi-Platform",
         width,
         height,
         WindowOptions {
@@ -34,7 +31,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     window.set_target_fps(60);
     let mut app = App::new();
-    let mut big_font_size = height as f32 * 0.5;
 
     // メインループ
     while window.is_open() && !app.should_quit {
@@ -42,7 +38,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         if new_width != width || new_height != height {
             width = new_width;
             height = new_height;
-            big_font_size = height as f32 * 0.5;
         }
 
         handle_input(&mut window, &mut app);
@@ -56,22 +51,24 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         // 3. 描画リストの各要素を解釈して描画
         for item in render_list {
             match item {
-                Renderable::BigText { text, anchor, shift, align } => {
-                    let (text_width, text_height, _ascent) = gui_renderer::measure_text(&font, &text, big_font_size);
+                Renderable::BigText { text, anchor, shift, align, font_size } => {
+                    let pixel_font_size = crate::renderer::calculate_pixel_font_size(font_size, width, height);
+                    let (text_width, text_height, _ascent) = gui_renderer::measure_text(&font, &text, pixel_font_size);
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
                     let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     gui_renderer::draw_text(
                         &mut pixel_buffer, width, &font, &text,
-                        (x as f32, y as f32), big_font_size,
+                        (x as f32, y as f32), pixel_font_size,
                     );
                 }
-                Renderable::Text { text, anchor, shift, align } => {
-                    let (text_width, text_height, _ascent) = gui_renderer::measure_text(&font, &text, NORMAL_FONT_SIZE);
+                Renderable::Text { text, anchor, shift, align, font_size } => {
+                    let pixel_font_size = crate::renderer::calculate_pixel_font_size(font_size, width, height);
+                    let (text_width, text_height, _ascent) = gui_renderer::measure_text(&font, &text, pixel_font_size);
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
                     let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     gui_renderer::draw_text(
                         &mut pixel_buffer, width, &font, &text,
-                        (x as f32, y as f32), NORMAL_FONT_SIZE,
+                        (x as f32, y as f32), pixel_font_size,
                     );
                 }
             }
