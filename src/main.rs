@@ -1,4 +1,8 @@
+#![cfg_attr(feature = "uefi", no_std)]
+#![cfg_attr(feature = "uefi", no_main)]
+
 /// main関数 - featureフラグに応じて各バックエンドを起動
+#[cfg(not(feature = "uefi"))]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // "gui" featureが有効な場合にコンパイルされるブロック
     #[cfg(feature = "gui")]
@@ -21,4 +25,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("No desktop backend feature enabled. Please run with --features gui or --features tui");
         return Ok(());
     }
+}
+
+
+#[cfg(feature = "uefi")]
+#[uefi::entry]
+ fn efi_main() -> uefi::prelude::Status {
+    // ここで `run` 関数を呼び出すか、`run` 関数の内容を直接記述します。
+    // `run` 関数のシグネチャを合わせる必要があるかもしれません。
+    rust_multibackend_app::uefi::run()
 }

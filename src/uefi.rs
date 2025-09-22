@@ -1,7 +1,5 @@
 // src/uefi.rs
 
-#![no_main]
-
 extern crate alloc;
 
 use uefi::prelude::*;
@@ -17,8 +15,8 @@ use alloc::vec::Vec;
 const BIG_FONT_SIZE: f32 = 48.0;
 const NORMAL_FONT_SIZE: f32 = 16.0;
 
-#[entry]
-fn main() -> Status {
+
+pub fn run() -> Status {
     uefi::helpers::init().unwrap();
 
     // Get Graphics Output Protocol

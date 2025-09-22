@@ -7,8 +7,6 @@
 // uefi featureが有効な場合にのみ必要となる設定
 #[cfg(feature = "uefi")]
 mod uefi_setup {
-    use core::panic::PanicInfo;
-
     /// uefiクレートが提供するアロケータをグローバルアロケータとして設定
     #[global_allocator]
     static ALLOCATOR: uefi::allocator::Allocator = uefi::allocator::Allocator;

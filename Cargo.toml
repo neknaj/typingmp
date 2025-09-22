@@ -9,7 +9,7 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 # デフォルトでgui featureを有効にする
-default = ["gui"]
+default = []
 gui = ["dep:minifb"]
 tui = ["dep:crossterm"]
 wasm = [
@@ -65,8 +65,3 @@ panic = "abort"
 name = "rust_multibackend_app"
 path = "src/main.rs"
 required-features = []
-
-[[bin]]
-name = "uefi_app"
-path = "src/uefi.rs"
-required-features = ["uefi"]
