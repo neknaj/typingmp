@@ -6,8 +6,6 @@ use crate::ui::{self, Renderable};
 use ab_glyph::FontRef;
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
 
-const WIDTH: usize = 800;
-const HEIGHT: usize = 300;
 const NORMAL_FONT_SIZE: f32 = 16.0;
 
 /// GUIアプリケーションのメイン関数
@@ -15,17 +13,35 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let font_data = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
     let font = FontRef::try_from_slice(font_data).map_err(|_| "Failed to load font from slice")?;
 
-    let mut window = Window::new("GUI Text Input", WIDTH, HEIGHT, WindowOptions::default())?;
+    let mut width = 800;
+    let mut height = 300;
+
+    let mut window = Window::new(
+        "GUI Text Input",
+        width,
+        height,
+        WindowOptions {
+            resize: true,
+            ..WindowOptions::default()
+        },
+    )?;
     window.set_target_fps(60);
     let mut app = App::new();
-    let big_font_size = HEIGHT as f32 * 0.5;
+    let mut big_font_size = height as f32 * 0.5;
 
     // メインループ
     while window.is_open() && !app.should_quit {
+        let (new_width, new_height) = window.get_size();
+        if new_width != width || new_height != height {
+            width = new_width;
+            height = new_height;
+            big_font_size = height as f32 * 0.5;
+        }
+
         handle_input(&mut window, &mut app);
 
         // 1. 背景色でピクセルバッファをクリア
-        let mut pixel_buffer = vec![BG_COLOR; WIDTH * HEIGHT];
+        let mut pixel_buffer = vec![BG_COLOR; width * height];
 
         // 2. UI定義から描画リストを取得
         let render_list = ui::build_ui(&app);
@@ -35,19 +51,19 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             match item {
                 Renderable::BigText { text, anchor, shift, align } => {
                     let (text_width, text_height) = gui_renderer::measure_text(&font, text, big_font_size);
-                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, WIDTH, HEIGHT);
+                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
                     let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     gui_renderer::draw_text(
-                        &mut pixel_buffer, WIDTH, &font, text,
+                        &mut pixel_buffer, width, &font, text,
                         (x as f32, y as f32), big_font_size,
                     );
                 }
                 Renderable::Text { text, anchor, shift, align } => {
                     let (text_width, text_height) = gui_renderer::measure_text(&font, text, NORMAL_FONT_SIZE);
-                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, WIDTH, HEIGHT);
+                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
                     let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     gui_renderer::draw_text(
-                        &mut pixel_buffer, WIDTH, &font, text,
+                        &mut pixel_buffer, width, &font, text,
                         (x as f32, y as f32), NORMAL_FONT_SIZE,
                     );
                 }
@@ -55,7 +71,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         
         // 4. 完成したバッファをウィンドウに表示
-        window.update_with_buffer(&pixel_buffer, WIDTH, HEIGHT)?;
+        window.update_with_buffer(&pixel_buffer, width, height)?;
     }
     Ok(())
 }

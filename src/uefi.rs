@@ -12,9 +12,7 @@ use crate::ui::{self, Renderable};
 use ab_glyph::{Font, FontRef, point, OutlinedGlyph, PxScale, ScaleFont};
 use alloc::vec::Vec;
 
-const BIG_FONT_SIZE: f32 = 48.0;
 const NORMAL_FONT_SIZE: f32 = 16.0;
-
 
 pub fn run() -> Status {
     uefi::helpers::init().unwrap();
@@ -26,6 +24,7 @@ pub fn run() -> Status {
     // Get current mode info
     let mode_info = gop.current_mode_info();
     let (width, height) = mode_info.resolution();
+    let big_font_size = height as f32 * 0.5;
 
     // Load font
     let font_data: &[u8] = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
@@ -78,12 +77,12 @@ pub fn run() -> Status {
         for item in render_list {
             match item {
                 Renderable::BigText { text, anchor, shift, align } => {
-                    let (text_width, text_height) = measure_text(&font, text, BIG_FONT_SIZE);
+                    let (text_width, text_height) = measure_text(&font, text, big_font_size);
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
                     let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     draw_text(
                         &mut pixel_buffer, width, &font, text,
-                        (x as f32, y as f32), BIG_FONT_SIZE,
+                        (x as f32, y as f32), big_font_size,
                     );
                 }
                 Renderable::Text { text, anchor, shift, align } => {
