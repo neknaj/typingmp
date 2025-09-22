@@ -1,7 +1,7 @@
 // src/gui.rs
 
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
-use crate::app::{App, AppEvent}; // AppState は未使用なので削除しました
+use crate::app::{App, AppEvent};
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
 use crate::renderer::{gui_renderer, draw_linear_gradient};
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
@@ -14,8 +14,7 @@ use minifb::{Key, KeyRepeat, Window, WindowOptions};
 // --- Windows固有のインポートと処理 ---
 // target_osがwindowsの場合のみコンパイルされる
 #[cfg(all(target_os = "windows", not(feature = "uefi")))]
-// raw-window-handle 0.6系に合わせて HasWindowHandle, WindowHandle, RawWindowHandle を使用
-use raw_window_handle::{HasWindowHandle, WindowHandle, RawWindowHandle}; // RawWindowHandle もインポート
+use raw_window_handle::{HasWindowHandle, WindowHandle, RawWindowHandle};
 #[cfg(all(target_os = "windows", not(feature = "uefi")))]
 use winapi::um::dwmapi::DwmSetWindowAttribute;
 #[cfg(all(target_os = "windows", not(feature = "uefi")))]
@@ -23,11 +22,25 @@ use winapi::shared::windef::HWND;
 #[cfg(all(target_os = "windows", not(feature = "uefi")))]
 use winapi::shared::minwindef::{BOOL, TRUE};
 #[cfg(all(target_os = "windows", not(feature = "uefi")))]
-use winapi::ctypes::c_void; // winapi::ctypes::c_void を明示的にインポート
+use winapi::ctypes::c_void;
 
-// DWMWA_USE_IMMERSIVE_DARK_MODE の値 (winapiに直接エクスポートされていない場合を考慮)
+// DWMWAのカスタム属性値 (Windows 11 SDKで導入されたもの)
 #[cfg(all(target_os = "windows", not(feature = "uefi")))]
-const DWMWA_USE_IMMERSIVE_DARK_MODE: u32 = 20;
+const DWMWA_CAPTION_COLOR: u32 = 35; // タイトルバーの背景色
+#[cfg(all(target_os = "windows", not(feature = "uefi")))]
+const DWMWA_TEXT_COLOR: u32 = 36;    // タイトルバーのテキスト色
+#[cfg(all(target_os = "windows", not(feature = "uefi")))]
+const DWMWA_BORDER_COLOR: u32 = 37;  // ウィンドウの境界線の色
+
+// 以前のダークモード設定用 (もし使用したい場合)
+// const DWMWA_USE_IMMERSIVE_DARK_MODE: u32 = 20;
+
+// RGBからCOLORREF (0x00BBGGRR) に変換するヘルパー関数
+#[cfg(all(target_os = "windows", not(feature = "uefi")))]
+fn rgb_to_colorref(r: u8, g: u8, b: u8) -> u32 {
+    ((b as u32) << 16) | ((g as u32) << 8) | (r as u32)
+}
+
 // --- End Windows固有のインポートと処理 ---
 
 
@@ -55,40 +68,65 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     // target_osがwindowsの場合のみこのブロックがコンパイル・実行される
     #[cfg(all(target_os = "windows", not(feature = "uefi")))]
     {
-        // minifbのウィンドウハンドルを取得
-        // raw-window-handle 0.6系では window_handle() メソッドを使う
-        // これは Result<WindowHandle, HandleError> を返す
-        match window.window_handle() {
-            Ok(handle_wrapper) => { // handle_wrapper は WindowHandle 構造体
-                // WindowHandle 構造体から内部の RawWindowHandle enum を取得
-                if let RawWindowHandle::Win32(handle) = handle_wrapper.as_raw() { // as_raw() を使用
-                    // RawWindowHandleからHWND (Windowsのウィンドウハンドル) を取得
-                    // handle.hwnd は NonZeroIsize をラップしているので .get() で値を取り出す
-                    let hwnd = handle.hwnd.get() as HWND; 
-                    // タイトルバーをダークモードに設定する属性
-                    let attribute = DWMWA_USE_IMMERSIVE_DARK_MODE;
-                    // ダークモードを有効にする値 (TRUE)
-                    let value: BOOL = TRUE;
+        // カスタム色定義
+        // 背景色: 黒
+        let caption_color = rgb_to_colorref(0, 0, 0); 
+        // テキスト色: 白
+        let text_color = rgb_to_colorref(255, 255, 255); 
+        // 境界線の色: 濃いグレー
+        let border_color = rgb_to_colorref(10, 10, 10); 
 
-                    // DwmSetWindowAttribute関数を呼び出し
-                    // unsafeブロックが必要なのは、外部関数インターフェース (FFI) を使用するため
-                    let result = unsafe {
+        match window.window_handle() {
+            Ok(handle_wrapper) => {
+                if let RawWindowHandle::Win32(handle) = handle_wrapper.as_raw() {
+                    let hwnd = handle.hwnd.get() as HWND; 
+
+                    // DWMWA_CAPTION_COLOR (タイトルバーの背景色) を設定
+                    let result_caption = unsafe {
                         DwmSetWindowAttribute(
                             hwnd,
-                            attribute,
-                            &value as *const _ as *const c_void, // winapi::ctypes::c_void にキャスト
-                            std::mem::size_of_val(&value) as u32,         // 値のサイズ
+                            DWMWA_CAPTION_COLOR,
+                            &caption_color as *const _ as *const c_void,
+                            std::mem::size_of_val(&caption_color) as u32,
                         )
                     };
-
-                    // DwmSetWindowAttributeは成功時に0 (S_OK) を返す
-                    if result != 0 {
-                        eprintln!("Failed to set DWMWA_USE_IMMERSIVE_DARK_MODE: {}", result);
-                    } else {
-                        println!("Successfully attempted to set DWMWA_USE_IMMERSIVE_DARK_MODE for Windows title bar.");
+                    if result_caption != 0 {
+                        eprintln!("Failed to set DWMWA_CAPTION_COLOR: {}", result_caption);
                     }
+
+                    // DWMWA_TEXT_COLOR (タイトルバーのテキスト色) を設定
+                    let result_text = unsafe {
+                        DwmSetWindowAttribute(
+                            hwnd,
+                            DWMWA_TEXT_COLOR,
+                            &text_color as *const _ as *const c_void,
+                            std::mem::size_of_val(&text_color) as u32,
+                        )
+                    };
+                    if result_text != 0 {
+                        eprintln!("Failed to set DWMWA_TEXT_COLOR: {}", result_text);
+                    }
+
+                    // DWMWA_BORDER_COLOR (ウィンドウの境界線の色) を設定
+                    let result_border = unsafe {
+                        DwmSetWindowAttribute(
+                            hwnd,
+                            DWMWA_BORDER_COLOR,
+                            &border_color as *const _ as *const c_void,
+                            std::mem::size_of_val(&border_color) as u32,
+                        )
+                    };
+                    if result_border != 0 {
+                        eprintln!("Failed to set DWMWA_BORDER_COLOR: {}", result_border);
+                    }
+
+                    if result_caption == 0 && result_text == 0 && result_border == 0 {
+                        println!("Successfully attempted to set custom colors for Windows title bar.");
+                    } else {
+                        eprintln!("Some DWM color attributes failed to set. This might occur on Windows 10 or older versions.");
+                    }
+
                 } else {
-                    // Win32 以外のハンドルが返された場合（理論的にはWindowsでは発生しないはずだが、念のため）
                     eprintln!("Non-Win32 raw window handle obtained, skipping DWM attribute set.");
                 }
             },
