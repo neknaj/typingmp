@@ -26,11 +26,34 @@ pub enum Anchor {
     BottomRight,
 }
 
-/// Anchorからのオフセット（余白）を定義する構造体
+/// Anchorからのオフセット（移動量）を定義する構造体
 #[derive(Clone, Copy)]
-pub struct Margin {
-    pub x: i32,
-    pub y: i32,
+pub struct Shift {
+    pub x: f32,
+    pub y: f32,
+}
+
+/// 水平方向の揃え
+#[derive(Clone, Copy)]
+pub enum HorizontalAlign {
+    Left,
+    Center,
+    Right,
+}
+
+/// 垂直方向の揃え
+#[derive(Clone, Copy)]
+pub enum VerticalAlign {
+    Top,
+    Center,
+    Bottom,
+}
+
+/// テキストの揃え方を定義する構造体
+#[derive(Clone, Copy)]
+pub struct Align {
+    pub horizontal: HorizontalAlign,
+    pub vertical: VerticalAlign,
 }
 
 /// 画面に描画すべき要素の種類とレイアウト情報を定義するenum
@@ -39,13 +62,15 @@ pub enum Renderable<'a> {
     Text {
         text: &'a str,
         anchor: Anchor,
-        margin: Margin,
+        shift: Shift,
+        align: Align,
     },
     /// 大きなフォントサイズで描画されるテキスト
     BigText {
         text: &'a str,
         anchor: Anchor,
-        margin: Margin,
+        shift: Shift,
+        align: Align,
     },
 }
 
@@ -56,19 +81,27 @@ pub fn build_ui<'a>(app: &'a App) -> Vec<Renderable<'a>> {
         Renderable::BigText {
             text: &app.input_text,
             anchor: Anchor::CenterLeft,
-            margin: Margin { x: 0, y: 0 },
+            shift: Shift { x: 0.02, y: 0.0 }, // 画面幅の2%右にずらす
+            align: Align {
+                horizontal: HorizontalAlign::Left,
+                vertical: VerticalAlign::Center,
+            },
         },
         // 画面左下に表示するステータステキスト
         Renderable::Text {
             text: &app.status_text,
             anchor: Anchor::BottomLeft,
-            margin: Margin { x: 5, y: -5 },
+            shift: Shift { x: 0.01, y: -0.02 }, // 画面幅の1%右、画面高さの2%上にずらす
+            align: Align {
+                horizontal: HorizontalAlign::Left,
+                vertical: VerticalAlign::Bottom,
+            },
         },
     ]
 }
 
-/// AnchorとMarginから、具体的な描画開始座標(x, y)を計算する
-pub fn calculate_position(anchor: Anchor, margin: Margin, width: usize, height: usize) -> (i32, i32) {
+/// AnchorとShiftから、基準となる座標(x, y)を計算する
+pub fn calculate_anchor_position(anchor: Anchor, shift: Shift, width: usize, height: usize) -> (i32, i32) {
     let (w, h) = (width as i32, height as i32);
     let base_pos = match anchor {
         Anchor::TopLeft => (0, 0),
@@ -81,5 +114,32 @@ pub fn calculate_position(anchor: Anchor, margin: Margin, width: usize, height: 
         Anchor::BottomCenter => (w / 2, h),
         Anchor::BottomRight => (w, h),
     };
-    (base_pos.0 + margin.x, base_pos.1 + margin.y)
+    let shift_x = (width as f32 * shift.x) as i32;
+    let shift_y = (height as f32 * shift.y) as i32;
+    (base_pos.0 + shift_x, base_pos.1 + shift_y)
+}
+
+/// 基準点、テキストの寸法、揃え方から、最終的な描画開始座標（左上）を計算する
+pub fn calculate_aligned_position(
+    anchor_pos: (i32, i32),
+    text_width: u32,
+    text_height: u32,
+    align: Align,
+) -> (i32, i32) {
+    let (tw, th) = (text_width as i32, text_height as i32);
+    let (ax, ay) = anchor_pos;
+
+    let x = match align.horizontal {
+        HorizontalAlign::Left => ax,
+        HorizontalAlign::Center => ax - tw / 2,
+        HorizontalAlign::Right => ax - tw,
+    };
+
+    let y = match align.vertical {
+        VerticalAlign::Top => ay,
+        VerticalAlign::Center => ay - th / 2,
+        VerticalAlign::Bottom => ay - th,
+    };
+
+    (x, y)
 }

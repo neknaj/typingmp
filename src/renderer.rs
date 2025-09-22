@@ -13,7 +13,7 @@ use std::vec::Vec;
 #[cfg(feature = "uefi")]
 use core_maths::CoreFloat;
 
-use ab_glyph::{point, Font, FontRef, OutlinedGlyph};
+use ab_glyph::{point, Font, FontRef, OutlinedGlyph, PxScale, ScaleFont};
 
 /// テキストの描画色
 pub const TEXT_COLOR: u32 = 0x00_FFFFFF;
@@ -64,6 +64,34 @@ pub mod gui_renderer {
             }
         });
     }
+
+    /// テキストの描画サイズ（幅と高さ）を計算する
+    pub fn measure_text(font: &FontRef, text: &str, size: f32) -> (u32, u32) {
+        let scale = PxScale::from(size);
+        let scaled_font = font.as_scaled(scale);
+        let mut total_width = 0.0;
+        let mut max_height = 0.0;
+
+        let mut last_glyph_id = None;
+        for c in text.chars() {
+            if c == '\n' {
+                continue;
+            }
+            let glyph = font.glyph_id(c);
+            if let Some(last_id) = last_glyph_id {
+                total_width += scaled_font.kern(last_id, glyph);
+            }
+            if let Some(outlined_glyph) = font.outline_glyph(glyph.with_scale(scale)) {
+                let bounds = outlined_glyph.px_bounds();
+                total_width += bounds.width();
+                if bounds.height() > max_height {
+                    max_height = bounds.height();
+                }
+            }
+            last_glyph_id = Some(glyph);
+        }
+        (total_width as u32, max_height as u32)
+    }
 }
 
 /// TUIバックエンド用の文字ベースレンダラ
@@ -76,7 +104,7 @@ pub mod tui_renderer {
         let font_size = height as f32 * 0.8;
         let scale = font_size / (font.ascent_unscaled() - font.descent_unscaled());
         let mut pen_x = 2.0;
-        let pen_y = height as f32 * 0.7;
+        let mut pen_y = height as f32 * 0.7;
 
         for character in text.chars() {
             let glyph = font.glyph_id(character).with_scale_and_position(font_size, point(pen_x, pen_y));
@@ -103,5 +131,10 @@ pub mod tui_renderer {
                 if buffer[index] == ' ' { buffer[index] = coverage_char; }
             }
         });
+    }
+
+    /// テキストの描画サイズ（幅と高さ）を計算する
+    pub fn measure_text(text: &str) -> (u32, u32) {
+        (text.chars().count() as u32, 1)
     }
 }

@@ -15,7 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(all(not(feature = "gui"), feature = "tui"))]
     {
         println!("Starting TUI version... (Press 'q' to exit)");
-        std::thread::sleep(std::time::Duration::from_secs(2));
+        // std::thread::sleep(std::time::Duration::from_secs(2));
         return rust_multibackend_app::tui::run();
     }
 

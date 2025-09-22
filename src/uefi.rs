@@ -77,18 +77,22 @@ pub fn run() -> Status {
 
         for item in render_list {
             match item {
-                Renderable::BigText { text, anchor, margin } => {
-                    let pos = ui::calculate_position(anchor, margin, width, height);
+                Renderable::BigText { text, anchor, shift, align } => {
+                    let (text_width, text_height) = measure_text(&font, text, BIG_FONT_SIZE);
+                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
+                    let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     draw_text(
                         &mut pixel_buffer, width, &font, text,
-                        (pos.0 as f32, pos.1 as f32), BIG_FONT_SIZE,
+                        (x as f32, y as f32), BIG_FONT_SIZE,
                     );
                 }
-                Renderable::Text { text, anchor, margin } => {
-                    let pos = ui::calculate_position(anchor, margin, width, height-10);
+                Renderable::Text { text, anchor, shift, align } => {
+                    let (text_width, text_height) = measure_text(&font, text, NORMAL_FONT_SIZE);
+                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
+                    let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     draw_text(
                         &mut pixel_buffer, width, &font, text,
-                        (pos.0 as f32, pos.1 as f32), NORMAL_FONT_SIZE,
+                        (x as f32, y as f32), NORMAL_FONT_SIZE,
                     );
                 }
             }
@@ -149,4 +153,32 @@ fn draw_glyph_to_pixel_buffer(buffer: &mut [BltPixel], stride: usize, outlined: 
             buffer[index] = BltPixel::new(b, g, r);
         }
     });
+}
+
+/// テキストの描画サイズを計算する
+fn measure_text(font: &FontRef, text: &str, size: f32) -> (u32, u32) {
+    let scale = PxScale::from(size);
+    let scaled_font = font.as_scaled(scale);
+    let mut total_width = 0.0;
+    let mut max_height = 0.0;
+
+    let mut last_glyph_id = None;
+    for c in text.chars() {
+        if c == '\n' {
+            continue;
+        }
+        let glyph = font.glyph_id(c);
+        if let Some(last_id) = last_glyph_id {
+            total_width += scaled_font.kern(last_id, glyph);
+        }
+        if let Some(outlined_glyph) = font.outline_glyph(glyph.with_scale(scale)) {
+            let bounds = outlined_glyph.px_bounds();
+            total_width += bounds.width();
+            if bounds.height() > max_height {
+                max_height = bounds.height();
+            }
+        }
+        last_glyph_id = Some(glyph);
+    }
+    (total_width as u32, max_height as u32)
 }

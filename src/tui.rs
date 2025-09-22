@@ -42,11 +42,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Renderable::Text {
                     text,
                     anchor,
-                    margin,
+                    shift,
+                    align,
                 } => {
-                    let pos = ui::calculate_position(anchor, margin, cols, rows);
-                    let mut x = pos.0;
-                    let y = pos.1;
+                    // TUIでは複雑なアライメントは実装が難しいため、単純な位置計算に留める
+                    let (text_width, text_height) = tui_renderer::measure_text(text);
+                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, cols, rows);
+                    let (mut x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
+
                     if y < 0 || y >= rows as i32 {
                         continue;
                     }
