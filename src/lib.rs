@@ -19,6 +19,7 @@ pub mod ui;
 pub mod parser;
 pub mod model;
 pub mod typing;
+pub mod typing_renderer;
 pub mod timestamp;
 
 // "gui" featureが有効な時だけコンパイルされるGUIバックエンドモジュール

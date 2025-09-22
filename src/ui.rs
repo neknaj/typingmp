@@ -17,8 +17,10 @@ use alloc::{format, string::{String, ToString}};
 use std::string::{String, ToString};
 
 use crate::app::{App, AppState};
-use crate::model::{Line, Segment, TypingCorrectnessChar, TypingCorrectnessLine, TypingStatus};
+use crate::model::{TypingCorrectnessChar, TypingCorrectnessLine, TypingStatus};
 use crate::typing; // For calculate_total_metrics
+use crate::typing_renderer; // 新しいモジュールをインポート
+use ab_glyph::FontRef; // FontRefを渡すために必要
 
 /// 画面上の描画基準点を定義するenum
 #[derive(Clone, Copy)]
@@ -99,15 +101,6 @@ pub enum Renderable {
         font_size: FontSize,
         color: u32,
     },
-    // A dedicated variant for the complex typing line
-    TypingText {
-        content_line: Line,
-        correctness_line: TypingCorrectnessLine,
-        status: TypingStatus,
-        anchor: Anchor,
-        shift: Shift,
-        font_size: FontSize,
-    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -117,7 +110,7 @@ const MENU_ITEMS: [&str; 1] = ["Start Typing"];
 const MENU_ITEMS: [&str; 2] = ["Start Typing", "Quit"];
 
 /// Appの状態を受け取り、描画リスト（UIレイアウト）を構築する
-pub fn build_ui(app: &App) -> Vec<Renderable> {
+pub fn build_ui(app: &App, font: &FontRef, width: usize, height: usize) -> Vec<Renderable> {
     let mut render_list = Vec::new();
 
     let menu_gradient = Gradient { start_color: 0xFF_000010, end_color: 0xFF_000000 };
@@ -126,7 +119,7 @@ pub fn build_ui(app: &App) -> Vec<Renderable> {
 
     match app.state {
         AppState::Menu => build_menu_ui(app, &mut render_list, menu_gradient),
-        AppState::Typing => build_typing_ui(app, &mut render_list, typing_gradient),
+        AppState::Typing => build_typing_ui(app, &mut render_list, typing_gradient, font, width, height),
         AppState::Result => build_result_ui(app, &mut render_list, result_gradient),
     }
 
@@ -179,7 +172,7 @@ fn build_menu_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradien
     }
 }
 
-fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient) {
+fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient, font: &FontRef, width: usize, height: usize) {
     render_list.push(Renderable::Background { gradient });
 
     if let Some(model) = &app.typing_model {
@@ -194,27 +187,28 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
                 render_list.push(Renderable::Text {
                     text: model.content.lines[line_idx].to_string(),
                     anchor: Anchor::Center,
-                    shift: Shift { x: 0.0, y: offset as f32 * 0.25 }, // Position above/below center
+                    shift: Shift { x: 0.0, y: offset as f32 * 0.35 }, //
                     align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
                     font_size: FontSize::WindowHeight(0.05),
                     color: 0xFF_444444,
                 });
             }
         }
-        
-        // --- Create the main TypingText Renderable ---
+
+        // --- Call the new typing_renderer to build the main view ---
         if (current_line_signed as usize) < line_count {
             let line_idx = current_line_signed as usize;
-            render_list.push(Renderable::TypingText {
-                content_line: model.content.lines[line_idx].clone(),
-                correctness_line: model.typing_correctness.lines[line_idx].clone(),
-                status: model.status.clone(),
-                anchor: Anchor::Center,
-                shift: Shift { x: 0.0, y: 0.0 }, // Centered
-                font_size: FontSize::WindowHeight(0.125), // Base font size
-            });
+            let typing_renderables = typing_renderer::build_typing_renderables(
+                &model.content.lines[line_idx],
+                &model.typing_correctness.lines[line_idx],
+                &model.status,
+                font,
+                width,
+                height,
+            );
+            render_list.extend(typing_renderables);
         }
-        
+
         // --- Render Status Panel (Bottom Left) ---
         let metrics = typing::calculate_total_metrics(model);
         let time = metrics.total_time / 1000.0;
