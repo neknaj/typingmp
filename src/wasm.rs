@@ -80,6 +80,9 @@ pub fn start() -> Result<(), JsValue> {
     let g = f.clone();
     *g.borrow_mut() = Some(Closure::<dyn FnMut()>::new(move || {
         let (width, height) = *size.borrow();
+
+        app.borrow_mut().update(width, height, &font);
+
         let app = app.borrow();
 
         let mut pixel_buffer = vec![0u32; width * height];

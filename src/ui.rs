@@ -253,11 +253,8 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
         
         // --- Call the new typing_renderer to build the main view ---
         if (current_line_signed as usize) < line_count {
-            let line_idx = current_line_signed as usize;
             let typing_renderables = typing_renderer::build_typing_renderables(
-                &model.content.lines[line_idx],
-                &model.typing_correctness.lines[line_idx],
-                &model.status,
+                model,
                 font,
                 width,
                 height,

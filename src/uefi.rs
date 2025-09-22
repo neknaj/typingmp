@@ -77,6 +77,9 @@ pub fn run() -> Status {
             }
         }
 
+        // 毎フレームの状態更新（スクロール計算など）
+        app.update(width, height, &font);
+
         // Render
         let mut pixel_buffer: alloc::vec::Vec<BltPixel> = alloc::vec![
             BltPixel::new(

@@ -10,7 +10,7 @@ use std::string::{String, ToString};
 #[cfg(not(feature = "uefi"))]
 use std::vec::Vec;
 
-use crate::model::{Line, Segment, TypingCorrectnessChar, TypingCorrectnessLine, TypingCorrectnessSegment, TypingStatus};
+use crate::model::{TypingModel, Segment, TypingCorrectnessChar, TypingCorrectnessSegment};
 use crate::renderer::gui_renderer;
 use crate::ui::{Align, Anchor, FontSize, HorizontalAlign, Renderable, Shift, VerticalAlign};
 use ab_glyph::FontRef;
@@ -34,27 +34,39 @@ fn is_segment_correct(segment: &TypingCorrectnessSegment) -> bool {
 
 /// Builds the complex list of renderables for the main typing view.
 pub fn build_typing_renderables(
-    content_line: &Line,
-    correctness_line: &TypingCorrectnessLine,
-    status: &TypingStatus,
+    model: &TypingModel,
     font: &FontRef,
     width: usize,
     height: usize,
 ) -> Vec<Renderable> {
     let mut renderables = Vec::new();
 
+    let line_idx = model.status.line as usize;
+    let content_line = if let Some(line) = model.content.lines.get(line_idx) { line } else { return renderables; };
+    let correctness_line = if let Some(line) = model.typing_correctness.lines.get(line_idx) { line } else { return renderables; };
+    let status = &model.status;
+    let scroll_offset = model.scroll.scroll as f32;
+
     let base_font_size = FontSize::WindowHeight(0.125);
     let base_pixel_font_size = crate::renderer::calculate_pixel_font_size(base_font_size, width, height);
     let ruby_pixel_font_size = base_pixel_font_size * 0.4;
     let small_ruby_pixel_font_size = base_pixel_font_size * 0.3;
 
-    // --- UPPER ROW (TARGET TEXT) ---
-    let upper_y = (height as f32 / 2.0) - base_pixel_font_size * UPPER_ROW_Y_OFFSET_FACTOR;
-    let total_upper_width = content_line.segments.iter().map(|seg| {
-        let text = match seg { Segment::Plain { text } => text, Segment::Annotated { base, .. } => base };
+    // --- Layout Calculation --- // The entire layout is now driven by the width of the 'base' text.
+    let total_layout_width = content_line.segments.iter().map(|seg| {
+        let text = match seg {
+            Segment::Plain { text } => text.as_str(),
+            Segment::Annotated { base, .. } => base.as_str(),
+        };
         gui_renderer::measure_text(font, text, base_pixel_font_size).0 as f32
     }).sum::<f32>();
-    let mut upper_pen_x = (width as f32 - total_upper_width) / 2.0;
+
+    // This is the starting X for the entire line block, for both rows.
+    let block_start_x = (width as f32 - total_layout_width) / 2.0 - scroll_offset;
+
+    // --- Render Upper Row (Target Text) ---
+    let upper_y = (height as f32 / 2.0) - base_pixel_font_size * UPPER_ROW_Y_OFFSET_FACTOR;
+    let mut upper_pen_x = block_start_x;
 
     for (seg_idx, seg) in content_line.segments.iter().enumerate() {
         let is_typed_segment = seg_idx < status.segment as usize;
@@ -63,87 +75,100 @@ pub fn build_typing_renderables(
         } else {
             PENDING_COLOR
         };
+
+        let base_text = match seg {
+            Segment::Plain { text } => text,
+            Segment::Annotated { base, .. } => base,
+        };
         
-        match seg {
-            Segment::Plain { text } => {
-                let (seg_w, ..) = gui_renderer::measure_text(font, text, base_pixel_font_size);
-                renderables.push(Renderable::BigText { text: text.clone(), anchor: Anchor::TopLeft, shift: Shift {x: upper_pen_x / width as f32, y: upper_y / height as f32}, align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top}, font_size: base_font_size, color });
-                upper_pen_x += seg_w as f32;
-            }
-            Segment::Annotated { base, reading } => {
-                 let (base_w, ..) = gui_renderer::measure_text(font, base, base_pixel_font_size);
-                 let (reading_w, ..) = gui_renderer::measure_text(font, reading, ruby_pixel_font_size);
-                 let ruby_x = upper_pen_x + (base_w as f32 - reading_w as f32) / 2.0;
-                 let ruby_y = upper_y - ruby_pixel_font_size * RUBY_Y_OFFSET_FACTOR;
-
-                renderables.push(Renderable::BigText { text: base.clone(), anchor: Anchor::TopLeft, shift: Shift {x: upper_pen_x / width as f32, y: upper_y / height as f32}, align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top}, font_size: base_font_size, color });
-                renderables.push(Renderable::Text { text: reading.clone(), anchor: Anchor::TopLeft, shift: Shift {x: ruby_x / width as f32, y: ruby_y / height as f32}, align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top}, font_size: FontSize::WindowHeight(0.125 * 0.4), color });
-                upper_pen_x += base_w as f32;
-            }
+        // Render the base text at the current pen position to ensure left alignment.
+        renderables.push(Renderable::BigText { text: base_text.to_string(), anchor: Anchor::TopLeft, shift: Shift {x: upper_pen_x / width as f32, y: upper_y / height as f32}, align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top}, font_size: base_font_size, color });
+        
+        // Also render ruby text if it's annotated
+        if let Segment::Annotated { base, reading, .. } = seg {
+            let (base_w, ..) = gui_renderer::measure_text(font, base, base_pixel_font_size);
+            let (ruby_w, ..) = gui_renderer::measure_text(font, reading, ruby_pixel_font_size);
+            // Center the ruby above the base text we just drew.
+            let ruby_x = upper_pen_x + (base_w as f32 - ruby_w as f32) / 2.0;
+            let ruby_y = upper_y - ruby_pixel_font_size * RUBY_Y_OFFSET_FACTOR;
+            renderables.push(Renderable::Text { text: reading.clone(), anchor: Anchor::TopLeft, shift: Shift {x: ruby_x / width as f32, y: ruby_y / height as f32}, align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top}, font_size: FontSize::WindowHeight(0.125 * 0.4), color });
         }
+
+        // IMPORTANT: Advance the pen by the BASE width.
+        let (base_w, ..) = gui_renderer::measure_text(font, base_text, base_pixel_font_size);
+        upper_pen_x += base_w as f32;
     }
 
-    // --- LOWER ROW (USER INPUT) ---
+    // --- Render Lower Row (User Input) ---
     let lower_y = (height as f32 / 2.0) + base_pixel_font_size * LOWER_ROW_Y_OFFSET_FACTOR;
-    let total_lower_width = {
-        let mut temp_width = 0.0;
-        for i in 0..status.segment as usize {
-            let text = match &content_line.segments[i] {
-                Segment::Plain { text } => text,
-                Segment::Annotated { base, .. } => base,
-            };
-            temp_width += gui_renderer::measure_text(font, text, base_pixel_font_size).0 as f32;
-        }
-        if let Some(seg) = content_line.segments.get(status.segment as usize) {
-            let reading = match seg { Segment::Plain { text } => text, Segment::Annotated { reading, .. } => reading };
-            let typed_part = reading.chars().take(status.char_ as usize).collect::<String>();
-            temp_width += gui_renderer::measure_text(font, &typed_part, base_pixel_font_size).0 as f32;
-        }
-        temp_width
-    };
-    let mut lower_pen_x = (width as f32 - total_lower_width) / 2.0;
-
-    // Draw completed segments for lower row
-    for (seg_idx, seg) in content_line.segments.iter().enumerate().take(status.segment as usize) {
+    let mut lower_pen_x = block_start_x;
+    
+    // Draw completed segments
+    for seg_idx in 0..(status.segment as usize) {
+        let seg = &content_line.segments[seg_idx];
         let color = if is_segment_correct(&correctness_line.segments[seg_idx]) { CORRECT_COLOR } else { INCORRECT_COLOR };
-        match seg {
-            Segment::Plain { text } => {
-                let (seg_w, ..) = gui_renderer::measure_text(font, text, base_pixel_font_size);
-                renderables.push(Renderable::BigText { text: text.clone(), anchor:Anchor::TopLeft, shift: Shift { x: lower_pen_x / width as f32, y: lower_y / height as f32 }, align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top}, font_size: base_font_size, color });
-                lower_pen_x += seg_w as f32;
-            }
-            Segment::Annotated { base, reading } => {
-                let (base_w, ..) = gui_renderer::measure_text(font, base, base_pixel_font_size);
-                let (reading_w, ..) = gui_renderer::measure_text(font, reading, small_ruby_pixel_font_size);
-                let ruby_x = lower_pen_x + (base_w as f32 - reading_w as f32) / 2.0;
-                let ruby_y = lower_y - small_ruby_pixel_font_size * RUBY_Y_OFFSET_FACTOR;
-                
-                renderables.push(Renderable::BigText { text: base.clone(), anchor:Anchor::TopLeft, shift: Shift { x: lower_pen_x / width as f32, y: lower_y / height as f32 }, align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top}, font_size: base_font_size, color });
-                renderables.push(Renderable::Text { text: reading.clone(), anchor: Anchor::TopLeft, shift: Shift { x: ruby_x / width as f32, y: ruby_y / height as f32 }, align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top}, font_size: FontSize::WindowHeight(0.125 * 0.3), color });
-                lower_pen_x += base_w as f32;
-            }
+        
+        let base_text = match seg {
+            Segment::Plain { text } => text,
+            Segment::Annotated { base, .. } => base,
+        };
+
+        // Render the base text at the current pen position.
+        renderables.push(Renderable::BigText { text: base_text.to_string(), anchor:Anchor::TopLeft, shift: Shift { x: lower_pen_x / width as f32, y: lower_y / height as f32 }, align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top}, font_size: base_font_size, color });
+        
+        if let Segment::Annotated { base, reading, .. } = seg {
+            let (base_w, ..) = gui_renderer::measure_text(font, base, base_pixel_font_size);
+            let (small_reading_w, ..) = gui_renderer::measure_text(font, reading, small_ruby_pixel_font_size);
+            // Center the ruby above the base text we just drew.
+            let ruby_x = lower_pen_x + (base_w as f32 - small_reading_w as f32) / 2.0;
+            let ruby_y = lower_y - small_ruby_pixel_font_size * RUBY_Y_OFFSET_FACTOR;
+            renderables.push(Renderable::Text { text: reading.clone(), anchor: Anchor::TopLeft, shift: Shift { x: ruby_x / width as f32, y: ruby_y / height as f32 }, align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top}, font_size: FontSize::WindowHeight(0.125 * 0.3), color });
         }
+        
+        // IMPORTANT: Advance the pen by the BASE width.
+        let (base_w, ..) = gui_renderer::measure_text(font, base_text, base_pixel_font_size);
+        lower_pen_x += base_w as f32;
     }
 
-    // Draw current segment (typed part) for lower row
+    // Draw current segment (typed part)
     if let Some(seg) = content_line.segments.get(status.segment as usize) {
-        let reading = match seg { Segment::Plain { text } => text, Segment::Annotated { reading, .. } => reading };
-        for (char_idx, character) in reading.chars().enumerate().take(status.char_ as usize) {
+        let (base_text, reading_text) = match seg {
+            Segment::Plain { text } => (text.as_str(), text.as_str()),
+            Segment::Annotated { base, reading } => (base.as_str(), reading.as_str()),
+        };
+
+        // Calculate total widths for the current segment once, before the loop
+        let (total_base_width, ..) = gui_renderer::measure_text(font, base_text, base_pixel_font_size);
+        let (total_reading_width, ..) = gui_renderer::measure_text(font, reading_text, base_pixel_font_size);
+
+        for (char_idx, character) in reading_text.chars().enumerate().take(status.char_ as usize) {
             let char_str = character.to_string();
             let color = match correctness_line.segments[status.segment as usize].chars[char_idx] {
                 TypingCorrectnessChar::Correct => CORRECT_COLOR,
                 _ => INCORRECT_COLOR,
             };
-            let (char_w, ..) = gui_renderer::measure_text(font, &char_str, base_pixel_font_size);
             
+            // Draw the typed character (from reading text) at the current pen position.
+            renderables.push(Renderable::BigText { text: char_str.clone(), anchor: Anchor::TopLeft, shift: Shift { x: lower_pen_x/width as f32, y: lower_y/ height as f32}, align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top}, font_size: base_font_size, color });
+
             if let Segment::Annotated{..} = seg {
-                let (reading_w, ..) = gui_renderer::measure_text(font, &char_str, small_ruby_pixel_font_size);
-                let ruby_x = lower_pen_x + (char_w as f32 - reading_w as f32) / 2.0;
+                let (char_reading_w, ..) = gui_renderer::measure_text(font, &char_str, base_pixel_font_size);
+                let (small_reading_w, ..) = gui_renderer::measure_text(font, &char_str, small_ruby_pixel_font_size);
+                let ruby_x = lower_pen_x + (char_reading_w as f32 - small_reading_w as f32) / 2.0;
                 let ruby_y = lower_y - small_ruby_pixel_font_size * RUBY_Y_OFFSET_FACTOR;
                 renderables.push(Renderable::Text { text: char_str.clone(), anchor: Anchor::TopLeft, shift: Shift { x: ruby_x / width as f32, y: ruby_y / height as f32 }, align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top}, font_size: FontSize::WindowHeight(0.125 * 0.3), color });
             }
-            renderables.push(Renderable::BigText { text: char_str, anchor: Anchor::TopLeft, shift: Shift { x: lower_pen_x/width as f32, y: lower_y/ height as f32}, align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top}, font_size: base_font_size, color });
-            lower_pen_x += char_w as f32;
+            
+            // Advance the pen proportionally to match the base text's total width.
+            let (char_reading_width, ..) = gui_renderer::measure_text(font, &char_str, base_pixel_font_size);
+            
+            // This is the proportional advance logic.
+            let progress_ratio = if total_reading_width > 0 { // FIX: Compare u32 with integer
+                char_reading_width as f32 / total_reading_width as f32
+            } else {
+                0.0
+            };
+            lower_pen_x += total_base_width as f32 * progress_ratio;
         }
     }
     

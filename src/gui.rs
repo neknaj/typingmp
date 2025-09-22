@@ -64,6 +64,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         handle_input(&mut window, &mut app);
 
+        // Add the update call here to calculate smooth scrolling
+        app.update(width, height, &font);
+
         let mut pixel_buffer = vec![0u32; width * height];
         // build_uiにfontとサイズを渡す
         let render_list = ui::build_ui(&app, &font, width, height);

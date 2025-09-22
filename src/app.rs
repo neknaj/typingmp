@@ -17,9 +17,15 @@ use std::{
     vec::Vec,
 };
 
+
+#[cfg(feature = "uefi")]
+use core_maths::CoreFloat; 
+
 use crate::model::{Model, ResultModel, Scroll, TypingModel, TypingStatus};
 use crate::parser;
 use crate::typing;
+use crate::renderer::gui_renderer;
+use ab_glyph::FontRef;
 
 // ビルドスクリプトによってOUT_DIRに生成されたファイルを取り込む
 include!(concat!(env!("OUT_DIR"), "/problem_files.rs"));
@@ -124,6 +130,62 @@ impl App {
         self.result_model = None;
         self.state = AppState::Typing;
         self.on_event(AppEvent::ChangeScene);
+    }
+
+    /// 毎フレームの状態更新（スクロール計算など）
+    pub fn update(&mut self, width: usize, height: usize, font: &FontRef) {
+        if self.state != AppState::Typing {
+            return;
+        }
+
+        if let Some(model) = self.typing_model.as_mut() {
+            let base_font_size_enum = crate::ui::FontSize::WindowHeight(0.125);
+            let base_pixel_font_size = crate::renderer::calculate_pixel_font_size(base_font_size_enum, width, height);
+
+            if let Some(current_line_content) = model.content.lines.get(model.status.line as usize) {
+                // 1. Calculate the total width of the current line's BASE text
+                let total_width = current_line_content.segments.iter().map(|seg| {
+                    let text = match seg {
+                        crate::model::Segment::Plain { text } => text.as_str(),
+                        crate::model::Segment::Annotated { base, .. } => base.as_str(),
+                    };
+                    gui_renderer::measure_text(font, text, base_pixel_font_size).0 as f32
+                }).sum::<f32>();
+
+                // 2. Calculate the width up to the cursor, based on the BASE text width
+                let mut cursor_x_offset = 0.0;
+                for i in 0..model.status.segment as usize {
+                    if let Some(seg) = current_line_content.segments.get(i) {
+                         let text = match seg {
+                            crate::model::Segment::Plain { text } => text.as_str(),
+                            crate::model::Segment::Annotated { base, .. } => base.as_str(),
+                        };
+                        cursor_x_offset += gui_renderer::measure_text(font, text, base_pixel_font_size).0 as f32;
+                    }
+                }
+                // For the current segment, calculate progress within the reading and apply it to the base width
+                if let Some(seg) = current_line_content.segments.get(model.status.segment as usize) {
+                    let (base_text, reading_text) = match seg {
+                        crate::model::Segment::Plain { text } => (text, text),
+                        crate::model::Segment::Annotated { base, reading } => (base, reading),
+                    };
+                    let typed_reading_part = reading_text.chars().take(model.status.char_ as usize).collect::<String>();
+                    let typed_reading_width = gui_renderer::measure_text(font, &typed_reading_part, base_pixel_font_size).0 as f32;
+                    let total_reading_width = gui_renderer::measure_text(font, reading_text, base_pixel_font_size).0 as f32;
+                    let total_base_width = gui_renderer::measure_text(font, base_text, base_pixel_font_size).0 as f32;
+                    let progress_ratio = if total_reading_width > 0.0 { typed_reading_width / total_reading_width } else { 0.0 };
+                    cursor_x_offset += total_base_width * progress_ratio;
+                }
+
+                // 3. Calculate target scroll position so the cursor is centered
+                let target_scroll = cursor_x_offset - total_width / 2.0;
+
+                // 4. Smoothly update the scroll value using an easing function
+                let now = model.scroll.scroll as f32;
+                let d = target_scroll - now;
+                model.scroll.scroll += (d * (d.powi(2)) / (50000.0 + d.powi(2))) as f64;
+            }
+        }
     }
 
     /// アプリケーションイベントを処理する
