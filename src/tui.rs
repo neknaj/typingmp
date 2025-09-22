@@ -8,24 +8,23 @@ use crate::renderer::tui_renderer;
 use crate::ui::{self, Renderable};
 use ab_glyph::FontRef;
 use crossterm::{
-    cursor, event, execute,
+    cursor, event,
     event::{Event, KeyCode, KeyEventKind},
+    execute,
     style::Print,
     terminal,
 };
 
-#[cfg(not(feature = "uefi"))]
-use std::io::{stdout, Write};
 #[cfg(feature = "uefi")]
 use alloc::string::String;
 #[cfg(feature = "uefi")]
 use alloc::vec::Vec;
 #[cfg(feature = "uefi")]
-use core::fmt::Write; // For stdout.flush()
+use core::fmt::Write;
+#[cfg(not(feature = "uefi"))]
+use std::io::{stdout, Write};
 #[cfg(not(feature = "uefi"))]
 use std::time::Duration;
-#[cfg(feature = "uefi")]
-use uefi::boot::TimerTrigger; // For Duration equivalent
 
 /// TUIアプリケーションのメイン関数
 #[cfg(not(feature = "uefi"))]
@@ -37,7 +36,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     terminal::enable_raw_mode()?;
     execute!(stdout, terminal::EnterAlternateScreen, cursor::Hide)?;
     let mut app = App::new();
-    App::on_event(&mut app, AppEvent::Start);
+    app.on_event(AppEvent::Start);
 
     // メインループ
     while !app.should_quit {
@@ -49,7 +48,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         for item in render_list {
             match item {
-                Renderable::BigText { text, font_size, .. } => {
+                Renderable::BigText {
+                    text, font_size, ..
+                } => {
                     let text_layer = tui_renderer::render(&font, &text, cols, rows, font_size);
                     for (i, ch) in text_layer.iter().enumerate() {
                         if *ch != ' ' {
@@ -62,13 +63,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     anchor,
                     shift,
                     align,
-                    font_size,
+                    ..
                 } => {
-                    // TUIでは複雑なアライメントは実装が難しいため、単純な位置計算に留める
-                    // font_sizeはTUIのmeasure_textでは直接利用されないが、将来的な拡張のために抽出しておく
                     let (text_width, text_height) = tui_renderer::measure_text(&text);
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, cols, rows);
-                    let (mut x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
+                    let (mut x, y) =
+                        ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
 
                     if y < 0 || y >= rows as i32 {
                         continue;
@@ -97,12 +97,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 /// TUIアプリケーションのメイン関数 (UEFI版)
 #[cfg(feature = "uefi")]
 pub fn run() -> Result<(), Box<dyn core::error::Error>> {
-    // UEFI環境ではTUIはサポートしないか、別の実装が必要
-    // ここでは単にエラーを返すか、何もしない
-    // TODO: UEFI環境でのTUI実装を検討
     Err("TUI is not supported in UEFI environment yet.".into())
 }
-
 
 /// 文字バッファをターミナルに描画する
 #[cfg(not(feature = "uefi"))]
@@ -116,7 +112,6 @@ fn draw_buffer_to_terminal(
         let line: String = row.iter().collect();
         execute!(stdout, Print(line), cursor::MoveToNextLine(1))?;
     }
-    // stdout.flush()がResultを返すため、これがこの関数の戻り値になる
     stdout.flush()
 }
 
@@ -138,22 +133,5 @@ fn handle_input(app: &mut App) -> std::io::Result<()> {
             }
         }
     }
-    // エラーが起きなかった場合に成功(Ok)を返す
-    Ok(())
-}
-
-// UEFI環境ではTUIのhandle_inputは不要
-#[cfg(feature = "uefi")]
-fn handle_input(_app: &mut App) -> Result<(), Box<dyn core::error::Error>> {
-    Ok(())
-}
-
-// UEFI環境ではdraw_buffer_to_terminalは不要
-#[cfg(feature = "uefi")]
-fn draw_buffer_to_terminal(
-    _stdout: &mut impl Write,
-    _buffer: &[char],
-    _width: usize,
-) -> Result<(), Box<dyn core::error::Error>> {
     Ok(())
 }

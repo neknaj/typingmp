@@ -606,6 +606,8 @@ dependencies = [
  "log",
  "minifb",
  "raw-window-handle",
+ "serde",
+ "serde_json",
  "uefi",
  "wasm-bindgen",
  "web-sys",

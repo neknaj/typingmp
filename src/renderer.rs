@@ -4,32 +4,30 @@ extern crate alloc;
 
 // uefi と std で使用する Vec と vec! を切り替える
 #[cfg(feature = "uefi")]
-use alloc::vec::Vec;
-#[cfg(feature = "uefi")]
 use alloc::vec;
+#[cfg(feature = "uefi")]
+use alloc::vec::Vec;
 #[cfg(not(feature = "uefi"))]
 use std::vec::Vec;
 
 #[cfg(feature = "uefi")]
 use core_maths::CoreFloat;
 
-use ab_glyph::{point, Font, FontRef, OutlinedGlyph, PxScale, ScaleFont};
 use crate::ui::FontSize;
+use ab_glyph::{point, Font, FontRef, OutlinedGlyph, PxScale, ScaleFont};
 
-/// テキストの描画色
-pub const TEXT_COLOR: u32 = 0xFF_FFFFFF;
 /// 背景の描画色
 pub const BG_COLOR: u32 = 0x00_000000;
-/// グラデーションの開始色
-pub const GRADIENT_START_COLOR: u32 = 0xFF_000020;
-/// グラデーションの終了色
-pub const GRADIENT_END_COLOR: u32 = 0xFF_000000;
 
 /// ピクセルバッファに線形グラデーションを描画する
 pub fn draw_linear_gradient(
-    buffer: &mut [u32], width: usize, height: usize,
-    start_color: u32, end_color: u32,
-    start_point: (f32, f32), end_point: (f32, f32),
+    buffer: &mut [u32],
+    width: usize,
+    height: usize,
+    start_color: u32,
+    end_color: u32,
+    start_point: (f32, f32),
+    end_point: (f32, f32),
 ) {
     let (x0, y0) = start_point;
     let (x1, y1) = end_point;
@@ -43,16 +41,20 @@ pub fn draw_linear_gradient(
             let p_x = x as f32;
             let p_y = y as f32;
 
-            // ベクトル (P - A) と (B - A) のドット積を計算
             let dot_product = (p_x - x0) * dx + (p_y - y0) * dy;
+            let ratio = if len_sq == 0.0 {
+                0.0
+            } else {
+                (dot_product / len_sq).clamp(0.0, 1.0)
+            };
 
-            // 補間比率を計算し、0.0から1.0の範囲にクランプ
-            let ratio = if len_sq == 0.0 { 0.0 } else { (dot_product / len_sq).clamp(0.0, 1.0) };
-
-            let r = (((start_color >> 16) & 0xFF) as f32 * (1.0 - ratio) + ((end_color >> 16) & 0xFF) as f32 * ratio) as u32;
-            let g = (((start_color >> 8) & 0xFF) as f32 * (1.0 - ratio) + ((end_color >> 8) & 0xFF) as f32 * ratio) as u32;
-            let b = (((start_color) & 0xFF) as f32 * (1.0 - ratio) + ((end_color) & 0xFF) as f32 * ratio) as u32;
-            let interpolated_color = (0xFF << 24) | (r << 16) | (g << 8) | b; // Alpha channel is always opaque
+            let r = (((start_color >> 16) & 0xFF) as f32 * (1.0 - ratio)
+                + ((end_color >> 16) & 0xFF) as f32 * ratio) as u32;
+            let g = (((start_color >> 8) & 0xFF) as f32 * (1.0 - ratio)
+                + ((end_color >> 8) & 0xFF) as f32 * ratio) as u32;
+            let b = (((start_color) & 0xFF) as f32 * (1.0 - ratio)
+                + ((end_color) & 0xFF) as f32 * ratio) as u32;
+            let interpolated_color = (0xFF << 24) | (r << 16) | (g << 8) | b;
 
             let index = y * width + x;
             buffer[index] = interpolated_color;
@@ -77,8 +79,13 @@ pub mod gui_renderer {
 
     /// 指定されたピクセルバッファの指定位置にテキストを描画する
     pub fn draw_text(
-        buffer: &mut [u32], stride: usize, font: &FontRef, text: &str,
-        pos: (f32, f32), font_size: f32,
+        buffer: &mut [u32],
+        stride: usize,
+        font: &FontRef,
+        text: &str,
+        pos: (f32, f32),
+        font_size: f32,
+        color: u32,
     ) {
         let scale = PxScale::from(font_size);
         let scaled_font = font.as_scaled(scale);
@@ -94,32 +101,41 @@ pub mod gui_renderer {
             }
             let glyph = glyph_id.with_scale_and_position(scale, point(pen_x, pen_y));
             if let Some(outlined) = font.outline_glyph(glyph) {
-                draw_glyph_to_pixel_buffer(buffer, stride, &outlined);
+                draw_glyph_to_pixel_buffer(buffer, stride, &outlined, color);
             }
             pen_x += scaled_font.h_advance(glyph_id);
             last_glyph = Some(glyph_id);
         }
     }
-    
+
     /// アウトライン化されたグリフをピクセルバッファに描画する（内部関数）
-    fn draw_glyph_to_pixel_buffer(buffer: &mut [u32], stride: usize, outlined: &OutlinedGlyph) {
+    fn draw_glyph_to_pixel_buffer(
+        buffer: &mut [u32],
+        stride: usize,
+        outlined: &OutlinedGlyph,
+        color: u32,
+    ) {
         let bounds = outlined.px_bounds();
         outlined.draw(|x, y, c| {
             let buffer_x = bounds.min.x as i32 + x as i32;
             let buffer_y = bounds.min.y as i32 + y as i32;
             let height = buffer.len() / stride;
-            if buffer_x >= 0 && buffer_x < stride as i32 && buffer_y >= 0 && buffer_y < height as i32 {
+            if buffer_x >= 0
+                && buffer_x < stride as i32
+                && buffer_y >= 0
+                && buffer_y < height as i32
+            {
                 let index = (buffer_y as usize) * stride + (buffer_x as usize);
-                let text_r = ((TEXT_COLOR >> 16) & 0xFF) as f32;
-                let text_g = ((TEXT_COLOR >> 8) & 0xFF) as f32;
-                let text_b = (TEXT_COLOR & 0xFF) as f32;
+                let text_r = ((color >> 16) & 0xFF) as f32;
+                let text_g = ((color >> 8) & 0xFF) as f32;
+                let text_b = (color & 0xFF) as f32;
                 let bg_r = ((buffer[index] >> 16) & 0xFF) as f32;
                 let bg_g = ((buffer[index] >> 8) & 0xFF) as f32;
                 let bg_b = (buffer[index] & 0xFF) as f32;
                 let r = (text_r * c + bg_r * (1.0 - c)) as u32;
                 let g = (text_g * c + bg_g * (1.0 - c)) as u32;
                 let b = (text_b * c + bg_b * (1.0 - c)) as u32;
-                buffer[index] = (r << 16) | (g << 8) | b;
+                buffer[index] = (0xFF << 24) | (r << 16) | (g << 8) | b;
             }
         });
     }
@@ -150,9 +166,15 @@ pub mod gui_renderer {
 /// TUIバックエンド用の文字ベースレンダラ
 pub mod tui_renderer {
     use super::*;
-    
+
     /// 全画面に大きなテキストを描画し、文字バッファを返す
-    pub fn render(font: &FontRef, text: &str, width: usize, height: usize, ui_font_size: FontSize) -> Vec<char> {
+    pub fn render(
+        font: &FontRef,
+        text: &str,
+        width: usize,
+        height: usize,
+        ui_font_size: FontSize,
+    ) -> Vec<char> {
         let mut buffer = vec![' '; width * height];
         let font_size = super::calculate_pixel_font_size(ui_font_size, width, height);
         let scale = font_size / (font.ascent_unscaled() - font.descent_unscaled());
@@ -160,7 +182,9 @@ pub mod tui_renderer {
         let pen_y = height as f32 * 0.7;
 
         for character in text.chars() {
-            let glyph = font.glyph_id(character).with_scale_and_position(font_size, point(pen_x, pen_y));
+            let glyph = font
+                .glyph_id(character)
+                .with_scale_and_position(font_size, point(pen_x, pen_y));
             if let Some(outlined) = font.outline_glyph(glyph) {
                 draw_glyph_to_char_buffer(&mut buffer, width, &outlined);
             }
@@ -168,7 +192,7 @@ pub mod tui_renderer {
         }
         buffer
     }
-    
+
     /// アウトライン化されたグリフを文字バッファに描画する（内部関数）
     fn draw_glyph_to_char_buffer(buffer: &mut Vec<char>, width: usize, outlined: &OutlinedGlyph) {
         let bounds = outlined.px_bounds();
@@ -185,7 +209,9 @@ pub mod tui_renderer {
                     3 => '#',
                     _ => '@',
                 };
-                if buffer[index] == ' ' { buffer[index] = coverage_char; }
+                if buffer[index] == ' ' {
+                    buffer[index] = coverage_char;
+                }
             }
         });
     }

@@ -1,5 +1,5 @@
 use crate::app::{App, AppEvent};
-use crate::renderer::{gui_renderer};
+use crate::renderer::gui_renderer;
 use crate::ui::{self, Renderable};
 use ab_glyph::FontRef;
 use std::cell::RefCell;
@@ -7,8 +7,6 @@ use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::Clamped;
 use web_sys::{CanvasRenderingContext2d, ImageData, KeyboardEvent};
-
-
 
 /// WASMモジュールのエントリーポイント
 #[wasm_bindgen(start)]
@@ -23,8 +21,10 @@ pub fn start() -> Result<(), JsValue> {
         .create_element("canvas")?
         .dyn_into::<web_sys::HtmlCanvasElement>()?;
     body.append_child(&canvas)?;
-    let context =
-        canvas.get_context("2d")?.unwrap().dyn_into::<CanvasRenderingContext2d>()?;
+    let context = canvas
+        .get_context("2d")?
+        .unwrap()
+        .dyn_into::<CanvasRenderingContext2d>()?;
 
     let font = FontRef::try_from_slice(include_bytes!("../fonts/NotoSerifJP-Regular.ttf"))
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
@@ -46,17 +46,17 @@ pub fn start() -> Result<(), JsValue> {
             canvas_clone.set_height(height);
             *size_clone.borrow_mut() = (width as usize, height as usize);
         });
-        window.add_event_listener_with_callback("resize", resize_handler.as_ref().unchecked_ref())?;
-        resize_handler.forget();
+        window
+            .add_event_listener_with_callback("resize", resize_handler.as_ref().unchecked_ref())?;
+
         // 初期サイズを設定するために一度呼び出す
-        let window_clone = window.clone();
-        let canvas_clone = canvas.clone();
-        let size_clone = size.clone();
-        let width = window_clone.inner_width().unwrap().as_f64().unwrap() as u32;
-        let height = window_clone.inner_height().unwrap().as_f64().unwrap() as u32;
-        canvas_clone.set_width(width);
-        canvas_clone.set_height(height);
-        *size_clone.borrow_mut() = (width as usize, height as usize);
+        let width = window.inner_width().unwrap().as_f64().unwrap() as u32;
+        let height = window.inner_height().unwrap().as_f64().unwrap() as u32;
+        canvas.set_width(width);
+        canvas.set_height(height);
+        *size.borrow_mut() = (width as usize, height as usize);
+
+        resize_handler.forget();
     }
 
     // キーボードイベントのリスナーを設定
@@ -70,7 +70,6 @@ pub fn start() -> Result<(), JsValue> {
                 "Backspace" => app.on_event(AppEvent::Backspace),
                 "Enter" => app.on_event(AppEvent::Enter),
                 "Escape" => app.on_event(AppEvent::Escape),
-                "q" => app.on_event(AppEvent::Quit),
                 key if key.len() == 1 => app.on_event(AppEvent::Char(key.chars().next().unwrap())),
                 _ => {}
             }
@@ -84,23 +83,28 @@ pub fn start() -> Result<(), JsValue> {
     let g = f.clone();
     *g.borrow_mut() = Some(Closure::<dyn FnMut()>::new(move || {
         let (width, height) = *size.borrow();
-        let _big_font_size = height as f32 * 0.5;
         let app = app.borrow(); // 描画中は不変借用
 
-        // 1. 背景色でピクセルバッファをクリア
         let mut pixel_buffer = vec![0u32; width * height];
-
-        // 2. UI定義から描画リストを取得
         let render_list = ui::build_ui(&app);
 
-        // 3. 描画リストを解釈して描画
         for item in render_list {
             match item {
-                Renderable::BigText { text, anchor, shift, align, font_size } => {
-                    let pixel_font_size = crate::renderer::calculate_pixel_font_size(font_size, width, height);
-                    let (text_width, text_height, _) = gui_renderer::measure_text(&font, &text, pixel_font_size);
+                Renderable::BigText {
+                    text,
+                    anchor,
+                    shift,
+                    align,
+                    font_size,
+                    color,
+                } => {
+                    let pixel_font_size =
+                        crate::renderer::calculate_pixel_font_size(font_size, width, height);
+                    let (text_width, text_height, _) =
+                        gui_renderer::measure_text(&font, &text, pixel_font_size);
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
-                    let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
+                    let (x, y) =
+                        ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     gui_renderer::draw_text(
                         &mut pixel_buffer,
                         width,
@@ -108,13 +112,24 @@ pub fn start() -> Result<(), JsValue> {
                         &text,
                         (x as f32, y as f32),
                         pixel_font_size,
+                        color,
                     );
                 }
-                Renderable::Text { text, anchor, shift, align, font_size } => {
-                    let pixel_font_size = crate::renderer::calculate_pixel_font_size(font_size, width, height);
-                    let (text_width, text_height, _) = gui_renderer::measure_text(&font, &text, pixel_font_size);
+                Renderable::Text {
+                    text,
+                    anchor,
+                    shift,
+                    align,
+                    font_size,
+                    color,
+                } => {
+                    let pixel_font_size =
+                        crate::renderer::calculate_pixel_font_size(font_size, width, height);
+                    let (text_width, text_height, _) =
+                        gui_renderer::measure_text(&font, &text, pixel_font_size);
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
-                    let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
+                    let (x, y) =
+                        ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
                     gui_renderer::draw_text(
                         &mut pixel_buffer,
                         width,
@@ -122,6 +137,7 @@ pub fn start() -> Result<(), JsValue> {
                         &text,
                         (x as f32, y as f32),
                         pixel_font_size,
+                        color,
                     );
                 }
                 Renderable::Background { gradient } => {
@@ -138,7 +154,6 @@ pub fn start() -> Result<(), JsValue> {
             }
         }
 
-        // 4. 完成したバッファをCanvasに転送
         let mut u8_buffer = Vec::with_capacity(width * height * 4);
         for pixel in pixel_buffer.iter() {
             u8_buffer.extend_from_slice(&[
@@ -156,7 +171,6 @@ pub fn start() -> Result<(), JsValue> {
         .unwrap();
         context.put_image_data(&image_data, 0.0, 0.0).unwrap();
 
-        // 次のフレームを要求
         request_animation_frame(f.borrow().as_ref().unwrap());
     }));
     request_animation_frame(g.borrow().as_ref().unwrap());

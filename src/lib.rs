@@ -16,6 +16,10 @@ mod uefi_setup {
 pub mod app;
 pub mod renderer;
 pub mod ui;
+pub mod parser;
+pub mod model;
+pub mod typing;
+pub mod timestamp;
 
 // "gui" featureが有効な時だけコンパイルされるGUIバックエンドモジュール
 #[cfg(feature = "gui")]

@@ -1,3 +1,5 @@
+// src/ui.rs
+
 // uefi featureが有効な場合、標準のallocクレートをインポート
 #[cfg(feature = "uefi")]
 extern crate alloc;
@@ -11,12 +13,16 @@ use std::vec::Vec;
 
 // uefi と std で使用する String と format! を切り替える
 #[cfg(feature = "uefi")]
-use alloc::{format, string::{String, ToString}};
+use alloc::{
+    format,
+    string::{String, ToString},
+};
 #[cfg(not(feature = "uefi"))]
 use std::string::{String, ToString};
 
-
 use crate::app::{App, AppState};
+use crate::model::{Segment, TypingCorrectnessChar};
+use crate::typing; // For calculate_total_metrics
 
 /// 画面上の描画基準点を定義するenum
 #[derive(Clone, Copy)]
@@ -79,12 +85,9 @@ pub struct Gradient {
 }
 
 /// 画面に描画すべき要素の種類とレイアウト情報を定義するenum
-
 pub enum Renderable {
     /// 背景グラデーション
-    Background {
-        gradient: Gradient,
-    },
+    Background { gradient: Gradient },
     /// 通常のフォントサイズで描画されるテキスト
     Text {
         text: String,
@@ -92,6 +95,7 @@ pub enum Renderable {
         shift: Shift,
         align: Align,
         font_size: FontSize,
+        color: u32,
     },
     /// 大きなフォントサイズで描画されるテキスト
     BigText {
@@ -100,14 +104,15 @@ pub enum Renderable {
         shift: Shift,
         align: Align,
         font_size: FontSize,
+        color: u32,
     },
 }
 
 #[cfg(target_arch = "wasm32")]
-const MENU_ITEMS: [&str; 1] = ["Start Editing"];
+const MENU_ITEMS: [&str; 1] = ["Start Typing"];
 
 #[cfg(not(target_arch = "wasm32"))]
-const MENU_ITEMS: [&str; 2] = ["Start Editing", "Quit"];
+const MENU_ITEMS: [&str; 2] = ["Start Typing", "Quit"];
 
 /// Appの状態を受け取り、描画リスト（UIレイアウト）を構築する
 pub fn build_ui(app: &App) -> Vec<Renderable> {
@@ -117,102 +122,304 @@ pub fn build_ui(app: &App) -> Vec<Renderable> {
         start_color: 0xFF_000010,
         end_color: 0xFF_000000,
     };
-    let editing_gradient = Gradient {
-        start_color: 0xFF_000B00,
+    let typing_gradient = Gradient {
+        start_color: 0xFF_100010,
+        end_color: 0xFF_000000,
+    };
+    let result_gradient = Gradient {
+        start_color: 0xFF_101000,
         end_color: 0xFF_000000,
     };
 
     match app.state {
-        AppState::Menu => {
-            render_list.push(Renderable::Background { gradient: menu_gradient });
-            render_list.push(Renderable::Text {
-                text: "Neknaj Typing MP".to_string(),
-                anchor: Anchor::Center,
-                shift: Shift { x: 0.0, y: -0.3 },
-                align: Align {
-                    horizontal: HorizontalAlign::Center,
-                    vertical: VerticalAlign::Center,
-                },
-                font_size: FontSize::WindowHeight(0.1),
-            });
-            for (i, item) in MENU_ITEMS.iter().enumerate() {
-                let text = if i == app.selected_menu_item {
-                    format!("> {} <", item)
-                } else {
-                    item.to_string()
-                };
-                render_list.push(Renderable::Text {
-                    text: text,
-                    anchor: Anchor::Center,
-                    shift: Shift { x: 0.0, y: -0.1 + (i as f32 * 0.1) },
-                    align: Align {
-                        horizontal: HorizontalAlign::Center,
-                        vertical: VerticalAlign::Center,
-                    },
-                    font_size: FontSize::WindowHeight(0.05),
-                });
-            }
-            render_list.push(Renderable::Text {
-                text: app.status_text.clone(),
-                anchor: Anchor::BottomLeft,
-                shift: Shift { x: 0.01, y: -0.02 },
-                align: Align {
-                    horizontal: HorizontalAlign::Left,
-                    vertical: VerticalAlign::Bottom,
-                },
-                font_size: FontSize::WindowHeight(0.05),
-            });
-            render_list.push(Renderable::Text {
-                text: app.instructions_text.clone(),
-                anchor: Anchor::BottomRight,
-                shift: Shift { x: -0.01, y: -0.02 },
-                align: Align {
-                    horizontal: HorizontalAlign::Right,
-                    vertical: VerticalAlign::Bottom,
-                },
-                font_size: FontSize::WindowHeight(0.05),
-            });
-        }
-        AppState::Editing => {
-            render_list.push(Renderable::Background { gradient: editing_gradient });
-            render_list.push(Renderable::BigText {
-                text: app.input_text.clone(),
-                anchor: Anchor::CenterLeft,
-                shift: Shift { x: 0.02, y: 0.0 },
-                align: Align {
-                    horizontal: HorizontalAlign::Left,
-                    vertical: VerticalAlign::Center,
-                },
-                font_size: FontSize::WindowHeight(0.3),
-            });
-            render_list.push(Renderable::Text {
-                text: app.status_text.clone(),
-                anchor: Anchor::BottomLeft,
-                shift: Shift { x: 0.01, y: -0.02 },
-                align: Align {
-                    horizontal: HorizontalAlign::Left,
-                    vertical: VerticalAlign::Bottom,
-                },
-                font_size: FontSize::WindowHeight(0.05),
-            });
-            render_list.push(Renderable::Text {
-                text: app.instructions_text.clone(),
-                anchor: Anchor::BottomRight,
-                shift: Shift { x: -0.01, y: -0.02 },
-                align: Align {
-                    horizontal: HorizontalAlign::Right,
-                    vertical: VerticalAlign::Bottom,
-                },
-                font_size: FontSize::WindowHeight(0.05),
-            });
-        }
+        AppState::Menu => build_menu_ui(app, &mut render_list, menu_gradient),
+        AppState::Typing => build_typing_ui(app, &mut render_list, typing_gradient),
+        AppState::Result => build_result_ui(app, &mut render_list, result_gradient),
+    }
+
+    // Don't draw common status/instructions text during typing, as it has its own status panel
+    if app.state != AppState::Typing {
+        render_list.push(Renderable::Text {
+            text: app.status_text.clone(),
+            anchor: Anchor::BottomLeft,
+            shift: Shift { x: 0.01, y: -0.02 },
+            align: Align {
+                horizontal: HorizontalAlign::Left,
+                vertical: VerticalAlign::Bottom,
+            },
+            font_size: FontSize::WindowHeight(0.04),
+            color: 0xFF_CCCCCC,
+        });
+        render_list.push(Renderable::Text {
+            text: app.instructions_text.clone(),
+            anchor: Anchor::BottomRight,
+            shift: Shift { x: -0.01, y: -0.02 },
+            align: Align {
+                horizontal: HorizontalAlign::Right,
+                vertical: VerticalAlign::Bottom,
+            },
+            font_size: FontSize::WindowHeight(0.04),
+            color: 0xFF_CCCCCC,
+        });
     }
 
     render_list
 }
 
+fn build_menu_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient) {
+    render_list.push(Renderable::Background { gradient });
+    render_list.push(Renderable::Text {
+        text: "Neknaj Typing MP".to_string(),
+        anchor: Anchor::Center,
+        shift: Shift { x: 0.0, y: -0.3 },
+        align: Align {
+            horizontal: HorizontalAlign::Center,
+            vertical: VerticalAlign::Center,
+        },
+        font_size: FontSize::WindowHeight(0.1),
+        color: 0xFF_FFFFFF,
+    });
+    for (i, item) in MENU_ITEMS.iter().enumerate() {
+        let (text, color) = if i == app.selected_menu_item {
+            (format!("> {} <", item), 0xFF_FFFF00)
+        } else {
+            (item.to_string(), 0xFF_FFFFFF)
+        };
+        render_list.push(Renderable::Text {
+            text,
+            anchor: Anchor::Center,
+            shift: Shift {
+                x: 0.0,
+                y: -0.1 + (i as f32 * 0.1),
+            },
+            align: Align {
+                horizontal: HorizontalAlign::Center,
+                vertical: VerticalAlign::Center,
+            },
+            font_size: FontSize::WindowHeight(0.05),
+            color,
+        });
+    }
+}
+
+fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient) {
+    render_list.push(Renderable::Background { gradient });
+
+    if let Some(model) = &app.typing_model {
+        let current_line_signed = model.status.line;
+        let line_count = model.content.lines.len();
+
+        // --- Layout Constants ---
+        const BIG_FONT_SIZE: FontSize = FontSize::WindowHeight(0.125);
+        const CONTEXT_FONT_SIZE: FontSize = FontSize::WindowHeight(0.05);
+        const RUBY_FONT_SIZE_RATIO: f32 = 0.4;
+        const FONT_WIDTH_RATIO_APPROX: f32 = 0.06; // Approximation for BigText character width
+        const CURSOR_TARGET_X: f32 = 0.3; // Active typing area at 30% of screen width
+
+        // --- Render Context Lines (Previous and Next) ---
+        let context_lines = [-1, 1];
+        for &offset in &context_lines {
+            let line_to_display_signed = current_line_signed + offset;
+            if line_to_display_signed >= 0 && (line_to_display_signed as usize) < line_count {
+                let line_idx = line_to_display_signed as usize;
+                render_list.push(Renderable::Text {
+                    text: model.content.lines[line_idx].to_string(),
+                    anchor: Anchor::TopLeft,
+                    shift: Shift {
+                        x: 0.05,
+                        y: 0.5 + (offset as f32 * 0.2),
+                    },
+                    align: Align {
+                        horizontal: HorizontalAlign::Left,
+                        vertical: VerticalAlign::Center,
+                    },
+                    font_size: CONTEXT_FONT_SIZE,
+                    color: 0xFF_444444,
+                });
+            }
+        }
+
+        // --- Render Current Typing Line ---
+        if (current_line_signed as usize) < line_count {
+            let line_idx = current_line_signed as usize;
+            let line = &model.content.lines[line_idx];
+            let correctness_line = &model.typing_correctness.lines[line_idx];
+            let mut pen_x_offset = 0.0;
+            let mut typed_width = 0.0;
+            let mut target_found = false;
+
+            // Calculate width of already typed portion to implement cursor target
+            for (seg_idx, seg) in line.segments.iter().enumerate() {
+                if target_found {
+                    break;
+                }
+                let reading_text = match seg {
+                    Segment::Plain { text } => text,
+                    Segment::Annotated { base: _, reading } => reading,
+                };
+                for char_idx in 0..reading_text.chars().count() {
+                    if seg_idx == model.status.segment as usize
+                        && char_idx == model.status.char_ as usize
+                    {
+                        target_found = true;
+                        break;
+                    }
+                    typed_width += FONT_WIDTH_RATIO_APPROX;
+                }
+            }
+
+            let start_x = CURSOR_TARGET_X - typed_width;
+
+            // Render each character of the current line segment by segment
+            for (seg_idx, seg) in line.segments.iter().enumerate() {
+                let correctness_seg = &correctness_line.segments[seg_idx];
+
+                match seg {
+                    Segment::Plain { text } | Segment::Annotated { base: text, .. } => {
+                        for (char_idx, character) in text.chars().enumerate() {
+                            render_list.push(Renderable::BigText {
+                                text: character.to_string(),
+                                anchor: Anchor::TopLeft,
+                                shift: Shift {
+                                    x: start_x + pen_x_offset,
+                                    y: 0.5,
+                                },
+                                align: Align {
+                                    horizontal: HorizontalAlign::Left,
+                                    vertical: VerticalAlign::Center,
+                                },
+                                font_size: BIG_FONT_SIZE,
+                                color: 0xFF_AAAAAA, // Default color for base text
+                            });
+                            pen_x_offset += FONT_WIDTH_RATIO_APPROX;
+                        }
+                    }
+                }
+            }
+
+            pen_x_offset = 0.0;
+            for (seg_idx, seg) in line.segments.iter().enumerate() {
+                let correctness_seg = &correctness_line.segments[seg_idx];
+                let reading_text = match seg {
+                    Segment::Plain { text } => text.clone(),
+                    Segment::Annotated { reading, .. } => reading.clone(),
+                };
+                let is_annotated = matches!(seg, Segment::Annotated { .. });
+
+                for (char_idx, character) in reading_text.chars().enumerate() {
+                    let correctness = &correctness_seg.chars[char_idx];
+                    let color = match correctness {
+                        TypingCorrectnessChar::Pending => 0, // Transparent, don't draw overlay
+                        TypingCorrectnessChar::Correct => 0xFF_22FF22,
+                        TypingCorrectnessChar::Incorrect => 0xFF_FF2222,
+                    };
+
+                    if color != 0 {
+                        let y_offset = if is_annotated { 0.5 - 0.08 } else { 0.5 };
+                        let font_size = if is_annotated {
+                            FontSize::WindowHeight(0.125 * RUBY_FONT_SIZE_RATIO)
+                        } else {
+                            BIG_FONT_SIZE
+                        };
+                        render_list.push(Renderable::BigText {
+                            text: character.to_string(),
+                            anchor: Anchor::TopLeft,
+                            shift: Shift {
+                                x: start_x + pen_x_offset,
+                                y: y_offset,
+                            },
+                            align: Align {
+                                horizontal: HorizontalAlign::Left,
+                                vertical: VerticalAlign::Center,
+                            },
+                            font_size,
+                            color,
+                        });
+                    }
+                    pen_x_offset += FONT_WIDTH_RATIO_APPROX;
+                }
+            }
+        }
+
+        // --- Render Status Panel (Bottom Left) ---
+        let metrics = typing::calculate_total_metrics(model);
+        let time = metrics.total_time / 1000.0;
+        let status_items = vec![
+            format!("Speed: {:.2} KPS", metrics.speed),
+            format!("Accuracy: {:.1}%", metrics.accuracy * 100.0),
+            format!("Misses: {}", metrics.miss_count),
+            format!("Time: {:02.0}:{:05.2}", (time / 60.0).floor(), time % 60.0),
+        ];
+
+        for (i, item) in status_items.iter().enumerate() {
+            render_list.push(Renderable::Text {
+                text: item.clone(),
+                anchor: Anchor::BottomLeft,
+                shift: Shift {
+                    x: 0.02,
+                    y: -0.16 + (i as f32 * 0.04),
+                },
+                align: Align {
+                    horizontal: HorizontalAlign::Left,
+                    vertical: VerticalAlign::Bottom,
+                },
+                font_size: FontSize::WindowHeight(0.04),
+                color: 0xFF_DDDDDD,
+            });
+        }
+    }
+}
+
+fn build_result_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient) {
+    render_list.push(Renderable::Background { gradient });
+    render_list.push(Renderable::Text {
+        text: "Result".to_string(),
+        anchor: Anchor::Center,
+        shift: Shift { x: 0.0, y: -0.3 },
+        align: Align {
+            horizontal: HorizontalAlign::Center,
+            vertical: VerticalAlign::Center,
+        },
+        font_size: FontSize::WindowHeight(0.15),
+        color: 0xFF_FFFF00,
+    });
+
+    if let Some(result) = &app.result_model {
+        let metrics = crate::typing::calculate_total_metrics(&result.typing_model);
+        let result_texts = vec![
+            format!("Typed Chars: {}", metrics.type_count),
+            format!("Misses: {}", metrics.miss_count),
+            format!("Time: {:.2}s", metrics.total_time / 1000.0),
+            format!("Accuracy: {:.2}%", metrics.accuracy * 100.0),
+            format!("Speed: {:.2} chars/sec", metrics.speed),
+        ];
+
+        for (i, text) in result_texts.iter().enumerate() {
+            render_list.push(Renderable::Text {
+                text: text.clone(),
+                anchor: Anchor::Center,
+                shift: Shift {
+                    x: 0.0,
+                    y: -0.1 + (i as f32 * 0.08),
+                },
+                align: Align {
+                    horizontal: HorizontalAlign::Center,
+                    vertical: VerticalAlign::Center,
+                },
+                font_size: FontSize::WindowHeight(0.05),
+                color: 0xFF_FFFFFF,
+            });
+        }
+    }
+}
+
 /// AnchorとShiftから、基準となる座標(x, y)を計算する
-pub fn calculate_anchor_position(anchor: Anchor, shift: Shift, width: usize, height: usize) -> (i32, i32) {
+pub fn calculate_anchor_position(
+    anchor: Anchor,
+    shift: Shift,
+    width: usize,
+    height: usize,
+) -> (i32, i32) {
     let (w, h) = (width as i32, height as i32);
     let base_pos = match anchor {
         Anchor::TopLeft => (0, 0),
