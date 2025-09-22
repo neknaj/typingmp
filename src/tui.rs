@@ -37,6 +37,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     terminal::enable_raw_mode()?;
     execute!(stdout, terminal::EnterAlternateScreen, cursor::Hide)?;
     let mut app = App::new();
+    App::on_event(&mut app, AppEvent::Start);
 
     // メインループ
     while !app.should_quit {

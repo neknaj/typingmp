@@ -29,6 +29,7 @@ pub fn run() -> Status {
     let font = FontRef::try_from_slice(font_data).expect("Failed to load font");
 
     let mut app = App::new();
+    App::on_event(&mut app, AppEvent::Start);
 
     // Create timer event for the main loop tick
     let timer_event = unsafe { uefi::boot::create_event(EventType::TIMER, Tpl::APPLICATION, None, None).unwrap() };
@@ -74,7 +75,7 @@ pub fn run() -> Status {
         }
 
         // Render
-        let mut pixel_buffer: alloc::vec::Vec<BltPixel> = alloc::vec![BltPixel::new(((BG_COLOR) & 0xFF) as u8, ((BG_COLOR >> 8) & 0xFF) as u8, ((BG_COLOR >> 16) & 0xFF) as u8); width * height];
+        let mut pixel_buffer: alloc::vec::Vec<BltPixel> = alloc::vec![BltPixel::new(((BG_COLOR >> 16) & 0xFF) as u8, ((BG_COLOR >> 8) & 0xFF) as u8, ((BG_COLOR) & 0xFF) as u8); width * height];
 
         let render_list = ui::build_ui(&app);
 
@@ -99,6 +100,22 @@ pub fn run() -> Status {
                         &mut pixel_buffer, width, &font, text.as_str(),
                         (x as f32, y as f32), pixel_font_size,
                     );
+                }
+                Renderable::Background { gradient } => {
+                    let mut temp_buffer: Vec<u32> = Vec::with_capacity(width * height);
+                    for pixel in pixel_buffer.iter() {
+                        temp_buffer.push((pixel.red as u32) << 16 | (pixel.green as u32) << 8 | (pixel.blue as u32));
+                    }
+
+                    crate::renderer::draw_linear_gradient(
+                        &mut temp_buffer, width, height,
+                        gradient.start_color, gradient.end_color,
+                        (0.0, 0.0), (width as f32, height as f32),
+                    );
+
+                    for (i, color) in temp_buffer.iter().enumerate() {
+                        pixel_buffer[i] = BltPixel::new(((color >> 16) & 0xFF) as u8, ((color >> 8) & 0xFF) as u8, (color & 0xFF) as u8);
+                    }
                 }
             }
         }
@@ -160,7 +177,7 @@ fn draw_glyph_to_pixel_buffer(buffer: &mut [BltPixel], stride: usize, outlined: 
             let b = (text_b * c + bg_b * (1.0 - c)) as u8;
             let g = (text_g * c + bg_g * (1.0 - c)) as u8;
             let r = (text_r * c + bg_r * (1.0 - c)) as u8;
-            buffer[index] = BltPixel::new(b, g, r);
+            buffer[index] = BltPixel::new(r, g, b);
         }
     });
 }

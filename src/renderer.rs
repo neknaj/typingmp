@@ -17,9 +17,48 @@ use ab_glyph::{point, Font, FontRef, OutlinedGlyph, PxScale, ScaleFont};
 use crate::ui::FontSize;
 
 /// テキストの描画色
-pub const TEXT_COLOR: u32 = 0x00_FFFFFF;
+pub const TEXT_COLOR: u32 = 0xFF_FFFFFF;
 /// 背景の描画色
-pub const BG_COLOR: u32 = 0x00_101010;
+pub const BG_COLOR: u32 = 0x00_000000;
+/// グラデーションの開始色
+pub const GRADIENT_START_COLOR: u32 = 0xFF_000020;
+/// グラデーションの終了色
+pub const GRADIENT_END_COLOR: u32 = 0xFF_000000;
+
+/// ピクセルバッファに線形グラデーションを描画する
+pub fn draw_linear_gradient(
+    buffer: &mut [u32], width: usize, height: usize,
+    start_color: u32, end_color: u32,
+    start_point: (f32, f32), end_point: (f32, f32),
+) {
+    let (x0, y0) = start_point;
+    let (x1, y1) = end_point;
+
+    let dx = x1 - x0;
+    let dy = y1 - y0;
+    let len_sq = dx * dx + dy * dy;
+
+    for y in 0..height {
+        for x in 0..width {
+            let p_x = x as f32;
+            let p_y = y as f32;
+
+            // ベクトル (P - A) と (B - A) のドット積を計算
+            let dot_product = (p_x - x0) * dx + (p_y - y0) * dy;
+
+            // 補間比率を計算し、0.0から1.0の範囲にクランプ
+            let ratio = if len_sq == 0.0 { 0.0 } else { (dot_product / len_sq).clamp(0.0, 1.0) };
+
+            let r = (((start_color >> 16) & 0xFF) as f32 * (1.0 - ratio) + ((end_color >> 16) & 0xFF) as f32 * ratio) as u32;
+            let g = (((start_color >> 8) & 0xFF) as f32 * (1.0 - ratio) + ((end_color >> 8) & 0xFF) as f32 * ratio) as u32;
+            let b = (((start_color) & 0xFF) as f32 * (1.0 - ratio) + ((end_color) & 0xFF) as f32 * ratio) as u32;
+            let interpolated_color = (0xFF << 24) | (r << 16) | (g << 8) | b; // Alpha channel is always opaque
+
+            let index = y * width + x;
+            buffer[index] = interpolated_color;
+        }
+    }
+}
 
 /// Calculates the actual pixel font size based on the FontSize enum and window dimensions.
 pub fn calculate_pixel_font_size(font_size: FontSize, width: usize, height: usize) -> f32 {

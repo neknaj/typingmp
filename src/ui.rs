@@ -5,8 +5,7 @@ extern crate alloc;
 // uefi と std で使用する Vec と vec! を切り替える
 #[cfg(feature = "uefi")]
 use alloc::vec::Vec;
-#[cfg(feature = "uefi")]
-use alloc::vec;
+
 #[cfg(not(feature = "uefi"))]
 use std::vec::Vec;
 
@@ -72,9 +71,20 @@ pub enum FontSize {
     WindowAreaSqrt(f32),
 }
 
+/// グラデーションの定義
+#[derive(Clone, Copy)]
+pub struct Gradient {
+    pub start_color: u32,
+    pub end_color: u32,
+}
+
 /// 画面に描画すべき要素の種類とレイアウト情報を定義するenum
 
 pub enum Renderable {
+    /// 背景グラデーション
+    Background {
+        gradient: Gradient,
+    },
     /// 通常のフォントサイズで描画されるテキスト
     Text {
         text: String,
@@ -103,8 +113,18 @@ const MENU_ITEMS: [&str; 2] = ["Start Editing", "Quit"];
 pub fn build_ui(app: &App) -> Vec<Renderable> {
     let mut render_list = Vec::new();
 
+    let menu_gradient = Gradient {
+        start_color: 0xFF_000010,
+        end_color: 0xFF_000000,
+    };
+    let editing_gradient = Gradient {
+        start_color: 0xFF_001000,
+        end_color: 0xFF_000000,
+    };
+
     match app.state {
         AppState::Menu => {
+            render_list.push(Renderable::Background { gradient: menu_gradient });
             render_list.push(Renderable::Text {
                 text: "Neknaj Typing MP".to_string(),
                 anchor: Anchor::Center,
@@ -144,6 +164,7 @@ pub fn build_ui(app: &App) -> Vec<Renderable> {
             });
         }
         AppState::Editing => {
+            render_list.push(Renderable::Background { gradient: editing_gradient });
             render_list.push(Renderable::BigText {
                 text: app.input_text.clone(),
                 anchor: Anchor::CenterLeft,

@@ -18,8 +18,16 @@ pub enum AppState {
     Editing,
 }
 
+#[cfg(target_arch = "wasm32")]
+const MENU_ITEM_COUNT: usize = 1;
+
+#[cfg(not(target_arch = "wasm32"))]
+const MENU_ITEM_COUNT: usize = 2;
+
 /// アプリケーションで発生するイベントを定義するenum
 pub enum AppEvent {
+    Start,
+    ChangeScene,
     /// 文字入力イベント
     Char(char),
     /// バックスペースイベント
@@ -57,7 +65,7 @@ impl App {
             state: AppState::Menu,
             selected_menu_item: 0,
             input_text: String::new(),
-            status_text: "Welcome to Neknaj Typing Multi-Platform".to_string(),
+            status_text: String::new(),
             should_quit: false,
         }
     }
@@ -66,6 +74,7 @@ impl App {
     pub fn on_event(&mut self, event: AppEvent) {
         match self.state {
             AppState::Menu => {
+                self.status_text = "Welcome to Neknaj Typing Multi-Platform".to_string();
                 match event {
                     AppEvent::Up => {
                         if self.selected_menu_item > 0 {
@@ -73,8 +82,7 @@ impl App {
                         }
                     }
                     AppEvent::Down => {
-                        // Assuming 2 menu items: "Start Editing" and "Quit"
-                        if self.selected_menu_item < 1 {
+                        if self.selected_menu_item < MENU_ITEM_COUNT - 1 {
                             self.selected_menu_item += 1;
                         }
                     }
@@ -82,9 +90,15 @@ impl App {
                         match self.selected_menu_item {
                             0 => {
                                 self.state = AppState::Editing;
-                                self.status_text = "Start typing! (ESC to return to menu)".to_string();
+                                App::on_event(self, AppEvent::ChangeScene);
+                                self.input_text.clear();
                             }
-                            1 => self.should_quit = true,
+                            1 => {
+                                #[cfg(not(target_arch = "wasm32"))]
+                                {
+                                    self.should_quit = true;
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -92,6 +106,7 @@ impl App {
                 }
             }
             AppState::Editing => {
+                self.status_text = "Start typing! (ESC to return to menu)".to_string();
                 match event {
                     AppEvent::Char(c) => {
                         if c != '\u{0}' { // NUL文字は無視する
@@ -106,7 +121,7 @@ impl App {
                     }
                     AppEvent::Escape => {
                         self.state = AppState::Menu;
-                        self.status_text = "Welcome to Neknaj Typing Multi-Platform".to_string();
+                        App::on_event(self, AppEvent::ChangeScene);
                     }
                     _ => {}
                 }

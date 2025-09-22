@@ -1,5 +1,5 @@
 use crate::app::{App, AppEvent};
-use crate::renderer::{gui_renderer, BG_COLOR};
+use crate::renderer::{gui_renderer};
 use crate::ui::{self, Renderable};
 use ab_glyph::FontRef;
 use std::cell::RefCell;
@@ -8,7 +8,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::Clamped;
 use web_sys::{CanvasRenderingContext2d, ImageData, KeyboardEvent};
 
-const NORMAL_FONT_SIZE: f32 = 25.0;
+
 
 /// WASMモジュールのエントリーポイント
 #[wasm_bindgen(start)]
@@ -30,6 +30,7 @@ pub fn start() -> Result<(), JsValue> {
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     let app = Rc::new(RefCell::new(App::new()));
+    App::on_event(&mut app, AppEvent::Start);
 
     let size = Rc::new(RefCell::new((0, 0)));
 
@@ -83,11 +84,11 @@ pub fn start() -> Result<(), JsValue> {
     let g = f.clone();
     *g.borrow_mut() = Some(Closure::<dyn FnMut()>::new(move || {
         let (width, height) = *size.borrow();
-        let big_font_size = height as f32 * 0.5;
+        let _big_font_size = height as f32 * 0.5;
         let app = app.borrow(); // 描画中は不変借用
 
         // 1. 背景色でピクセルバッファをクリア
-        let mut pixel_buffer = vec![BG_COLOR; width * height];
+        let mut pixel_buffer = vec![0u32; width * height];
 
         // 2. UI定義から描画リストを取得
         let render_list = ui::build_ui(&app);
@@ -121,6 +122,17 @@ pub fn start() -> Result<(), JsValue> {
                         &text,
                         (x as f32, y as f32),
                         pixel_font_size,
+                    );
+                }
+                Renderable::Background { gradient } => {
+                    crate::renderer::draw_linear_gradient(
+                        &mut pixel_buffer,
+                        width,
+                        height,
+                        gradient.start_color,
+                        gradient.end_color,
+                        (0.0, 0.0),
+                        (width as f32, height as f32),
                     );
                 }
             }

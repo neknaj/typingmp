@@ -3,7 +3,7 @@
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
 use crate::app::{App, AppState, AppEvent};
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
-use crate::renderer::{gui_renderer, BG_COLOR};
+use crate::renderer::{gui_renderer, draw_linear_gradient};
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
 use crate::ui::{self, Renderable};
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
@@ -31,6 +31,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     window.set_target_fps(60);
     let mut app = App::new();
+    App::on_event(&mut app, AppEvent::Start);
 
     // メインループ
     while window.is_open() && !app.should_quit {
@@ -43,7 +44,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         handle_input(&mut window, &mut app);
 
         // 1. 背景色でピクセルバッファをクリア
-        let mut pixel_buffer = vec![BG_COLOR; width * height];
+        let mut pixel_buffer = vec![0u32; width * height];
 
         // 2. UI定義から描画リストを取得
         let render_list = ui::build_ui(&app);
@@ -51,6 +52,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         // 3. 描画リストの各要素を解釈して描画
         for item in render_list {
             match item {
+                Renderable::Background { gradient } => {
+                    draw_linear_gradient(
+                        &mut pixel_buffer, width, height,
+                        gradient.start_color, gradient.end_color,
+                        (0.0, 0.0), (width as f32, height as f32),
+                    );
+                }
                 Renderable::BigText { text, anchor, shift, align, font_size } => {
                     let pixel_font_size = crate::renderer::calculate_pixel_font_size(font_size, width, height);
                     let (text_width, text_height, _ascent) = gui_renderer::measure_text(&font, &text, pixel_font_size);
