@@ -139,7 +139,7 @@ fn key_to_char(key: Key, is_shift: bool) -> Option<char> {
         (Key::X, false) => Some('x'), (Key::X, true) => Some('X'),
         (Key::Y, false) => Some('y'), (Key::Y, true) => Some('Y'),
         (Key::Z, false) => Some('z'), (Key::Z, true) => Some('Z'),
-        (Key::Key0, false) => Some('0'), (Key::Key0, true) => Some(')'),
+        (Key::Key0, false) => Some('0'), (Key::Key0, true) => None,
         (Key::Key1, false) => Some('1'), (Key::Key1, true) => Some('!'),
         (Key::Key2, false) => Some('2'), (Key::Key2, true) => Some('"'),
         (Key::Key3, false) => Some('3'), (Key::Key3, true) => Some('#'),

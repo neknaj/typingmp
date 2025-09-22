@@ -163,6 +163,14 @@ impl App {
                 self.status_text = "Start typing!".to_string();
                 match event {
                     AppEvent::Char(c) => {
+                        #[cfg(any(not(feature = "tui"), feature = "gui"))]
+                        {
+                            #[cfg(not(target_arch = "wasm32"))]
+                            println!("[APP] Received char: '{}'", c);
+                            #[cfg(target_arch = "wasm32")]
+                            web_sys::console::log_1(&format!("[APP] Received char: '{}'", c).into());
+                        }
+
                         if let Some(model) = self.typing_model.take() {
                             match typing::key_input(model, c) {
                                 Model::Typing(new_model) => {

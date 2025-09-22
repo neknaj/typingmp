@@ -10,13 +10,72 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::Clamped;
 use web_sys::{CanvasRenderingContext2d, ImageData, KeyboardEvent};
 
-// (初期化処理、リサイズ、キーイベントリスナは変更なし)
-
 #[wasm_bindgen(start)]
 #[cfg(feature = "wasm")]
 pub fn start() -> Result<(), JsValue> {
-    // ... (既存のセットアップコード) ...
+    console_error_panic_hook::set_once();
+    let window = web_sys::window().unwrap();
+    let document = window.document().unwrap();
+    let body = document.body().unwrap();
 
+    let canvas = document.create_element("canvas")?.dyn_into::<web_sys::HtmlCanvasElement>()?;
+    body.append_child(&canvas)?;
+    let context = canvas.get_context("2d")?.unwrap().dyn_into::<CanvasRenderingContext2d>()?;
+
+    let font = FontRef::try_from_slice(include_bytes!("../fonts/NotoSerifJP-Regular.ttf"))
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+    let app = Rc::new(RefCell::new(App::new()));
+    app.borrow_mut().on_event(AppEvent::Start);
+
+    let size = Rc::new(RefCell::new((0, 0)));
+
+    // 初期サイズ設定とリサイズハンドラ
+    {
+        let window_clone = window.clone();
+        let canvas_clone = canvas.clone();
+        let size_clone = size.clone();
+        let resize_handler = Closure::<dyn FnMut()>::new(move || {
+            let width = window_clone.inner_width().unwrap().as_f64().unwrap() as u32;
+            let height = window_clone.inner_height().unwrap().as_f64().unwrap() as u32;
+            canvas_clone.set_width(width);
+            canvas_clone.set_height(height);
+            *size_clone.borrow_mut() = (width as usize, height as usize);
+        });
+        window.add_event_listener_with_callback("resize", resize_handler.as_ref().unchecked_ref())?;
+        
+        let width = window.inner_width().unwrap().as_f64().unwrap() as u32;
+        let height = window.inner_height().unwrap().as_f64().unwrap() as u32;
+        canvas.set_width(width);
+        canvas.set_height(height);
+        *size.borrow_mut() = (width as usize, height as usize);
+        
+        resize_handler.forget();
+    }
+
+    // キーボードイベントのリスナーを設定
+    {
+        let app_clone = app.clone();
+        let closure = Closure::<dyn FnMut(_)>::new(move |event: KeyboardEvent| {
+            // ブラウザのデフォルト動作（フォーム送信など）を抑制する
+            event.prevent_default();
+
+            let mut app = app_clone.borrow_mut();
+            match event.key().as_str() {
+                "ArrowUp" => app.on_event(AppEvent::Up),
+                "ArrowDown" => app.on_event(AppEvent::Down),
+                "Backspace" => app.on_event(AppEvent::Backspace),
+                "Enter" => app.on_event(AppEvent::Enter),
+                "Escape" => app.on_event(AppEvent::Escape),
+                key if key.len() == 1 => app.on_event(AppEvent::Char(key.chars().next().unwrap())),
+                _ => {}
+            }
+        });
+        document.add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref())?;
+        closure.forget();
+    }
+
+    // requestAnimationFrameによるメインループ
     let f = Rc::new(RefCell::new(None));
     let g = f.clone();
     *g.borrow_mut() = Some(Closure::<dyn FnMut()>::new(move || {
@@ -24,7 +83,6 @@ pub fn start() -> Result<(), JsValue> {
         let app = app.borrow();
 
         let mut pixel_buffer = vec![0u32; width * height];
-        // build_uiにfontとサイズを渡す
         let render_list = ui::build_ui(&app, &font, width, height);
 
         for item in render_list {

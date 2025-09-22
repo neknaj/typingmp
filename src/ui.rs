@@ -17,7 +17,7 @@ use alloc::{format, string::{String, ToString}};
 use std::string::{String, ToString};
 
 use crate::app::{App, AppState};
-use crate::model::{TypingCorrectnessChar, TypingCorrectnessLine, TypingStatus};
+// 不要なuse文を削除
 use crate::typing; // For calculate_total_metrics
 use crate::typing_renderer; // 新しいモジュールをインポート
 use ab_glyph::FontRef; // FontRefを渡すために必要
@@ -93,7 +93,7 @@ pub enum Renderable {
         font_size: FontSize,
         color: u32,
     },
-    BigText { // BigText is kept for other potential uses (like result screen title)
+    BigText {
         text: String,
         anchor: Anchor,
         shift: Shift,
@@ -194,7 +194,7 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
                 });
             }
         }
-
+        
         // --- Call the new typing_renderer to build the main view ---
         if (current_line_signed as usize) < line_count {
             let line_idx = current_line_signed as usize;
@@ -208,7 +208,7 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
             );
             render_list.extend(typing_renderables);
         }
-
+        
         // --- Render Status Panel (Bottom Left) ---
         let metrics = typing::calculate_total_metrics(model);
         let time = metrics.total_time / 1000.0;

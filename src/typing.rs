@@ -6,10 +6,14 @@ use crate::timestamp::now;
 
 // Helper function for logging to handle both native and wasm targets.
 fn log(message: &str) {
-    #[cfg(not(target_arch = "wasm32"))]
-    println!("{}", message);
-    #[cfg(target_arch = "wasm32")]
-    web_sys::console::log_1(&message.into());
+    // TUIモード (`tui` featureが有効で `gui` featureが無効) の場合はログを出力しない
+    #[cfg(any(not(feature = "tui"), feature = "gui"))]
+    {
+        #[cfg(not(target_arch = "wasm32"))]
+        println!("{}", message);
+        #[cfg(target_arch = "wasm32")]
+        web_sys::console::log_1(&message.into());
+    }
 }
 
 

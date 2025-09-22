@@ -603,6 +603,7 @@ dependencies = [
  "core_maths",
  "crossterm",
  "getrandom 0.2.16",
+ "js-sys",
  "log",
  "minifb",
  "raw-window-handle",

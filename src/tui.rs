@@ -44,47 +44,42 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         let (cols, rows) = (cols as usize, rows as usize);
 
         let mut char_buffer = vec![' '; cols * rows];
-        let render_list = ui::build_ui(&app);
+        
+        // 全ての状態で共通のUI構築と描画ロジックを使用する
+        let render_list = ui::build_ui(&app, &font, cols, rows);
 
         for item in render_list {
             match item {
-                Renderable::BigText {
-                    text, font_size, ..
-                } => {
-                    let text_layer = tui_renderer::render(&font, &text, cols, rows, font_size);
-                    for (i, ch) in text_layer.iter().enumerate() {
-                        if *ch != ' ' {
-                            char_buffer[i] = *ch;
-                        }
-                    }
-                }
-                Renderable::Text {
-                    text,
-                    anchor,
-                    shift,
-                    align,
-                    ..
-                } => {
-                    let (text_width, text_height) = tui_renderer::measure_text(&text);
-                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, cols, rows);
-                    let (mut x, y) =
-                        ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
-
-                    if y < 0 || y >= rows as i32 {
-                        continue;
-                    }
-                    for c in text.chars() {
-                        if x >= 0 && x < cols as i32 {
-                            char_buffer[(y as usize) * cols + (x as usize)] = c;
-                        }
-                        x += 1;
-                    }
-                }
                 Renderable::Background { .. } => {
                     // TUIでは背景グラデーションは描画しない
                 }
+                Renderable::Text { text, anchor, shift, align, .. } |
+                Renderable::BigText { text, anchor, shift, align, .. } => {
+                    // 1. TUIグリッド上でのテキストサイズを計算
+                    let (text_width, text_height) = tui_renderer::measure_text(&text);
+                    
+                    // 2. アンカー位置を計算
+                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, cols, rows);
+
+                    // 3. 揃えを考慮した最終的な描画開始位置(左上)を計算
+                    let (start_x, start_y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
+
+                    // 4. バッファに文字を描画（範囲チェック付き）
+                    if start_y >= 0 && start_y < rows as i32 {
+                        for (i, c) in text.chars().enumerate() {
+                            let current_x = start_x + i as i32;
+                            if current_x >= 0 && current_x < cols as i32 {
+                                let index = (start_y as usize * cols) + current_x as usize;
+                                if index < char_buffer.len() {
+                                    char_buffer[index] = c;
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
+        
         draw_buffer_to_terminal(&mut stdout, &char_buffer, cols)?;
         handle_input(&mut app)?;
     }
@@ -93,6 +88,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     terminal::disable_raw_mode()?;
     Ok(())
 }
+
 
 /// TUIアプリケーションのメイン関数 (UEFI版)
 #[cfg(feature = "uefi")]
