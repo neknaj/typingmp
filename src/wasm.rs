@@ -30,7 +30,7 @@ pub fn start() -> Result<(), JsValue> {
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     let app = Rc::new(RefCell::new(App::new()));
-    App::on_event(&mut app, AppEvent::Start);
+    app.borrow_mut().on_event(AppEvent::Start);
 
     let size = Rc::new(RefCell::new((0, 0)));
 

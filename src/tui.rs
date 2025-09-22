@@ -80,6 +80,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         x += 1;
                     }
                 }
+                Renderable::Background { .. } => {
+                    // TUIでは背景グラデーションは描画しない
+                }
             }
         }
         draw_buffer_to_terminal(&mut stdout, &char_buffer, cols)?;
