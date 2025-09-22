@@ -1,143 +1,129 @@
 // src/typing.rs
 
-use crate::model::{
-    Content, Model, ResultModel, Scroll, Segment, TypingCorrectnessChar, TypingCorrectnessContent,
-    TypingCorrectnessLine, TypingCorrectnessSegment, TypingInput, TypingMetrics, TypingModel,
-    TypingSession,
-};
+use crate::model::{Model, TypingModel, ResultModel, TypingCorrectnessContent, TypingSession, TypingInput, TypingCorrectnessLine, TypingCorrectnessSegment, TypingCorrectnessChar, TypingMetrics};
+use crate::model::{Content, Segment};
 use crate::timestamp::now;
 
-pub fn key_input(mut model_: TypingModel, input: char) -> Model {
-    let current_time = now();
-    let current_line_num = model_.status.line;
+// Helper function for logging to handle both native and wasm targets.
+fn log(message: &str) {
+    #[cfg(not(target_arch = "wasm32"))]
+    println!("{}", message);
+    #[cfg(target_arch = "wasm32")]
+    web_sys::console::log_1(&message.into());
+}
 
-    if model_.content.lines.len() <= current_line_num as usize {
-        return Model::Typing(model_); // Already finished
+
+pub fn key_input(mut model_: TypingModel, input: char) -> Model {
+    log(&format!("\n--- key_input: '{}' ---", input));
+    log(&format!("  [State Before] line: {}, seg: {}, char: {}, unconfirmed: {:?}",
+        model_.status.line, model_.status.segment, model_.status.char_, model_.status.unconfirmed));
+
+    let current_time = now();
+    let current_line = model_.status.line;
+    
+    if model_.content.lines.len() <= current_line as usize {
+        log("  [Result] Typing already finished. No action.");
+        return Model::Typing(model_);
     }
 
-    // Start a new session if it's the very first input or if there's a pause
-    let should_start_new_session = if model_.user_input.is_empty() {
-        true
-    } else {
-        match model_.user_input.last() {
-            Some(last_session) if last_session.line != current_line_num => true,
-            Some(last_session) => {
-                if let Some(last_input) = last_session.inputs.last() {
-                    (current_time - last_input.timestamp) > 1000.0 // 1-second pause
-                } else {
-                    true
-                }
-            }
-            None => true,
-        }
+    // (セッション開始ロジックは変更なし)
+    let should_start_new_session = if model_.user_input.is_empty() { true } else {
+        model_.user_input.last().map_or(true, |s| s.inputs.last().map_or(true, |i| (current_time - i.timestamp) > 1000.0))
     };
 
     if should_start_new_session {
-        model_.user_input.push(TypingSession {
-            line: current_line_num,
-            inputs: Vec::new(),
-        });
+        model_.user_input.push(TypingSession { line: current_line, inputs: Vec::new() });
     }
-
     let current_session = model_.user_input.last_mut().unwrap();
-
-    let remaining_s = match &model_.content.lines[model_.status.line as usize].segments
-        [model_.status.segment as usize]
-    {
+    
+    let remaining_s = match &model_.content.lines[model_.status.line as usize].segments[model_.status.segment as usize] {
         Segment::Plain { text } => text.clone(),
         Segment::Annotated { reading, .. } => reading.clone(),
     };
-    let remaining: Vec<char> = remaining_s.chars().collect();
+    log(&format!("  [Target Text] remaining: '{}'", remaining_s));
+    let remaining = remaining_s.chars().collect::<Vec<char>>();
 
+    // --- EXPECT LIST GENERATION: REVERTED TO OLD, ROBUST LOGIC ---
     let mut expect = Vec::new();
     for (key, values) in model_.layout.mapping.iter() {
         for v in values {
             let mut flag = true;
             let start_index = model_.status.char_ as usize;
-            if start_index + key.len() > remaining.len() {
-                flag = false;
-            } else {
-                for (i, c) in key.chars().enumerate() {
-                    if c != remaining[start_index + i] {
+            
+            // Check 1: Does the Japanese key match the target text?
+            for (i, c) in key.chars().enumerate() {
+                if let Some(rs_char) = remaining_s.chars().nth(start_index + i) {
+                    if c != rs_char {
                         flag = false;
                         break;
                     }
+                } else {
+                    flag = false;
+                    break;
                 }
             }
             if !flag {
                 continue;
             }
 
-            for (i, c) in v.chars().enumerate() {
-                if i < model_.status.unconfirmed.len() {
-                    if model_.status.unconfirmed[i] != c {
+            // Check 2: Does the romaji value match the unconfirmed input?
+            for (i, unconfirmed_char) in model_.status.unconfirmed.iter().enumerate() {
+                if let Some(v_char) = v.chars().nth(i) {
+                    if *unconfirmed_char != v_char {
                         flag = false;
                         break;
                     }
+                } else {
+                    flag = false;
+                    break;
                 }
             }
+
             if flag {
                 expect.push((key.clone(), v.chars().collect::<Vec<char>>()));
             }
         }
     }
+    // --- END OF EXPECT LIST GENERATION ---
+
+    log(&format!("  [Expect List] Found {} candidates:", expect.len()));
+    for (key, val) in &expect {
+        log(&format!("    - Key: '{}', Value: {:?}", key, val));
+    }
 
     let mut is_correct = false;
     let mut is_finished = false;
-    for (key, e) in expect {
+    for (key,e) in expect {
         if e.get(model_.status.unconfirmed.len()) == Some(&input) {
             is_correct = true;
             model_.status.last_wrong_keydown = None;
-
+            
             if e.len() == model_.status.unconfirmed.len() + 1 {
                 let char_pos = model_.status.char_ as usize;
-                let segment = &mut model_.typing_correctness.lines[model_.status.line as usize]
-                    .segments[model_.status.segment as usize];
-
+                let segment = &mut model_.typing_correctness.lines[model_.status.line as usize].segments[model_.status.segment as usize];
                 let mut has_error = false;
                 for i in 0..key.chars().count() {
-                    if segment.chars.get(char_pos + i) == Some(&TypingCorrectnessChar::Incorrect) {
-                        has_error = true;
-                        break;
-                    }
+                    if segment.chars.get(char_pos + i) == Some(&TypingCorrectnessChar::Incorrect) { has_error = true; break; }
                 }
-
                 for i in 0..key.chars().count() {
-                    let correctness = if !has_error {
-                        TypingCorrectnessChar::Correct
-                    } else {
-                        TypingCorrectnessChar::Incorrect
-                    };
-                    if let Some(c) = segment.chars.get_mut(char_pos + i) {
-                        *c = correctness;
-                    }
+                    let correctness = if !has_error { TypingCorrectnessChar::Correct } else { TypingCorrectnessChar::Incorrect };
+                    if let Some(c) = segment.chars.get_mut(char_pos + i) { *c = correctness; }
                 }
 
-                if remaining.len() == char_pos + key.chars().count() {
-                    if model_.content.lines[model_.status.line as usize]
-                        .segments
-                        .len()
-                        == model_.status.segment as usize + 1
-                    {
+                if remaining.len() == model_.status.char_ as usize + key.chars().count() {
+                    if model_.content.lines[model_.status.line as usize].segments.len() == model_.status.segment as usize + 1 {
                         if model_.content.lines.len() == model_.status.line as usize + 1 {
-                            model_.status.line += 1;
-                            is_finished = true;
+                            model_.status.line += 1; is_finished = true;
                         } else {
-                            model_.status.char_ = 0;
-                            model_.status.segment = 0;
-                            model_.status.line += 1;
-                            model_.status.unconfirmed.clear();
-                            model_.scroll.scroll = model_.scroll.max;
+                            model_.status.char_ = 0; model_.status.segment = 0; model_.status.line += 1;
                         }
                     } else {
-                        model_.status.char_ = 0;
-                        model_.status.segment += 1;
-                        model_.status.unconfirmed.clear();
+                        model_.status.char_ = 0; model_.status.segment += 1;
                     }
                 } else {
                     model_.status.char_ += key.chars().count() as i32;
-                    model_.status.unconfirmed.clear();
                 }
+                model_.status.unconfirmed.clear();
             } else {
                 model_.status.unconfirmed.push(input);
             }
@@ -145,54 +131,42 @@ pub fn key_input(mut model_: TypingModel, input: char) -> Model {
         }
     }
 
-    current_session.inputs.push(TypingInput {
-        key: input,
-        timestamp: current_time,
-        is_correct,
-    });
-
+    current_session.inputs.push(TypingInput { key: input, timestamp: current_time, is_correct });
+    
     if !is_correct {
         model_.status.last_wrong_keydown = Some(input);
         let char_pos = model_.status.char_ as usize;
-        let segment = &mut model_.typing_correctness.lines[model_.status.line as usize].segments
-            [model_.status.segment as usize];
-        if let Some(c) = segment.chars.get_mut(char_pos) {
-            *c = TypingCorrectnessChar::Incorrect;
-        }
+        let segment = &mut model_.typing_correctness.lines[model_.status.line as usize].segments[model_.status.segment as usize];
+        if let Some(c) = segment.chars.get_mut(char_pos) { *c = TypingCorrectnessChar::Incorrect; }
     }
 
+    log(&format!("  [Result] is_correct: {}, is_finished: {}", is_correct, is_finished));
+    log(&format!("  [State After] line: {}, seg: {}, char: {}, unconfirmed: {:?}",
+        model_.status.line, model_.status.segment, model_.status.char_, model_.status.unconfirmed));
+
     if is_finished {
-        Model::Result(ResultModel {
-            typing_model: model_,
-        })
+        Model::Result(ResultModel { typing_model: model_ })
     } else {
         Model::Typing(model_)
     }
 }
 
 pub fn create_typing_correctness_model(content: &Content) -> TypingCorrectnessContent {
-    let lines = content
-        .lines
-        .iter()
-        .map(|line| {
-            let segments = line
-                .segments
-                .iter()
-                .map(|segment| {
-                    let target_text = match segment {
-                        Segment::Plain { text } => text,
-                        Segment::Annotated { reading, .. } => reading,
-                    };
-                    let chars = target_text
-                        .chars()
-                        .map(|_| TypingCorrectnessChar::Pending)
-                        .collect();
-                    TypingCorrectnessSegment { chars }
-                })
+    let mut lines = Vec::new();
+    for line in &content.lines {
+        let mut segments = Vec::new();
+        for segment in &line.segments {
+            let target_text = match segment {
+                Segment::Plain { text } => text,
+                Segment::Annotated { base: _, reading } => reading,
+            };
+            let chars = target_text.chars()
+                .map(|_| TypingCorrectnessChar::Pending)
                 .collect();
-            TypingCorrectnessLine { segments }
-        })
-        .collect();
+            segments.push(TypingCorrectnessSegment { chars });
+        }
+        lines.push(TypingCorrectnessLine { segments });
+    }
     TypingCorrectnessContent { lines }
 }
 
@@ -221,14 +195,12 @@ pub fn calculate_total_metrics(model: &TypingModel) -> TypingMetrics {
     let mut metrics = TypingMetrics::new();
     let mut total_type_count = 0;
     let mut total_miss_count = 0;
-
+    
     let mut first_input_time = f64::MAX;
     let mut last_input_time = f64::MIN;
 
     for session in &model.user_input {
-        if session.inputs.is_empty() {
-            continue;
-        }
+        if session.inputs.is_empty() { continue; }
 
         if let Some(first) = session.inputs.first() {
             if first.timestamp < first_input_time {
@@ -245,11 +217,11 @@ pub fn calculate_total_metrics(model: &TypingModel) -> TypingMetrics {
             if input.is_correct {
                 total_type_count += 1;
             } else {
-                total_miss_count += 1;
+                total_miss_count +=1;
             }
         }
     }
-
+    
     metrics.type_count = total_type_count;
     metrics.miss_count = total_miss_count;
     if last_input_time > first_input_time {

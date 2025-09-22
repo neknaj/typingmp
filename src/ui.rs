@@ -7,21 +7,17 @@ extern crate alloc;
 // uefi と std で使用する Vec と vec! を切り替える
 #[cfg(feature = "uefi")]
 use alloc::vec::Vec;
-
 #[cfg(not(feature = "uefi"))]
 use std::vec::Vec;
 
 // uefi と std で使用する String と format! を切り替える
 #[cfg(feature = "uefi")]
-use alloc::{
-    format,
-    string::{String, ToString},
-};
+use alloc::{format, string::{String, ToString}};
 #[cfg(not(feature = "uefi"))]
 use std::string::{String, ToString};
 
 use crate::app::{App, AppState};
-use crate::model::{Segment, TypingCorrectnessChar};
+use crate::model::{Line, Segment, TypingCorrectnessChar, TypingCorrectnessLine, TypingStatus};
 use crate::typing; // For calculate_total_metrics
 
 /// 画面上の描画基準点を定義するenum
@@ -86,9 +82,7 @@ pub struct Gradient {
 
 /// 画面に描画すべき要素の種類とレイアウト情報を定義するenum
 pub enum Renderable {
-    /// 背景グラデーション
     Background { gradient: Gradient },
-    /// 通常のフォントサイズで描画されるテキスト
     Text {
         text: String,
         anchor: Anchor,
@@ -97,8 +91,7 @@ pub enum Renderable {
         font_size: FontSize,
         color: u32,
     },
-    /// 大きなフォントサイズで描画されるテキスト
-    BigText {
+    BigText { // BigText is kept for other potential uses (like result screen title)
         text: String,
         anchor: Anchor,
         shift: Shift,
@@ -106,6 +99,15 @@ pub enum Renderable {
         font_size: FontSize,
         color: u32,
     },
+    // A dedicated variant for the complex typing line
+    TypingText {
+        content_line: Line,
+        correctness_line: TypingCorrectnessLine,
+        status: TypingStatus,
+        anchor: Anchor,
+        shift: Shift,
+        font_size: FontSize,
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -118,18 +120,9 @@ const MENU_ITEMS: [&str; 2] = ["Start Typing", "Quit"];
 pub fn build_ui(app: &App) -> Vec<Renderable> {
     let mut render_list = Vec::new();
 
-    let menu_gradient = Gradient {
-        start_color: 0xFF_000010,
-        end_color: 0xFF_000000,
-    };
-    let typing_gradient = Gradient {
-        start_color: 0xFF_100010,
-        end_color: 0xFF_000000,
-    };
-    let result_gradient = Gradient {
-        start_color: 0xFF_101000,
-        end_color: 0xFF_000000,
-    };
+    let menu_gradient = Gradient { start_color: 0xFF_000010, end_color: 0xFF_000000 };
+    let typing_gradient = Gradient { start_color: 0xFF_100010, end_color: 0xFF_000000 };
+    let result_gradient = Gradient { start_color: 0xFF_101000, end_color: 0xFF_000000 };
 
     match app.state {
         AppState::Menu => build_menu_ui(app, &mut render_list, menu_gradient),
@@ -137,16 +130,12 @@ pub fn build_ui(app: &App) -> Vec<Renderable> {
         AppState::Result => build_result_ui(app, &mut render_list, result_gradient),
     }
 
-    // Don't draw common status/instructions text during typing, as it has its own status panel
     if app.state != AppState::Typing {
         render_list.push(Renderable::Text {
             text: app.status_text.clone(),
             anchor: Anchor::BottomLeft,
             shift: Shift { x: 0.01, y: -0.02 },
-            align: Align {
-                horizontal: HorizontalAlign::Left,
-                vertical: VerticalAlign::Bottom,
-            },
+            align: Align { horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Bottom },
             font_size: FontSize::WindowHeight(0.04),
             color: 0xFF_CCCCCC,
         });
@@ -154,10 +143,7 @@ pub fn build_ui(app: &App) -> Vec<Renderable> {
             text: app.instructions_text.clone(),
             anchor: Anchor::BottomRight,
             shift: Shift { x: -0.01, y: -0.02 },
-            align: Align {
-                horizontal: HorizontalAlign::Right,
-                vertical: VerticalAlign::Bottom,
-            },
+            align: Align { horizontal: HorizontalAlign::Right, vertical: VerticalAlign::Bottom },
             font_size: FontSize::WindowHeight(0.04),
             color: 0xFF_CCCCCC,
         });
@@ -172,10 +158,7 @@ fn build_menu_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradien
         text: "Neknaj Typing MP".to_string(),
         anchor: Anchor::Center,
         shift: Shift { x: 0.0, y: -0.3 },
-        align: Align {
-            horizontal: HorizontalAlign::Center,
-            vertical: VerticalAlign::Center,
-        },
+        align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
         font_size: FontSize::WindowHeight(0.1),
         color: 0xFF_FFFFFF,
     });
@@ -188,14 +171,8 @@ fn build_menu_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradien
         render_list.push(Renderable::Text {
             text,
             anchor: Anchor::Center,
-            shift: Shift {
-                x: 0.0,
-                y: -0.1 + (i as f32 * 0.1),
-            },
-            align: Align {
-                horizontal: HorizontalAlign::Center,
-                vertical: VerticalAlign::Center,
-            },
+            shift: Shift { x: 0.0, y: -0.1 + (i as f32 * 0.1) },
+            align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
             font_size: FontSize::WindowHeight(0.05),
             color,
         });
@@ -209,138 +186,35 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
         let current_line_signed = model.status.line;
         let line_count = model.content.lines.len();
 
-        // --- Layout Constants ---
-        const BIG_FONT_SIZE: FontSize = FontSize::WindowHeight(0.125);
-        const CONTEXT_FONT_SIZE: FontSize = FontSize::WindowHeight(0.05);
-        const RUBY_FONT_SIZE_RATIO: f32 = 0.4;
-        const FONT_WIDTH_RATIO_APPROX: f32 = 0.06; // Approximation for BigText character width
-        const CURSOR_TARGET_X: f32 = 0.3; // Active typing area at 30% of screen width
-
         // --- Render Context Lines (Previous and Next) ---
-        let context_lines = [-1, 1];
-        for &offset in &context_lines {
+        for &offset in &[-1, 1] { // Previous and Next lines
             let line_to_display_signed = current_line_signed + offset;
             if line_to_display_signed >= 0 && (line_to_display_signed as usize) < line_count {
                 let line_idx = line_to_display_signed as usize;
                 render_list.push(Renderable::Text {
                     text: model.content.lines[line_idx].to_string(),
-                    anchor: Anchor::TopLeft,
-                    shift: Shift {
-                        x: 0.05,
-                        y: 0.5 + (offset as f32 * 0.2),
-                    },
-                    align: Align {
-                        horizontal: HorizontalAlign::Left,
-                        vertical: VerticalAlign::Center,
-                    },
-                    font_size: CONTEXT_FONT_SIZE,
+                    anchor: Anchor::Center,
+                    shift: Shift { x: 0.0, y: offset as f32 * 0.25 }, // Position above/below center
+                    align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
+                    font_size: FontSize::WindowHeight(0.05),
                     color: 0xFF_444444,
                 });
             }
         }
-
-        // --- Render Current Typing Line ---
+        
+        // --- Create the main TypingText Renderable ---
         if (current_line_signed as usize) < line_count {
             let line_idx = current_line_signed as usize;
-            let line = &model.content.lines[line_idx];
-            let correctness_line = &model.typing_correctness.lines[line_idx];
-            let mut pen_x_offset = 0.0;
-            let mut typed_width = 0.0;
-            let mut target_found = false;
-
-            // Calculate width of already typed portion to implement cursor target
-            for (seg_idx, seg) in line.segments.iter().enumerate() {
-                if target_found {
-                    break;
-                }
-                let reading_text = match seg {
-                    Segment::Plain { text } => text,
-                    Segment::Annotated { base: _, reading } => reading,
-                };
-                for char_idx in 0..reading_text.chars().count() {
-                    if seg_idx == model.status.segment as usize
-                        && char_idx == model.status.char_ as usize
-                    {
-                        target_found = true;
-                        break;
-                    }
-                    typed_width += FONT_WIDTH_RATIO_APPROX;
-                }
-            }
-
-            let start_x = CURSOR_TARGET_X - typed_width;
-
-            // Render each character of the current line segment by segment
-            for (seg_idx, seg) in line.segments.iter().enumerate() {
-                let correctness_seg = &correctness_line.segments[seg_idx];
-
-                match seg {
-                    Segment::Plain { text } | Segment::Annotated { base: text, .. } => {
-                        for (char_idx, character) in text.chars().enumerate() {
-                            render_list.push(Renderable::BigText {
-                                text: character.to_string(),
-                                anchor: Anchor::TopLeft,
-                                shift: Shift {
-                                    x: start_x + pen_x_offset,
-                                    y: 0.5,
-                                },
-                                align: Align {
-                                    horizontal: HorizontalAlign::Left,
-                                    vertical: VerticalAlign::Center,
-                                },
-                                font_size: BIG_FONT_SIZE,
-                                color: 0xFF_AAAAAA, // Default color for base text
-                            });
-                            pen_x_offset += FONT_WIDTH_RATIO_APPROX;
-                        }
-                    }
-                }
-            }
-
-            pen_x_offset = 0.0;
-            for (seg_idx, seg) in line.segments.iter().enumerate() {
-                let correctness_seg = &correctness_line.segments[seg_idx];
-                let reading_text = match seg {
-                    Segment::Plain { text } => text.clone(),
-                    Segment::Annotated { reading, .. } => reading.clone(),
-                };
-                let is_annotated = matches!(seg, Segment::Annotated { .. });
-
-                for (char_idx, character) in reading_text.chars().enumerate() {
-                    let correctness = &correctness_seg.chars[char_idx];
-                    let color = match correctness {
-                        TypingCorrectnessChar::Pending => 0, // Transparent, don't draw overlay
-                        TypingCorrectnessChar::Correct => 0xFF_22FF22,
-                        TypingCorrectnessChar::Incorrect => 0xFF_FF2222,
-                    };
-
-                    if color != 0 {
-                        let y_offset = if is_annotated { 0.5 - 0.08 } else { 0.5 };
-                        let font_size = if is_annotated {
-                            FontSize::WindowHeight(0.125 * RUBY_FONT_SIZE_RATIO)
-                        } else {
-                            BIG_FONT_SIZE
-                        };
-                        render_list.push(Renderable::BigText {
-                            text: character.to_string(),
-                            anchor: Anchor::TopLeft,
-                            shift: Shift {
-                                x: start_x + pen_x_offset,
-                                y: y_offset,
-                            },
-                            align: Align {
-                                horizontal: HorizontalAlign::Left,
-                                vertical: VerticalAlign::Center,
-                            },
-                            font_size,
-                            color,
-                        });
-                    }
-                    pen_x_offset += FONT_WIDTH_RATIO_APPROX;
-                }
-            }
+            render_list.push(Renderable::TypingText {
+                content_line: model.content.lines[line_idx].clone(),
+                correctness_line: model.typing_correctness.lines[line_idx].clone(),
+                status: model.status.clone(),
+                anchor: Anchor::Center,
+                shift: Shift { x: 0.0, y: 0.0 }, // Centered
+                font_size: FontSize::WindowHeight(0.125), // Base font size
+            });
         }
-
+        
         // --- Render Status Panel (Bottom Left) ---
         let metrics = typing::calculate_total_metrics(model);
         let time = metrics.total_time / 1000.0;
@@ -355,14 +229,8 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
             render_list.push(Renderable::Text {
                 text: item.clone(),
                 anchor: Anchor::BottomLeft,
-                shift: Shift {
-                    x: 0.02,
-                    y: -0.16 + (i as f32 * 0.04),
-                },
-                align: Align {
-                    horizontal: HorizontalAlign::Left,
-                    vertical: VerticalAlign::Bottom,
-                },
+                shift: Shift { x: 0.02, y: -0.16 + (i as f32 * 0.04)},
+                align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Bottom },
                 font_size: FontSize::WindowHeight(0.04),
                 color: 0xFF_DDDDDD,
             });
@@ -371,15 +239,13 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
 }
 
 fn build_result_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient) {
+    // Similar to build_menu_ui, no changes needed here.
     render_list.push(Renderable::Background { gradient });
     render_list.push(Renderable::Text {
         text: "Result".to_string(),
         anchor: Anchor::Center,
         shift: Shift { x: 0.0, y: -0.3 },
-        align: Align {
-            horizontal: HorizontalAlign::Center,
-            vertical: VerticalAlign::Center,
-        },
+        align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
         font_size: FontSize::WindowHeight(0.15),
         color: 0xFF_FFFF00,
     });
@@ -398,14 +264,8 @@ fn build_result_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
             render_list.push(Renderable::Text {
                 text: text.clone(),
                 anchor: Anchor::Center,
-                shift: Shift {
-                    x: 0.0,
-                    y: -0.1 + (i as f32 * 0.08),
-                },
-                align: Align {
-                    horizontal: HorizontalAlign::Center,
-                    vertical: VerticalAlign::Center,
-                },
+                shift: Shift { x: 0.0, y: -0.1 + (i as f32 * 0.08) },
+                align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
                 font_size: FontSize::WindowHeight(0.05),
                 color: 0xFF_FFFFFF,
             });
@@ -413,13 +273,10 @@ fn build_result_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
     }
 }
 
+
 /// AnchorとShiftから、基準となる座標(x, y)を計算する
 pub fn calculate_anchor_position(
-    anchor: Anchor,
-    shift: Shift,
-    width: usize,
-    height: usize,
-) -> (i32, i32) {
+    anchor: Anchor, shift: Shift, width: usize, height: usize) -> (i32, i32) {
     let (w, h) = (width as i32, height as i32);
     let base_pos = match anchor {
         Anchor::TopLeft => (0, 0),
@@ -439,11 +296,7 @@ pub fn calculate_anchor_position(
 
 /// 基準点、テキストの寸法、揃え方から、最終的な描画開始座標（左上）を計算する
 pub fn calculate_aligned_position(
-    anchor_pos: (i32, i32),
-    text_width: u32,
-    text_height: u32,
-    align: Align,
-) -> (i32, i32) {
+    anchor_pos: (i32, i32), text_width: u32, text_height: u32, align: Align) -> (i32, i32) {
     let (tw, th) = (text_width as i32, text_height as i32);
     let (ax, ay) = anchor_pos;
 

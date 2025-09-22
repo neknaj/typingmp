@@ -89,7 +89,7 @@ impl App {
     /// 新しいタイピングセッションを開始する
     fn start_typing_session(&mut self) {
         // examples/sample.txtから問題文を読み込む
-        let problem_text = include_str!("../examples/MIT.ntq");
+        let problem_text = include_str!("../examples/いろは歌.ntq");
         let content = parser::parse_problem(problem_text);
         let typing_correctness = typing::create_typing_correctness_model(&content);
 
@@ -163,6 +163,11 @@ impl App {
                 self.status_text = "Start typing!".to_string();
                 match event {
                     AppEvent::Char(c) => {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        println!("[APP] Received char: '{}'", c);
+                        #[cfg(target_arch = "wasm32")]
+                        web_sys::console::log_1(&format!("[APP] Received char: '{}'", c).into());
+
                         if let Some(model) = self.typing_model.take() {
                             match typing::key_input(model, c) {
                                 Model::Typing(new_model) => {

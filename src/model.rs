@@ -2,8 +2,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
-
-// --- Data models for parsed content ---
+use serde_json; // serde_jsonをuseする
 
 #[derive(Debug, Clone)]
 pub struct Content {
@@ -39,8 +38,6 @@ impl fmt::Display for Segment {
         }
     }
 }
-
-// --- Data models for typing game state ---
 
 #[derive(Debug, Clone)]
 pub enum Model {
@@ -118,7 +115,8 @@ pub struct TypingMetrics {
 
 #[derive(Debug, Clone)]
 pub struct Layout {
-    pub mapping: HashMap<String, Vec<String>>,
+    // 旧コードのTextConvert.mappingに合わせる
+    pub mapping: Vec<(String, Vec<String>)>,
 }
 
 #[derive(Debug, Clone)]
@@ -129,15 +127,15 @@ pub struct Scroll {
 
 impl Default for Layout {
     fn default() -> Self {
-        // コンパイル時に`assets/japanese.json`を文字列として読み込む
         let json_data = include_str!("../assets/japanese.json");
-
-        // JSON文字列をパースしてHashMapに変換する
-        // パースに失敗した場合は、プログラムがパニックする。
-        // レイアウトファイルは必須なので、これは意図した動作。
-        let mapping: HashMap<String, Vec<String>> =
+        
+        // HashMapとして一度デシリアライズ
+        let mapping_hash: HashMap<String, Vec<String>> =
             serde_json::from_str(json_data).expect("Failed to parse japanese.json layout file.");
+        
+        // HashMapをVec<(String, Vec<String>)>に変換
+        let mapping_vec = mapping_hash.into_iter().collect();
 
-        Layout { mapping }
+        Layout { mapping: mapping_vec }
     }
 }
