@@ -122,8 +122,9 @@ pub fn build_ui(app: &App, font: &FontRef, width: usize, height: usize) -> Vec<R
     let result_gradient = Gradient { start_color: 0xFF_101000, end_color: 0xFF_000000 };
 
     match app.state {
-        AppState::Menu => build_menu_ui(app, &mut render_list, menu_gradient),
+        AppState::MainMenu => build_main_menu_ui(app, &mut render_list, menu_gradient),
         AppState::Typing => build_typing_ui(app, &mut render_list, typing_gradient, font, width, height),
+        AppState::ProblemSelection => build_problem_selection_ui(app, &mut render_list, menu_gradient),
         AppState::Result => build_result_ui(app, &mut render_list, result_gradient),
     }
 
@@ -149,7 +150,7 @@ pub fn build_ui(app: &App, font: &FontRef, width: usize, height: usize) -> Vec<R
     render_list
 }
 
-fn build_menu_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient) {
+fn build_main_menu_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient) {
     render_list.push(Renderable::Background { gradient });
     render_list.push(Renderable::Text {
         text: "Neknaj Typing MP".to_string(),
@@ -160,7 +161,7 @@ fn build_menu_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradien
         color: 0xFF_FFFFFF,
     });
     for (i, item) in MENU_ITEMS.iter().enumerate() {
-        let (text, color) = if i == app.selected_menu_item {
+        let (text, color) = if i == app.selected_main_menu_item {
             (format!("> {} <", item), 0xFF_FFFF00)
         } else {
             (item.to_string(), 0xFF_FFFFFF)
@@ -173,6 +174,57 @@ fn build_menu_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradien
             font_size: FontSize::WindowHeight(0.05),
             color,
         });
+    }
+}
+
+fn build_problem_selection_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient) {
+    render_list.push(Renderable::Background { gradient });
+    render_list.push(Renderable::Text {
+        text: "Select Problem".to_string(),
+        anchor: Anchor::TopCenter,
+        shift: Shift { x: 0.0, y: 0.1 },
+        align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
+        font_size: FontSize::WindowHeight(0.1),
+        color: 0xFF_FFFFFF,
+    });
+
+    let item_height: f32 = 0.06;
+    let list_y_start: f32 = 0.25;
+    let list_height: f32 = 0.6;
+    let items_per_screen = (list_height / item_height).floor() as usize;
+
+    let mut start_index = 0;
+    if app.selected_problem_item >= items_per_screen {
+        start_index = app.selected_problem_item - items_per_screen + 1;
+    }
+    let end_index = (start_index + items_per_screen).min(app.problem_list.len());
+
+    for i in start_index..end_index {
+        let item = app.problem_list[i];
+        let (text, color) = if i == app.selected_problem_item {
+            (format!("> {}", item), 0xFF_FFFF00)
+        } else {
+            (format!("  {}", item), 0xFF_FFFFFF)
+        };
+        let y_pos = list_y_start + ((i - start_index) as f32 * item_height);
+
+        render_list.push(Renderable::Text {
+            text,
+            anchor: Anchor::TopCenter,
+            shift: Shift { x: -0.2, y: y_pos },
+            align: Align { horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top },
+            font_size: FontSize::WindowHeight(0.045),
+            color,
+        });
+    }
+
+    if start_index > 0 {
+        render_list.push(Renderable::Text { text: "▲".to_string(), anchor: Anchor::TopCenter, shift: Shift { x: 0.0, y: list_y_start - item_height },
+            align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center }, font_size: FontSize::WindowHeight(0.04), color: 0xFF_AAAAAA });
+    }
+    if end_index < app.problem_list.len() {
+        render_list.push(Renderable::Text { text: "▼".to_string(), anchor: Anchor::TopCenter, shift: Shift { x: 0.0, y: list_y_start + list_height },
+            align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center }, font_size: FontSize::WindowHeight(0.04), color: 0xFF_AAAAAA });
     }
 }
 
@@ -237,7 +289,6 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
 }
 
 fn build_result_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient) {
-    // Similar to build_menu_ui, no changes needed here.
     render_list.push(Renderable::Background { gradient });
     render_list.push(Renderable::Text {
         text: "Result".to_string(),

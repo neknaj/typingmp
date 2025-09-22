@@ -21,10 +21,14 @@ use crate::model::{Model, ResultModel, Scroll, TypingModel, TypingStatus};
 use crate::parser;
 use crate::typing;
 
+// ビルドスクリプトによってOUT_DIRに生成されたファイルを取り込む
+include!(concat!(env!("OUT_DIR"), "/problem_files.rs"));
+
 /// アプリケーションの現在の状態（シーン）を定義するenum
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 pub enum AppState {
-    Menu,
+    MainMenu,
+    ProblemSelection,
     Typing,
     Result,
 }
@@ -59,10 +63,12 @@ pub enum AppEvent {
 pub struct App {
     /// 現在のアプリケーションの状態
     pub state: AppState,
-    /// メニューで選択されている項目
-    pub selected_menu_item: usize,
-    /// ユーザーが入力したテキスト
-    pub input_text: String, // This can be removed or repurposed
+    /// メインメニューで選択されている項目
+    pub selected_main_menu_item: usize,
+    /// 問題選択画面で選択されている項目
+    pub selected_problem_item: usize,
+    /// 問題のリスト
+    pub problem_list: &'static [&'static str],
     /// タイピング中の状態モデル
     pub typing_model: Option<TypingModel>,
     /// 結果画面の状態モデル
@@ -79,9 +85,10 @@ impl App {
     /// Appの新しいインスタンスを生成する
     pub fn new() -> Self {
         Self {
-            state: AppState::Menu,
-            selected_menu_item: 0,
-            input_text: String::new(),
+            state: AppState::MainMenu,
+            selected_main_menu_item: 0,
+            selected_problem_item: 0,
+            problem_list: PROBLEM_FILES_NAMES,
             typing_model: None,
             result_model: None,
             status_text: String::new(),
@@ -91,9 +98,9 @@ impl App {
     }
 
     /// 新しいタイピングセッションを開始する
-    fn start_typing_session(&mut self) {
-        // examples/sample.txtから問題文を読み込む
-        let problem_text = include_str!("../examples/いろは歌.ntq");
+    fn start_typing_session(&mut self, problem_index: usize) {
+        // 選択されたインデックスに基づいて問題文を読み込む
+        let problem_text = get_problem_content(problem_index);
         let content = parser::parse_problem(problem_text);
         let typing_correctness = typing::create_typing_correctness_model(&content);
 
@@ -124,8 +131,11 @@ impl App {
         // AppStateが変更されたときにシーン固有の初期化を行う
         if let AppEvent::ChangeScene = event {
             match self.state {
-                AppState::Menu => {
+                AppState::MainMenu => {
                     self.instructions_text = "Up/Down: Navigate | Enter: Select".to_string();
+                }
+                AppState::ProblemSelection => {
+                    self.instructions_text = "Up/Down: Select | Enter: Start | ESC: Back".to_string();
                 }
                 AppState::Typing => {
                     self.instructions_text = "ESC: Back to Menu".to_string();
@@ -137,21 +147,24 @@ impl App {
         }
 
         match self.state {
-            AppState::Menu => {
+            AppState::MainMenu => {
                 self.status_text = "Welcome to Neknaj Typing Multi-Platform".to_string();
                 match event {
                     AppEvent::Up => {
-                        if self.selected_menu_item > 0 {
-                            self.selected_menu_item -= 1;
+                        if self.selected_main_menu_item > 0 {
+                            self.selected_main_menu_item -= 1;
                         }
                     }
                     AppEvent::Down => {
-                        if self.selected_menu_item < MENU_ITEM_COUNT - 1 {
-                            self.selected_menu_item += 1;
+                        if self.selected_main_menu_item < MENU_ITEM_COUNT - 1 {
+                            self.selected_main_menu_item += 1;
                         }
                     }
-                    AppEvent::Enter => match self.selected_menu_item {
-                        0 => self.start_typing_session(),
+                    AppEvent::Enter => match self.selected_main_menu_item {
+                        0 => {
+                            self.state = AppState::ProblemSelection;
+                            self.on_event(AppEvent::ChangeScene);
+                        }
                         1 => {
                             #[cfg(not(target_arch = "wasm32"))]
                             {
@@ -160,6 +173,29 @@ impl App {
                         }
                         _ => {}
                     },
+                    _ => {}
+                }
+            }
+            AppState::ProblemSelection => {
+                self.status_text = "Select a problem to type.".to_string();
+                match event {
+                    AppEvent::Up => {
+                        if self.selected_problem_item > 0 {
+                            self.selected_problem_item -= 1;
+                        }
+                    }
+                    AppEvent::Down => {
+                        if self.selected_problem_item < self.problem_list.len() - 1 {
+                            self.selected_problem_item += 1;
+                        }
+                    }
+                    AppEvent::Enter => {
+                        self.start_typing_session(self.selected_problem_item);
+                    }
+                    AppEvent::Escape => {
+                        self.state = AppState::MainMenu;
+                        self.on_event(AppEvent::ChangeScene);
+                    }
                     _ => {}
                 }
             }
@@ -194,7 +230,7 @@ impl App {
                         }
                     }
                     AppEvent::Escape => {
-                        self.state = AppState::Menu;
+                        self.state = AppState::MainMenu;
                         self.typing_model = None;
                         self.result_model = None;
                         self.on_event(AppEvent::ChangeScene);
@@ -213,7 +249,7 @@ impl App {
                 }
                 match event {
                     AppEvent::Enter | AppEvent::Escape => {
-                        self.state = AppState::Menu;
+                        self.state = AppState::MainMenu;
                         self.typing_model = None;
                         self.result_model = None;
                         self.on_event(AppEvent::ChangeScene);
