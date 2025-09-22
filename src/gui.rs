@@ -1,53 +1,79 @@
-// -----------------------------------------------------------------------------
-// GUIバックエンドの実装 (feature = "gui" の時のみコンパイル)
-// -----------------------------------------------------------------------------
+// src/gui.rs
+
 use crate::app::App;
-use crate::renderer::gui_renderer;
+use crate::renderer::{gui_renderer, BG_COLOR};
+use crate::ui::{self, Renderable};
 use ab_glyph::{Font, FontRef};
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
 
 const WIDTH: usize = 800;
 const HEIGHT: usize = 100;
+const BIG_FONT_SIZE: f32 = 48.0;
+const NORMAL_FONT_SIZE: f32 = 16.0;
 
+/// GUIアプリケーションのメイン関数
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let font_data = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
     let font = FontRef::try_from_slice(font_data)?;
 
     let mut window = Window::new("GUI Text Input", WIDTH, HEIGHT, WindowOptions::default())?;
     window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
-
     let mut app = App::new();
 
+    // メインループ
     while window.is_open() && !app.should_quit {
         handle_input(&mut window, &mut app);
 
-        let pixel_buffer = gui_renderer::render(&font, &app.input_text, WIDTH, HEIGHT);
+        // 1. 背景色でピクセルバッファをクリア
+        let mut pixel_buffer = vec![BG_COLOR; WIDTH * HEIGHT];
+
+        // 2. UI定義から描画リストを取得
+        let render_list = ui::build_ui(&app);
+
+        // 3. 描画リストの各要素を解釈して描画
+        for item in render_list {
+            match item {
+                Renderable::BigText { text, anchor, margin } => {
+                    let pos = ui::calculate_position(anchor, margin, WIDTH, HEIGHT);
+                    gui_renderer::draw_text(
+                        &mut pixel_buffer, WIDTH, &font, text,
+                        (pos.0 as f32, pos.1 as f32), BIG_FONT_SIZE,
+                    );
+                }
+                Renderable::Text { text, anchor, margin } => {
+                    let pos = ui::calculate_position(anchor, margin, WIDTH, HEIGHT);
+                    gui_renderer::draw_text(
+                        &mut pixel_buffer, WIDTH, &font, text,
+                        (pos.0 as f32, pos.1 as f32), NORMAL_FONT_SIZE,
+                    );
+                }
+            }
+        }
+        
+        // 4. 完成したバッファをウィンドウに表示
         window.update_with_buffer(&pixel_buffer, WIDTH, HEIGHT)?;
     }
     Ok(())
 }
 
+/// キーボード入力を処理する
 fn handle_input(window: &mut Window, app: &mut App) {
     if window.is_key_down(Key::Escape) {
         app.should_quit = true;
     }
-
-    // ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ 変更点 ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
-    // `get_keys_pressed`が返す`Vec<Key>`を直接forループで処理する。
-    // これにより、エラーが解消され、コードもよりシンプルになる。
+    
     for key in window.get_keys_pressed(KeyRepeat::Yes) {
         match key {
             Key::Backspace => app.on_backspace(),
             Key::Enter => app.on_key('\n'),
             Key::Space => app.on_key(' '),
-            _ => { // その他のキーはヘルパー関数で文字に変換
+            _ => {
                 if let Some(char_key) = key_to_char(key, window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift)) {
                     app.on_key(char_key);
                 }
             }
         }
     }
-    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲ 変更点 ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 }
 
 // キーコードを文字に変換するヘルパー関数 (変更なし)
