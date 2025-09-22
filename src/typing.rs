@@ -1,5 +1,14 @@
 // src/typing.rs
 
+#[cfg(feature = "uefi")]
+extern crate alloc;
+
+#[cfg(feature = "uefi")]
+use alloc::{format, vec::Vec};
+
+#[cfg(not(feature = "uefi"))]
+use std::vec::Vec;
+
 use crate::model::{Model, TypingModel, ResultModel, TypingCorrectnessContent, TypingSession, TypingInput, TypingCorrectnessLine, TypingCorrectnessSegment, TypingCorrectnessChar, TypingMetrics};
 use crate::model::{Content, Segment};
 use crate::timestamp::now;

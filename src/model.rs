@@ -1,8 +1,23 @@
 // src/model.rs
 
-use std::collections::HashMap;
+// uefi featureが有効な場合、no_stdとno_mainでコンパイルする
+#[cfg(feature = "uefi")]
+extern crate alloc;
+
+#[cfg(feature = "uefi")]
+use alloc::{string::String, vec, vec::Vec};
+#[cfg(not(feature = "uefi"))]
+use std::string::{String, Vec};
+
+#[cfg(not(feature = "uefi"))]
 use std::fmt;
-use serde_json; // serde_jsonをuseする
+
+#[cfg(feature = "uefi")]
+use core::fmt;
+
+use crate::layout_data;
+
+// --- Data models for parsed content ---
 
 #[derive(Debug, Clone)]
 pub struct Content {
@@ -38,6 +53,8 @@ impl fmt::Display for Segment {
         }
     }
 }
+
+// --- Data models for typing game state ---
 
 #[derive(Debug, Clone)]
 pub enum Model {
@@ -115,7 +132,6 @@ pub struct TypingMetrics {
 
 #[derive(Debug, Clone)]
 pub struct Layout {
-    // 旧コードのTextConvert.mappingに合わせる
     pub mapping: Vec<(String, Vec<String>)>,
 }
 
@@ -125,17 +141,11 @@ pub struct Scroll {
     pub max: f64,
 }
 
+// LayoutのDefault実装を全面的に差し替え
 impl Default for Layout {
     fn default() -> Self {
-        let json_data = include_str!("../assets/japanese.json");
-        
-        // HashMapとして一度デシリアライズ
-        let mapping_hash: HashMap<String, Vec<String>> =
-            serde_json::from_str(json_data).expect("Failed to parse japanese.json layout file.");
-        
-        // HashMapをVec<(String, Vec<String>)>に変換
-        let mapping_vec = mapping_hash.into_iter().collect();
-
-        Layout { mapping: mapping_vec }
+        Layout {
+            mapping: layout_data::get_layout(),
+        }
     }
 }

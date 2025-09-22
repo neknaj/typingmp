@@ -18,6 +18,7 @@ pub mod renderer;
 pub mod ui;
 pub mod parser;
 pub mod model;
+pub mod layout_data;
 pub mod typing;
 pub mod typing_renderer;
 pub mod timestamp;

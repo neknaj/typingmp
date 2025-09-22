@@ -6,7 +6,7 @@ extern crate alloc;
 
 // uefi と std で使用する Vec と vec! を切り替える
 #[cfg(feature = "uefi")]
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 #[cfg(not(feature = "uefi"))]
 use std::vec::Vec;
 

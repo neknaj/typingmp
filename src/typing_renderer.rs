@@ -1,5 +1,15 @@
 // src/typing_renderer.rs
 
+#[cfg(feature = "uefi")]
+extern crate alloc;
+
+#[cfg(feature = "uefi")]
+use alloc::{string::{String, ToString}, vec::Vec};
+#[cfg(not(feature = "uefi"))]
+use std::string::{String, ToString};
+#[cfg(not(feature = "uefi"))]
+use std::vec::Vec;
+
 use crate::model::{Line, Segment, TypingCorrectnessChar, TypingCorrectnessLine, TypingCorrectnessSegment, TypingStatus};
 use crate::renderer::gui_renderer;
 use crate::ui::{Align, Anchor, FontSize, HorizontalAlign, Renderable, Shift, VerticalAlign};

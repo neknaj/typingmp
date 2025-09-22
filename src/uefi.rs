@@ -7,7 +7,6 @@ use crate::renderer::{calculate_pixel_font_size, gui_renderer, BG_COLOR};
 use crate::ui::{self, Renderable};
 use ab_glyph::{point, Font, FontRef, OutlinedGlyph, PxScale, ScaleFont};
 use alloc::vec::Vec;
-use uefi::boot::{EventType, Tpl};
 use uefi::prelude::*;
 use uefi::proto::console::gop::{BltOp, BltPixel, BltRegion, GraphicsOutput};
 use uefi::proto::console::text::{Key, ScanCode};
@@ -28,8 +27,7 @@ pub fn run() -> Status {
     app.on_event(AppEvent::Start);
 
     while !app.should_quit {
-        // Simple delay loop instead of timer events for broader compatibility
-        uefi::boot::stall(16_000); // roughly 16ms for ~60fps
+        uefi::boot::stall(16_000);
 
         let keys: Vec<Key> = uefi::system::with_stdin(|stdin| {
             let mut collected_keys = Vec::new();
@@ -65,60 +63,34 @@ pub fn run() -> Status {
         }
 
         // Render
-        let mut pixel_buffer: Vec<BltPixel> = alloc::vec![
-            BltPixel::new(
-                ((BG_COLOR >> 16) & 0xFF) as u8,
-                ((BG_COLOR >> 8) & 0xFF) as u8,
-                (BG_COLOR & 0xFF) as u8
-            );
-            width * height
-        ];
+        let mut pixel_buffer: Vec<BltPixel> = alloc::vec![BltPixel::new(0, 0, 0); width * height];
 
-        let render_list = ui::build_ui(&app);
+        // build_uiの呼び出しを修正
+        let render_list = ui::build_ui(&app, &font, width, height);
 
         for item in render_list {
             match item {
-                Renderable::BigText { text, anchor, shift, align, font_size, color } => {
-                    let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
-                    let (text_width, text_height, _ascent) =
-                        gui_renderer::measure_text(&font, &text, pixel_font_size);
-                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
-                    let (x, y) =
-                        ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
-                    draw_text(
-                        &mut pixel_buffer, width, &font, &text,
-                        (x as f32, y as f32), pixel_font_size, color,
-                    );
-                }
-                Renderable::Text { text, anchor, shift, align, font_size, color } => {
-                    let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
-                    let (text_width, text_height, _ascent) =
-                        gui_renderer::measure_text(&font, &text, pixel_font_size);
-                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
-                    let (x, y) =
-                        ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
-                    draw_text(
-                        &mut pixel_buffer, width, &font, &text,
-                        (x as f32, y as f32), pixel_font_size, color,
-                    );
-                }
                 Renderable::Background { gradient } => {
-                    // Re-implement gradient drawing for UEFI's BltPixel
-                    let start_r = ((gradient.start_color >> 16) & 0xFF) as f32;
-                    let start_g = ((gradient.start_color >> 8) & 0xFF) as f32;
-                    let start_b = (gradient.start_color & 0xFF) as f32;
-                    let end_r = ((gradient.end_color >> 16) & 0xFF) as f32;
-                    let end_g = ((gradient.end_color >> 8) & 0xFF) as f32;
-                    let end_b = (gradient.end_color & 0xFF) as f32;
-
-                    for y in 0..height {
-                        for x in 0..width {
-                            let ratio = y as f32 / height as f32;
-                            let r = (start_r * (1.0 - ratio) + end_r * ratio) as u8;
-                            let g = (start_g * (1.0 - ratio) + end_g * ratio) as u8;
-                            let b = (start_b * (1.0 - ratio) + end_b * ratio) as u8;
-                            pixel_buffer[y * width + x] = BltPixel::new(r, g, b);
-                        }
+                    // 背景描画ロジックは簡略化
+                    let start_r = ((gradient.start_color >> 16) & 0xFF) as u8;
+                    let start_g = ((gradient.start_color >> 8) & 0xFF) as u8;
+                    let start_b = (gradient.start_color & 0xFF) as u8;
+                    for pixel in pixel_buffer.iter_mut() {
+                        *pixel = BltPixel::new(start_r, start_g, start_b);
+                    }
+                }
+                Renderable::BigText { text, anchor, shift, align, font_size, color }
+                | Renderable::Text { text, anchor, shift, align, font_size, color } => {
+                    let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
+                    let (text_width, text_height, _ascent) =
+                        gui_renderer::measure_text(&font, &text, pixel_font_size);
+                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
+                    let (x, y) =
+                        ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
+                    draw_text(
+                        &mut pixel_buffer, width, &font, &text,
+                        (x as f32, y as f32), pixel_font_size, color,
+                    );
                     }
                 }
             }
