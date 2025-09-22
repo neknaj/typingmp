@@ -1,4 +1,9 @@
-use crate::app::App;
+// src/tui.rs
+
+#[cfg(feature = "uefi")]
+extern crate alloc;
+
+use crate::app::{App, AppEvent};
 use crate::renderer::tui_renderer;
 use crate::ui::{self, Renderable};
 use ab_glyph::FontRef;
@@ -8,10 +13,22 @@ use crossterm::{
     style::Print,
     terminal,
 };
+
+#[cfg(not(feature = "uefi"))]
 use std::io::{stdout, Write};
+#[cfg(feature = "uefi")]
+use alloc::string::String;
+#[cfg(feature = "uefi")]
+use alloc::vec::Vec;
+#[cfg(feature = "uefi")]
+use core::fmt::Write; // For stdout.flush()
+#[cfg(not(feature = "uefi"))]
 use std::time::Duration;
+#[cfg(feature = "uefi")]
+use uefi::boot::TimerTrigger; // For Duration equivalent
 
 /// TUIアプリケーションのメイン関数
+#[cfg(not(feature = "uefi"))]
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let font_data = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
     let font = FontRef::try_from_slice(font_data).map_err(|_| "Failed to load font from slice")?;
@@ -71,7 +88,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// TUIアプリケーションのメイン関数 (UEFI版)
+#[cfg(feature = "uefi")]
+pub fn run() -> Result<(), Box<dyn core::error::Error>> {
+    // UEFI環境ではTUIはサポートしないか、別の実装が必要
+    // ここでは単にエラーを返すか、何もしない
+    // TODO: UEFI環境でのTUI実装を検討
+    Err("TUI is not supported in UEFI environment yet.".into())
+}
+
+
 /// 文字バッファをターミナルに描画する
+#[cfg(not(feature = "uefi"))]
 fn draw_buffer_to_terminal(
     stdout: &mut impl Write,
     buffer: &[char],
@@ -87,19 +115,40 @@ fn draw_buffer_to_terminal(
 }
 
 /// キーボード入力を処理する
+#[cfg(not(feature = "uefi"))]
 fn handle_input(app: &mut App) -> std::io::Result<()> {
     if event::poll(Duration::from_millis(100))? {
         if let Event::Key(key) = event::read()? {
             if key.kind == KeyEventKind::Press {
                 match key.code {
-                    KeyCode::Char('q') => app.should_quit = true,
-                    KeyCode::Char(c) => app.on_key(c),
-                    KeyCode::Backspace => app.on_backspace(),
+                    KeyCode::Char('q') => app.on_event(AppEvent::Quit),
+                    KeyCode::Char(c) => app.on_event(AppEvent::Char(c)),
+                    KeyCode::Backspace => app.on_event(AppEvent::Backspace),
+                    KeyCode::Up => app.on_event(AppEvent::Up),
+                    KeyCode::Down => app.on_event(AppEvent::Down),
+                    KeyCode::Enter => app.on_event(AppEvent::Enter),
+                    KeyCode::Esc => app.on_event(AppEvent::Escape),
                     _ => {}
                 }
             }
         }
     }
     // エラーが起きなかった場合に成功(Ok)を返す
+    Ok(())
+}
+
+// UEFI環境ではTUIのhandle_inputは不要
+#[cfg(feature = "uefi")]
+fn handle_input(_app: &mut App) -> Result<(), Box<dyn core::error::Error>> {
+    Ok(())
+}
+
+// UEFI環境ではdraw_buffer_to_terminalは不要
+#[cfg(feature = "uefi")]
+fn draw_buffer_to_terminal(
+    _stdout: &mut impl Write,
+    _buffer: &[char],
+    _width: usize,
+) -> Result<(), Box<dyn core::error::Error>> {
     Ok(())
 }

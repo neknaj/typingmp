@@ -10,7 +10,14 @@ use alloc::vec;
 #[cfg(not(feature = "uefi"))]
 use std::vec::Vec;
 
-use crate::app::App;
+// uefi と std で使用する String と format! を切り替える
+#[cfg(feature = "uefi")]
+use alloc::{format, string::{String, ToString}};
+#[cfg(not(feature = "uefi"))]
+use std::string::{String, ToString};
+
+
+use crate::app::{App, AppState};
 
 /// 画面上の描画基準点を定義するenum
 #[derive(Clone, Copy)]
@@ -74,30 +81,74 @@ pub enum Renderable<'a> {
     },
 }
 
+const MENU_ITEMS: [&str; 2] = ["Start Editing", "Quit"];
+
 /// Appの状態を受け取り、描画リスト（UIレイアウト）を構築する
 pub fn build_ui<'a>(app: &'a App) -> Vec<Renderable<'a>> {
-    vec![
-        // 画面中央に表示する大きなテキスト
-        Renderable::BigText {
-            text: &app.input_text,
-            anchor: Anchor::CenterLeft,
-            shift: Shift { x: 0.02, y: 0.0 }, // 画面幅の2%右にずらす
-            align: Align {
-                horizontal: HorizontalAlign::Left,
-                vertical: VerticalAlign::Center,
-            },
-        },
-        // 画面左下に表示するステータステキスト
-        Renderable::Text {
-            text: &app.status_text,
-            anchor: Anchor::BottomLeft,
-            shift: Shift { x: 0.01, y: -0.02 }, // 画面幅の1%右、画面高さの2%上にずらす
-            align: Align {
-                horizontal: HorizontalAlign::Left,
-                vertical: VerticalAlign::Bottom,
-            },
-        },
-    ]
+    let mut render_list = Vec::new();
+
+    match app.state {
+        AppState::Menu => {
+            for (i, item) in MENU_ITEMS.iter().enumerate() {
+                let text = if i == app.selected_menu_item {
+                    format!("> {} <", item)
+                } else {
+                    item.to_string()
+                };
+                #[cfg(not(feature = "uefi"))] // Box::leak is not available in UEFI
+                render_list.push(Renderable::Text {
+                    text: Box::leak(text.into_boxed_str()), // TODO: Avoid this leak if possible
+                    anchor: Anchor::Center,
+                    shift: Shift { x: 0.0, y: -0.1 + (i as f32 * 0.1) },
+                    align: Align {
+                        horizontal: HorizontalAlign::Center,
+                        vertical: VerticalAlign::Center,
+                    },
+                });
+                #[cfg(feature = "uefi")] // For UEFI, we can't use Box::leak, so we'll just use the string directly
+                render_list.push(Renderable::Text {
+                    text: item, // This will not show the "> <" highlight in UEFI
+                    anchor: Anchor::Center,
+                    shift: Shift { x: 0.0, y: -0.1 + (i as f32 * 0.1) },
+                    align: Align {
+                        horizontal: HorizontalAlign::Center,
+                        vertical: VerticalAlign::Center,
+                    },
+                });
+            }
+            render_list.push(Renderable::Text {
+                text: &app.status_text,
+                anchor: Anchor::BottomLeft,
+                shift: Shift { x: 0.01, y: -0.02 },
+                align: Align {
+                    horizontal: HorizontalAlign::Left,
+                    vertical: VerticalAlign::Bottom,
+                },
+            });
+        }
+        AppState::Editing => {
+            render_list.push(Renderable::BigText {
+                text: &app.input_text,
+                anchor: Anchor::CenterLeft,
+                shift: Shift { x: 0.02, y: 0.0 },
+                align: Align {
+                    horizontal: HorizontalAlign::Left,
+                    vertical: VerticalAlign::Center,
+                },
+            });
+            render_list.push(Renderable::Text {
+                text: &app.status_text,
+                anchor: Anchor::BottomLeft,
+                shift: Shift { x: 0.01, y: -0.02 },
+                align: Align {
+                    horizontal: HorizontalAlign::Left,
+                    vertical: VerticalAlign::Bottom,
+                },
+            });
+        }
+    }
+
+    render_list
 }
 
 /// AnchorとShiftから、基準となる座標(x, y)を計算する

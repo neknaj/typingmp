@@ -1,14 +1,21 @@
 // src/gui.rs
 
-use crate::app::App;
+#[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
+use crate::app::{App, AppState, AppEvent};
+#[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
 use crate::renderer::{gui_renderer, BG_COLOR};
+#[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
 use crate::ui::{self, Renderable};
+#[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
 use ab_glyph::FontRef;
+#[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
 
-const NORMAL_FONT_SIZE: f32 = 16.0;
+#[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
+const NORMAL_FONT_SIZE: f32 = 25.0;
 
 /// GUIアプリケーションのメイン関数
+#[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let font_data = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
     let font = FontRef::try_from_slice(font_data).map_err(|_| "Failed to load font from slice")?;
@@ -77,26 +84,33 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// キーボード入力を処理する
+#[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
 fn handle_input(window: &mut Window, app: &mut App) {
+    // Escapeキーは常に処理する
     if window.is_key_down(Key::Escape) {
-        app.should_quit = true;
+        app.on_event(AppEvent::Escape);
     }
-    
+
     for key in window.get_keys_pressed(KeyRepeat::Yes) {
         match key {
-            Key::Backspace => app.on_backspace(),
-            Key::Enter => app.on_key('\n'),
-            Key::Space => app.on_key(' '),
+            Key::Up => app.on_event(AppEvent::Up),
+            Key::Down => app.on_event(AppEvent::Down),
+            Key::Backspace => app.on_event(AppEvent::Backspace),
+            Key::Enter => app.on_event(AppEvent::Enter),
+            Key::Space => app.on_event(AppEvent::Char(' ')),
+            Key::Q => app.on_event(AppEvent::Quit),
             _ => {
                 if let Some(char_key) = key_to_char(key, window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift)) {
-                    app.on_key(char_key);
+                    app.on_event(AppEvent::Char(char_key));
                 }
             }
         }
     }
 }
 
+
 // キーコードを文字に変換するヘルパー関数 (変更なし)
+#[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
 fn key_to_char(key: Key, is_shift: bool) -> Option<char> {
     match (key, is_shift) {
         (Key::A, false) => Some('a'), (Key::A, true) => Some('A'),
@@ -143,4 +157,10 @@ fn key_to_char(key: Key, is_shift: bool) -> Option<char> {
         (Key::Minus, false) => Some('-'), (Key::Minus, true) => Some('_'),
         _ => None,
     }
+}
+
+// Dummy run function for UEFI build
+#[cfg(feature = "uefi")]
+pub fn run() -> Result<(), Box<dyn core::error::Error>> {
+    Err("GUI is not supported in UEFI environment.".into())
 }

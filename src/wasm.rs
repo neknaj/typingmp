@@ -1,17 +1,18 @@
-use crate::app::App;
+use crate::app::{App, AppEvent};
 use crate::renderer::{gui_renderer, BG_COLOR};
 use crate::ui::{self, Renderable};
-use ab_glyph::{FontRef};
+use ab_glyph::FontRef;
 use std::cell::RefCell;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::Clamped;
 use web_sys::{CanvasRenderingContext2d, ImageData, KeyboardEvent};
 
-const NORMAL_FONT_SIZE: f32 = 16.0;
+const NORMAL_FONT_SIZE: f32 = 25.0;
 
 /// WASMモジュールのエントリーポイント
 #[wasm_bindgen(start)]
+#[cfg(feature = "wasm")] // Only compile if wasm feature is enabled
 pub fn start() -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
     let window = web_sys::window().unwrap();
@@ -63,9 +64,13 @@ pub fn start() -> Result<(), JsValue> {
         let closure = Closure::<dyn FnMut(_)>::new(move |event: KeyboardEvent| {
             let mut app = app_clone.borrow_mut();
             match event.key().as_str() {
-                "Backspace" => app.on_backspace(),
-                "Enter" => app.on_key('\n'),
-                key if key.len() == 1 => app.on_key(key.chars().next().unwrap()),
+                "ArrowUp" => app.on_event(AppEvent::Up),
+                "ArrowDown" => app.on_event(AppEvent::Down),
+                "Backspace" => app.on_event(AppEvent::Backspace),
+                "Enter" => app.on_event(AppEvent::Enter),
+                "Escape" => app.on_event(AppEvent::Escape),
+                "q" => app.on_event(AppEvent::Quit),
+                key if key.len() == 1 => app.on_event(AppEvent::Char(key.chars().next().unwrap())),
                 _ => {}
             }
         });

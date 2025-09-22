@@ -4,15 +4,15 @@ extern crate alloc;
 
 use uefi::prelude::*;
 use uefi::proto::console::gop::{BltOp, BltPixel, BltRegion, GraphicsOutput};
-use uefi::proto::console::text::Key;
+use uefi::proto::console::text::{Key, ScanCode};
 use uefi::boot::{EventType, TimerTrigger, Tpl};
-use crate::app::App;
+use crate::app::{App, AppEvent};
 use crate::renderer::{TEXT_COLOR, BG_COLOR};
 use crate::ui::{self, Renderable};
 use ab_glyph::{Font, FontRef, point, OutlinedGlyph, PxScale, ScaleFont};
 use alloc::vec::Vec;
 
-const NORMAL_FONT_SIZE: f32 = 16.0;
+const NORMAL_FONT_SIZE: f32 = 25.0;
 
 pub fn run() -> Status {
     uefi::helpers::init().unwrap();
@@ -57,15 +57,23 @@ pub fn run() -> Status {
                 Key::Printable(c) => {
                     let ch: char = c.into();
                     if ch == '\u{0008}' { // Backspace
-                        app.on_backspace();
+                        app.on_event(AppEvent::Backspace);
+                    } else if ch == 'q' { // 'q' for quit
+                        app.on_event(AppEvent::Quit);
+                    } else if ch == '\r' { // Enter
+                        app.on_event(AppEvent::Enter);
                     } else {
-                        app.on_key(ch);
+                        app.on_event(AppEvent::Char(ch));
                     }
                 },
-                Key::Special(scan) if scan == uefi::proto::console::text::ScanCode::ESCAPE => {
-                    app.should_quit = true;
+                Key::Special(scan) => {
+                    match scan {
+                        ScanCode::ESCAPE => app.on_event(AppEvent::Escape),
+                        ScanCode::UP => app.on_event(AppEvent::Up),
+                        ScanCode::DOWN => app.on_event(AppEvent::Down),
+                        _ => {},
+                    }
                 },
-                _ => {},
             }
         }
 
