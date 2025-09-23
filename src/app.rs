@@ -94,6 +94,7 @@ pub struct App<'a> {
     // フォント管理用のフィールド
     pub fonts: Fonts<'a>,
     pub font_choice: FontChoice,
+    pub fps: f64, // FPSを保持するフィールドを追加
 }
 
 impl<'a> App<'a> {
@@ -115,6 +116,7 @@ impl<'a> App<'a> {
             should_quit: false,
             fonts,
             font_choice: FontChoice::YujiSyuku, // デフォルトフォント
+            fps: 0.0, // FPSを初期化
         }
     }
 
@@ -157,6 +159,11 @@ impl<'a> App<'a> {
 
     /// 毎フレームの状態更新（スクロール計算など）
     pub fn update(&mut self, width: usize, height: usize, delta_time: f64) {
+        // FPSを計算して保存
+        if delta_time > 0.0 {
+            self.fps = 1000.0 / delta_time;
+        }
+
         if self.state != AppState::Typing {
             return;
         }

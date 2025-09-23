@@ -217,6 +217,17 @@ pub fn build_ui<'a>(app: &App<'a>, font: &FontRef<'a>, width: usize, height: usi
         });
     }
 
+    // --- 画面右上のFPS表示 ---
+    let fps_text = format!("FPS: {:.1}", app.fps);
+    render_list.push(Renderable::Text {
+        text: fps_text,
+        anchor: Anchor::TopRight,
+        shift: Shift { x: -0.01, y: 0.01 },
+        align: Align { horizontal: HorizontalAlign::Right, vertical: VerticalAlign::Top },
+        font_size: FontSize::WindowHeight(0.04),
+        color: 0xFF_00FF00, // 緑色
+    });
+
     // --- 画面下部の共通UI ---
     #[cfg(feature = "gui")]
     {
