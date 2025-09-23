@@ -4,11 +4,22 @@
 extern crate alloc;
 
 #[cfg(feature = "uefi")]
-use alloc::{format, string::String, vec::Vec};
+use alloc::{
+    format,
+    string::{String, ToString}, // ToStringをインポート
+    vec::Vec,
+};
 #[cfg(not(feature = "uefi"))]
-use std::{string::String, vec::Vec};
+use std::{
+    string::{String, ToString}, // ToStringをインポート
+    vec::Vec,
+};
 
-use crate::model::{Content, Model, ResultModel, Segment, TypingCorrectnessChar, TypingCorrectnessContent, TypingCorrectnessLine, TypingCorrectnessSegment, TypingInput, TypingMetrics, TypingModel, TypingSession};
+use crate::model::{
+    Content, Model, ResultModel, Segment, TypingCorrectnessChar, TypingCorrectnessContent,
+    TypingCorrectnessLine, TypingCorrectnessSegment, TypingInput, TypingMetrics, TypingModel,
+    TypingSession,
+};
 
 // Helper function for logging to handle both native and wasm targets.
 fn log(_message: &str) {
@@ -26,11 +37,12 @@ fn log(_message: &str) {
     }
 }
 
-
 pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     log(&format!("\n--- key_input: '{}' ---", input));
-    log(&format!("  [State Before] line: {}, seg: {}, char: {}, unconfirmed: {:?}",
-        model.status.line, model.status.segment, model.status.char_, model.status.unconfirmed));
+    log(&format!(
+        "  [State Before] line: {}, seg: {}, char: {}, unconfirmed: {:?}",
+        model.status.line, model.status.segment, model.status.char_, model.status.unconfirmed
+    ));
 
     let current_time = timestamp;
     let current_line_idx = model.status.line as usize;
@@ -40,8 +52,19 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
         return Model::Typing(model);
     }
 
-    if model.user_input.is_empty() || model.user_input.last().and_then(|s| s.inputs.last()).map_or(true, |i| (current_time - i.timestamp) > 1000.0) {
-        model.user_input.push(TypingSession { line: model.status.line, inputs: Vec::new() });
+    if model
+        .user_input
+        .is_empty()
+        || model
+            .user_input
+            .last()
+            .and_then(|s| s.inputs.last())
+            .map_or(true, |i| (current_time - i.timestamp) > 1000.0)
+    {
+        model.user_input.push(TypingSession {
+            line: model.status.line,
+            inputs: Vec::new(),
+        });
     }
 
     let mut is_correct = false;
@@ -58,7 +81,10 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     fn normalize_char(c: char) -> char {
         let lower = c.to_lowercase().next().unwrap_or(c);
         if lower >= 'ァ' && lower <= 'ヶ' {
-            std::char::from_u32(lower as u32 - 0x60).unwrap_or(lower)
+            // --- ▼▼▼ 変更箇所 ▼▼▼ ---
+            // std::char::from_u32 を core::char::from_u32 に変更
+            core::char::from_u32(lower as u32 - 0x60).unwrap_or(lower)
+            // --- ▲▲▲ 変更箇所 ▲▲▲ ---
         } else {
             lower
         }
@@ -87,7 +113,7 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
                 if remaining_slice.starts_with(key) {
                     for v in values {
                         if v.starts_with(&model.status.unconfirmed.iter().collect::<String>()) {
-                           expect.push((key.clone(), (*v).to_string()));
+                            expect.push((key.clone(), (*v).to_string()));
                         }
                     }
                 }
@@ -95,7 +121,9 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
 
             if !expect.is_empty() {
                 log(&format!("  [Expect List] Found {} candidates:", expect.len()));
-                for (key, val) in &expect { log(&format!("    - Key: '{}', Value: {}", key, val)); }
+                for (key, val) in &expect {
+                    log(&format!("    - Key: '{}', Value: {}", key, val));
+                }
 
                 let mut current_input_str = model.status.unconfirmed.iter().collect::<String>();
                 current_input_str.push(input);
@@ -104,12 +132,14 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
                     let lower_val_str = val_str.to_lowercase();
                     let lower_current_input_str = current_input_str.to_lowercase();
 
-                    if lower_val_str == lower_current_input_str { // Romanji completed
+                    if lower_val_str == lower_current_input_str {
+                        // Romanji completed
                         is_correct = true;
                         model.status.unconfirmed.clear();
                         advance_chars = key.chars().count();
                         break;
-                    } else if lower_val_str.starts_with(&lower_current_input_str) { // Romanji in progress
+                    } else if lower_val_str.starts_with(&lower_current_input_str) {
+                        // Romanji in progress
                         is_correct = true;
                         is_romaji_in_progress = true; // Mark that we don't advance the cursor yet
                         model.status.unconfirmed.push(input);
@@ -125,40 +155,60 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
         model.status.last_wrong_keydown = None;
         // Only advance cursor/correctness map if it's not a partial romaji input
         if !is_romaji_in_progress {
-            let correctness_segment = &mut model.typing_correctness.lines[current_line_idx].segments[model.status.segment as usize];
+            let correctness_segment = &mut model.typing_correctness.lines[current_line_idx]
+                .segments[model.status.segment as usize];
             let start_char_pos = model.status.char_ as usize;
 
             // Check if any character being marked as correct was previously incorrect
             let mut has_error = false;
             for i in 0..advance_chars {
-                if correctness_segment.chars.get(start_char_pos + i) == Some(&TypingCorrectnessChar::Incorrect) {
+                if correctness_segment.chars.get(start_char_pos + i)
+                    == Some(&TypingCorrectnessChar::Incorrect)
+                {
                     has_error = true;
                     break;
                 }
             }
-            let new_status = if has_error { TypingCorrectnessChar::Incorrect } else { TypingCorrectnessChar::Correct };
+            let new_status = if has_error {
+                TypingCorrectnessChar::Incorrect
+            } else {
+                TypingCorrectnessChar::Correct
+            };
 
             // Update correctness map for all advanced characters
             for i in 0..advance_chars {
-                 if let Some(c) = correctness_segment.chars.get_mut(start_char_pos + i) {
+                if let Some(c) = correctness_segment.chars.get_mut(start_char_pos + i) {
                     *c = new_status.clone();
                 }
             }
             model.status.char_ += advance_chars as i32;
         }
-    } else { // Incorrect keypress
+    } else {
+        // Incorrect keypress
         model.status.last_wrong_keydown = Some(input);
         model.status.unconfirmed.clear(); // Any incorrect keypress clears the romaji buffer
         let char_pos = model.status.char_ as usize;
         // Mark the current target character as incorrect
-        if let Some(segment) = model.typing_correctness.lines[current_line_idx].segments.get_mut(model.status.segment as usize) {
+        if let Some(segment) = model.typing_correctness.lines[current_line_idx]
+            .segments
+            .get_mut(model.status.segment as usize)
+        {
             if let Some(c) = segment.chars.get_mut(char_pos) {
                 *c = TypingCorrectnessChar::Incorrect;
             }
         }
     }
 
-    model.user_input.last_mut().unwrap().inputs.push(TypingInput { key: input, timestamp, is_correct });
+    model
+        .user_input
+        .last_mut()
+        .unwrap()
+        .inputs
+        .push(TypingInput {
+            key: input,
+            timestamp,
+            is_correct,
+        });
 
     // --- 4. Check for segment/line/game completion ---
     let mut is_finished = false;
@@ -177,12 +227,19 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
         }
     }
 
-    log(&format!("  [Result] is_correct: {}, is_finished: {}", is_correct, is_finished));
-    log(&format!("  [State After] line: {}, seg: {}, char: {}, unconfirmed: {:?}",
-        model.status.line, model.status.segment, model.status.char_, model.status.unconfirmed));
+    log(&format!(
+        "  [Result] is_correct: {}, is_finished: {}",
+        is_correct, is_finished
+    ));
+    log(&format!(
+        "  [State After] line: {}, seg: {}, char: {}, unconfirmed: {:?}",
+        model.status.line, model.status.segment, model.status.char_, model.status.unconfirmed
+    ));
 
     if is_finished {
-        Model::Result(ResultModel { typing_model: model })
+        Model::Result(ResultModel {
+            typing_model: model,
+        })
     } else {
         Model::Typing(model)
     }

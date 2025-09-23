@@ -59,10 +59,10 @@ pub struct Fonts<'a> {
 }
 
 #[cfg(target_arch = "wasm32")]
-const MENU_ITEM_COUNT: usize = 1;
+const MENU_ITEM_COUNT: usize = 2; // Quitなし
 
 #[cfg(not(target_arch = "wasm32"))]
-const MENU_ITEM_COUNT: usize = 3; // "Settings" を追加
+const MENU_ITEM_COUNT: usize = 3;
 
 /// アプリケーションで発生するイベントを定義するenum
 pub enum AppEvent {
