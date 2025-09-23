@@ -189,13 +189,14 @@ pub fn start() -> Result<(), JsValue> {
 
             event.prevent_default();
 
-            let value = input_clone.value();
-            if !value.is_empty() {
-                let mut app = app_clone.borrow_mut();
-                for c in value.chars() {
-                    app.on_event(AppEvent::Char { c, timestamp: crate::timestamp::now() });
+            // input要素の全内容(value)ではなく、イベントで追加された文字(data)のみを処理する
+            if let Some(data) = event.data() {
+                if !data.is_empty() {
+                    let mut app = app_clone.borrow_mut();
+                    for c in data.chars() {
+                        app.on_event(AppEvent::Char { c, timestamp: crate::timestamp::now() });
+                    }
                 }
-                // input_clone.set_value("");
             }
         });
         input_element.add_event_listener_with_callback("input", closure.as_ref().unchecked_ref())?;
