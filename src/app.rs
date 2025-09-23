@@ -95,6 +95,10 @@ pub struct App<'a> {
     pub fonts: Fonts<'a>,
     pub font_choice: FontChoice,
     pub fps: f64, // FPSを保持するフィールドを追加
+    // --- ▼▼▼ 変更箇所 ▼▼▼ ---
+    #[cfg(target_arch = "wasm32")] // wasmでのみ利用
+    pub should_reset_ime: bool, // IMEリセット要求フラグ
+    // --- ▲▲▲ 変更箇所 ▲▲▲ ---
 }
 
 impl<'a> App<'a> {
@@ -117,6 +121,10 @@ impl<'a> App<'a> {
             fonts,
             font_choice: FontChoice::YujiSyuku, // デフォルトフォント
             fps: 0.0, // FPSを初期化
+            // --- ▼▼▼ 変更箇所 ▼▼▼ ---
+            #[cfg(target_arch = "wasm32")]
+            should_reset_ime: false, // 初期値はfalse
+            // --- ▲▲▲ 変更箇所 ▲▲▲ ---
         }
     }
 
@@ -325,8 +333,23 @@ impl<'a> App<'a> {
                 match event {
                     AppEvent::Char { c, timestamp } => {
                         if let Some(model) = self.typing_model.take() {
+                            // --- ▼▼▼ 変更箇所 ▼▼▼ ---
+                            // key_input呼び出し前の状態を保存
+                            let old_segment = model.status.segment;
+                            let old_line = model.status.line;
+
                             match typing::key_input(model, c, timestamp) {
-                                Model::Typing(new_model) => self.typing_model = Some(new_model),
+                                Model::Typing(new_model) => {
+                                    #[cfg(target_arch = "wasm32")]
+                                    {
+                                        // セグメントまたは行が完了したかをチェック
+                                        if new_model.status.line != old_line || new_model.status.segment != old_segment {
+                                            self.should_reset_ime = true;
+                                        }
+                                    }
+                                    self.typing_model = Some(new_model)
+                                },
+                                // --- ▲▲▲ 変更箇所 ▲▲▲ ---
                                 Model::Result(result_model) => {
                                     self.result_model = Some(result_model);
                                     self.state = AppState::Result;
