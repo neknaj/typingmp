@@ -74,20 +74,23 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let total_width: u32 = segments.iter().map(|seg| {
                         tui_renderer::render_text_to_art(&font, &seg.base_text, font_size_px).1 as u32
                     }).sum();
-                    let total_height = target_art_height_in_cells as u32;
+                    
+                    let (_, _, line_total_height, line_ascent) = tui_renderer::render_text_to_art(&font, "|", font_size_px);
 
                     if total_width == 0 { continue; }
 
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, cols, rows);
-                    let (mut pen_x, start_y) = ui::calculate_aligned_position(anchor_pos, total_width, total_height, align);
+                    let (mut pen_x, line_start_y) = ui::calculate_aligned_position(anchor_pos, total_width, line_total_height as u32, align);
+                    let line_baseline_y = line_start_y + line_ascent as i32;
 
                     for seg in segments {
-                        let (art_buffer, art_width, art_height) = tui_renderer::render_text_to_art(&font, &seg.base_text, font_size_px);
-                        blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, art_height, pen_x as isize, start_y as isize);
+                        let (art_buffer, art_width, _, char_ascent) = tui_renderer::render_text_to_art(&font, &seg.base_text, font_size_px);
+                        let blit_y = line_baseline_y - char_ascent as i32;
+                        blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, 0, pen_x as isize, blit_y as isize);
 
                         if let Some(ruby) = &seg.ruby_text {
                             let (ruby_width, _) = measure_plain_text(ruby);
-                            let ruby_anchor_pos = (pen_x + (art_width as i32 / 2), start_y);
+                            let ruby_anchor_pos = (pen_x + (art_width as i32 / 2), line_start_y - 3);
                             let (ruby_x, ruby_y) = ui::calculate_aligned_position(ruby_anchor_pos, ruby_width, 1, Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Bottom });
                             draw_plain_text_at(&mut current_buffer, ruby, ruby_x, ruby_y, cols);
                         }
@@ -110,22 +113,27 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             }).sum()
                         })
                     });
-                    let total_height = target_art_height_in_cells as u32;
+                    
+                    let (_, _, line_total_height, line_ascent) = tui_renderer::render_text_to_art(&font, "|", font_size_px);
 
                     if total_width == 0 { continue; }
 
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, cols, rows);
-                    let (mut pen_x, start_y) = ui::calculate_aligned_position(anchor_pos, total_width, total_height, align);
+                    let (mut pen_x, line_start_y) = ui::calculate_aligned_position(anchor_pos, total_width, line_total_height as u32, align);
+                    let line_baseline_y = line_start_y + line_ascent as i32;
 
                     for seg in segments {
                         match seg {
                             LowerTypingSegment::Completed { base_text, ruby_text, .. } => {
-                                let (art_buffer, art_width, art_height) = tui_renderer::render_text_to_art(&font, &base_text, font_size_px);
-                                blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, art_height, pen_x as isize, start_y as isize);
+                                let (art_buffer, art_width, _, char_ascent) = tui_renderer::render_text_to_art(&font, &base_text, font_size_px);
+                                let blit_y = line_baseline_y - char_ascent as i32;
+                                blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, 0, pen_x as isize, blit_y as isize);
 
                                 if let Some(ruby) = ruby_text {
                                     let (ruby_width, _) = measure_plain_text(&ruby);
-                                    let ruby_anchor = (pen_x + (art_width as i32 / 2), start_y);
+                                    // --- 修正箇所 START: ルビの位置を1セル上にずらす ---
+                                    let ruby_anchor = (pen_x + (art_width as i32 / 2), line_start_y - 3);
+                                    // --- 修正箇所 END ---
                                     let (rx, ry) = ui::calculate_aligned_position(ruby_anchor, ruby_width, 1, Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Bottom });
                                     draw_plain_text_at(&mut current_buffer, &ruby, rx, ry, cols);
                                 }
@@ -135,36 +143,36 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 for el in elements {
                                     match el {
                                         ActiveLowerElement::Typed { character, .. } => {
-                                            let (art_buffer, art_width, art_height) = tui_renderer::render_text_to_art(&font, &character.to_string(), font_size_px);
-                                            blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, art_height, pen_x as isize, start_y as isize);
+                                            let (art_buffer, art_width, _, char_ascent) = tui_renderer::render_text_to_art(&font, &character.to_string(), font_size_px);
+                                            let blit_y = line_baseline_y - char_ascent as i32;
+                                            blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, 0, pen_x as isize, blit_y as isize);
                                             pen_x += art_width as i32;
                                         }
-                                        // --- 修正箇所 START ---
+                                        // --- 修正箇所 START: カーソルを手動描画に戻す ---
                                         ActiveLowerElement::Cursor => {
-                                            // Art Textの高さに合わせて縦棒を手動で描画
-                                            let cursor_height = target_art_height_in_cells;
+                                            let cursor_height = line_total_height;
                                             for y_offset in 0..cursor_height {
-                                                let target_y = start_y + y_offset as i32;
-                                                let target_x = pen_x;
-
-                                                if target_y >= 0 && target_y < rows as i32 && target_x >= 0 && target_x < cols as i32 {
-                                                    let index = (target_y as usize * cols) + target_x as usize;
+                                                let target_y = line_start_y + y_offset as i32;
+                                                if target_y >= 0 && target_y < rows as i32 && pen_x >= 0 && pen_x < cols as i32 {
+                                                    let index = (target_y as usize * cols) + pen_x as usize;
                                                     if index < current_buffer.len() {
                                                         current_buffer[index] = '|';
                                                     }
                                                 }
                                             }
-                                            pen_x += 1; // カーソルの幅は1セル
+                                            pen_x += 1;
                                         }
                                         // --- 修正箇所 END ---
                                         ActiveLowerElement::UnconfirmedInput(s) => {
-                                            let (art_buffer, art_width, art_height) = tui_renderer::render_text_to_art(&font, &s, font_size_px);
-                                            blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, art_height, pen_x as isize, start_y as isize);
+                                            let (art_buffer, art_width, _, char_ascent) = tui_renderer::render_text_to_art(&font, &s, font_size_px);
+                                            let blit_y = line_baseline_y - char_ascent as i32;
+                                            blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, 0, pen_x as isize, blit_y as isize);
                                             pen_x += art_width as i32;
                                         }
                                         ActiveLowerElement::LastIncorrectInput(c) => {
-                                            let (art_buffer, art_width, art_height) = tui_renderer::render_text_to_art(&font, &c.to_string(), font_size_px);
-                                            blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, art_height, pen_x as isize, start_y as isize);
+                                            let (art_buffer, art_width, _, char_ascent) = tui_renderer::render_text_to_art(&font, &c.to_string(), font_size_px);
+                                            let blit_y = line_baseline_y - char_ascent as i32;
+                                            blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, 0, pen_x as isize, blit_y as isize);
                                             pen_x += art_width as i32;
                                         }
                                     }
@@ -191,10 +199,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(not(feature = "uefi"))]
 fn blit_art(
     buffer: &mut [char], buf_w: usize, buf_h: usize,
-    art: &[char], art_w: usize, art_h: usize,
+    art: &[char], art_w: usize, _art_h: usize,
     start_x: isize, start_y: isize,
 ) {
     if art_w == 0 { return; }
+    let art_h = if art.is_empty() { 0 } else { art.len() / art_w };
+
     for y in 0..art_h {
         let target_y = start_y + y as isize;
         if target_y >= 0 && target_y < buf_h as isize {
@@ -254,7 +264,7 @@ fn draw_art_text(
     if target_art_height_in_cells == 0 { return; }
 
     let font_size_px = target_art_height_in_cells as f32 * tui_renderer::ART_V_PIXELS_PER_CELL;
-    let (art_buffer, art_width, art_height) = tui_renderer::render_text_to_art(font, text, font_size_px);
+    let (art_buffer, art_width, art_height, _) = tui_renderer::render_text_to_art(font, text, font_size_px);
 
     if art_width == 0 || art_height == 0 { return; }
     

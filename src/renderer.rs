@@ -173,14 +173,14 @@ pub mod tui_renderer {
     // アートの1セルを構成する仮想ピクセル数。小さいほど高解像度（大きく）なる
     pub const ART_V_PIXELS_PER_CELL: f32 = 2.0;
 
-    /// 指定されたテキストをASCIIアート化し、(文字バッファ, 幅, 高さ)を返す
+    /// 指定されたテキストをASCIIアート化し、(文字バッファ, 幅, 高さ, アセント)を返す
     pub fn render_text_to_art(
         font: &FontRef,
         text: &str,
         font_size_px: f32,
-    ) -> (Vec<char>, usize, usize) {
+    ) -> (Vec<char>, usize, usize, usize) { // <- 戻り値にアセント(usize)を追加
         if text.is_empty() {
-            return (Vec::new(), 0, 0);
+            return (Vec::new(), 0, 0, 0);
         }
 
         let scale = PxScale::from(font_size_px);
@@ -213,7 +213,7 @@ pub mod tui_renderer {
         max_x = max_x.max(pen_x); // 最後の文字の右端も考慮
 
         if min_x > max_x { // テキストに描画可能なグリフがなかった場合
-            return (Vec::new(), 0, 0);
+            return (Vec::new(), 0, 0, 0);
         }
 
         let art_cell_height = ART_V_PIXELS_PER_CELL;
@@ -223,8 +223,13 @@ pub mod tui_renderer {
         let art_height = ((max_y - min_y) / art_cell_height).ceil() as usize;
 
         if art_width == 0 || art_height == 0 {
-            return (Vec::new(), 0, 0);
+            return (Vec::new(), 0, 0, 0);
         }
+
+        // --- アセント計算 ---
+        let ascent_in_pixels = ascent - min_y;
+        let ascent_in_cells = (ascent_in_pixels / art_cell_height).floor().max(0.0) as usize;
+        // --- ここまで ---
 
         let mut coverage_buffer = vec![0.0f32; art_width * art_height];
 
@@ -268,6 +273,7 @@ pub mod tui_renderer {
             })
             .collect();
 
-        (char_buffer, art_width, art_height)
+        // 戻り値にascent_in_cellsを追加
+        (char_buffer, art_width, art_height, ascent_in_cells)
     }
 }
