@@ -148,7 +148,7 @@ pub fn run() -> Status {
                             let (base_w, ..) = gui_renderer::measure_text(&font, seg.base_text.as_str(), pixel_font_size);
                             let (ruby_w, ..) = gui_renderer::measure_text(&font, ruby.as_str(), ruby_pixel_font_size);
                             let ruby_x = pen_x as f32 + (base_w as f32 - ruby_w as f32) / 2.0;
-                            let ruby_y = y as f32 - ruby_pixel_font_size;
+                            let ruby_y = y as f32 - ruby_pixel_font_size*0.5;
                             draw_text(&mut pixel_buffer, width, &font, ruby.as_str(), (ruby_x, ruby_y), ruby_pixel_font_size, color);
                         }
                         
@@ -174,7 +174,7 @@ pub fn run() -> Status {
                                     let (base_w, ..) = gui_renderer::measure_text(&font, base_text.as_str(), pixel_font_size);
                                     let (ruby_w, ..) = gui_renderer::measure_text(&font, ruby.as_str(), ruby_pixel_font_size);
                                     let ruby_x = pen_x as f32 + (base_w as f32 - ruby_w as f32) / 2.0;
-                                    let ruby_y = y as f32 - ruby_pixel_font_size;
+                                    let ruby_y = y as f32 - ruby_pixel_font_size*0.5;
                                     draw_text(&mut pixel_buffer, width, &font, ruby.as_str(), (ruby_x, ruby_y), ruby_pixel_font_size, color);
                                 }
 

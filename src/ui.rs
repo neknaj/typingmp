@@ -233,7 +233,7 @@ fn build_main_menu_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gr
         anchor: Anchor::Center,
         shift: Shift { x: 0.0, y: -0.3 },
         align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
-        font_size: FontSize::WindowHeight(0.4),
+        font_size: FontSize::WindowHeight(0.25),
         color: 0xFF_FFFFFF,
     });
     for (i, item) in MENU_ITEMS.iter().enumerate() {
