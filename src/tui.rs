@@ -143,17 +143,34 @@ fn draw_art_text(
     buffer: &mut [char], font: &FontRef, text: &str, anchor: Anchor, shift: Shift, align: Align, font_size: FontSize,
     cols: usize, rows: usize, virtual_width: usize, virtual_height: usize,
 ) {
-    let font_size_px = calculate_pixel_font_size(font_size, virtual_width, virtual_height);
+    // 【修正箇所】
+    // 1. FontSize (仮想空間での相対的な大きさ) を、TUIの目標セル数に変換する
+    let target_art_height_in_cells = match font_size {
+        FontSize::WindowHeight(ratio) => (rows as f32 * ratio).ceil() as usize,
+        FontSize::WindowAreaSqrt(ratio) => {
+            let base_dimension = (cols as f32 * rows as f32).sqrt();
+            (base_dimension * ratio).ceil() as usize
+        }
+    };
+
+    if target_art_height_in_cells == 0 {
+        return;
+    }
+
+    // 2. 目標のセル数から、AAをレンダリングするための適切なピクセルフォントサイズを逆算する
+    let font_size_px = target_art_height_in_cells as f32 * tui_renderer::ART_V_PIXELS_PER_CELL;
+
+    // 3. この計算されたフォントサイズでAAを生成する
     let (art_buffer, art_width, art_height) = tui_renderer::render_text_to_art(font, text, font_size_px);
 
     if art_width == 0 || art_height == 0 {
         return;
     }
-    
-    // TUIのセル数(cols, rows)に対する相対座標を計算
+
+    // 4. AAの位置決めは、これまで通りTUIのセル数(cols, rows)で行う (ここは変更なし)
     let anchor_pos = ui::calculate_anchor_position(anchor, shift, cols, rows);
     let (start_x, start_y) = ui::calculate_aligned_position(anchor_pos, art_width as u32, art_height as u32, align);
-    
+
     blit_art(buffer, cols, rows, &art_buffer, art_width, art_height, start_x as isize, start_y as isize);
 }
 
