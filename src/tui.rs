@@ -38,12 +38,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App::new();
     app.on_event(AppEvent::Start);
 
+    // 前回のフレームバッファを保持するための変数
+    let mut previous_buffer: Vec<char> = Vec::new();
+
     // メインループ
     while !app.should_quit {
         let (cols, rows) = terminal::size()?;
         let (cols, rows) = (cols as usize, rows as usize);
 
-        let mut char_buffer = vec![' '; cols * rows];
+        // 現在のフレームのバッファを作成
+        let mut current_buffer = vec![' '; cols * rows];
         
         // 全ての状態で共通のUI構築と描画ロジックを使用する
         let render_list = ui::build_ui(&app, &font, cols, rows);
@@ -70,8 +74,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             let current_x = start_x + i as i32;
                             if current_x >= 0 && current_x < cols as i32 {
                                 let index = (start_y as usize * cols) + current_x as usize;
-                                if index < char_buffer.len() {
-                                    char_buffer[index] = c;
+                                if index < current_buffer.len() {
+                                    current_buffer[index] = c;
                                 }
                             }
                         }
@@ -80,7 +84,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         
-        draw_buffer_to_terminal(&mut stdout, &char_buffer, cols)?;
+        // 変更点のみを描画する
+        draw_buffer_to_terminal(&mut stdout, &current_buffer, &previous_buffer, cols)?;
+        
+        // 次のフレームのために現在のバッファを保存
+        previous_buffer = current_buffer;
+
         handle_input(&mut app)?;
     }
 
@@ -96,18 +105,42 @@ pub fn run() -> Result<(), Box<dyn core::error::Error>> {
     Err("TUI is not supported in UEFI environment yet.".into())
 }
 
-/// 文字バッファをターミナルに描画する
+/// 文字バッファをターミナルに描画する（ダブルバッファリング）
 #[cfg(not(feature = "uefi"))]
 fn draw_buffer_to_terminal(
     stdout: &mut impl Write,
-    buffer: &[char],
+    current_buffer: &[char],
+    previous_buffer: &[char],
     width: usize,
 ) -> std::io::Result<()> {
-    execute!(stdout, cursor::MoveTo(0, 0))?;
-    for row in buffer.chunks(width) {
-        let line: String = row.iter().collect();
-        execute!(stdout, Print(line), cursor::MoveToNextLine(1))?;
+    // 初回描画時や画面サイズが変わった場合は全描画を行う
+    if previous_buffer.len() != current_buffer.len() {
+        execute!(stdout, terminal::Clear(terminal::ClearType::All), cursor::MoveTo(0, 0))?;
+        for (y, row) in current_buffer.chunks(width).enumerate() {
+            let line: String = row.iter().collect();
+            // yがu16の範囲内であることを確認
+            if y < u16::MAX as usize {
+                 execute!(stdout, cursor::MoveTo(0, y as u16), Print(line))?;
+            }
+        }
+        return stdout.flush();
     }
+
+    // 変更があった行だけを再描画する
+    for (y, (current_row, previous_row)) in current_buffer
+        .chunks(width)
+        .zip(previous_buffer.chunks(width))
+        .enumerate()
+    {
+        if current_row != previous_row {
+            let line: String = current_row.iter().collect();
+            // yがu16の範囲内であることを確認
+            if y < u16::MAX as usize {
+                execute!(stdout, cursor::MoveTo(0, y as u16), Print(line))?;
+            }
+        }
+    }
+    
     stdout.flush()
 }
 
