@@ -83,6 +83,26 @@
         .description {
             opacity: 0;
         }
+
+        #link-container {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            font-family: sans-serif;
+            font-size: 12px;
+            color: #aaa;
+        }
+        #link-container a {
+            color: #6277a5;
+            /* text-decoration: none; */
+        }
+        #link-container a:hover {
+            color: #fff;
+        }
+        #link-container p {
+            margin: 5px 0 0 0;
+            padding: 0;
+        }
     </style>
 </head>
 
@@ -102,6 +122,11 @@
         <button id="key-enter">Enter</button>
         <button id="key-backspace">BS</button>
         <button id="key-esc">Esc</button>
+    </div>
+
+    <div id="link-container">
+        <a href="https://github.com/neknaj/typingmp" target="_blank" rel="noopener noreferrer">Source Code on GitHub</a>
+        <p>(Desktop versions also available)</p>
     </div>
 
 </body>
