@@ -417,7 +417,7 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
                 render_list.push(Renderable::Text {
                     text: model.content.lines[line_idx_context].to_string(),
                     anchor: Anchor::Center,
-                    shift: Shift { x: 0.0, y: offset as f32 * 0.35 },
+                    shift: Shift { x: 0.0, y: offset as f32 * 0.45 },
                     align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
                     font_size: FontSize::WindowHeight(0.05),
                     color: 0xFF_444444,
