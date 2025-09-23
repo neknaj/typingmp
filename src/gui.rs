@@ -10,6 +10,8 @@ use crate::ui::{self, ActiveLowerElement, LowerTypingSegment, Renderable, UpperS
 use ab_glyph::FontRef;
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
+#[cfg(not(feature = "uefi"))]
+use std::time::Instant;
 
 // ... (Windows固有の処理は変更なし)
 #[cfg(all(target_os = "windows", not(feature = "uefi")))]
@@ -61,6 +63,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App::new(fonts); // Appにフォントを渡す
     app.on_event(AppEvent::Start);
 
+    let mut last_frame_time = Instant::now();
+
     while window.is_open() && !app.should_quit {
         let (new_width, new_height) = window.get_size();
         if new_width != width || new_height != height {
@@ -68,9 +72,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             height = new_height;
         }
 
+        let now_time = Instant::now();
+        let delta_time = now_time.duration_since(last_frame_time).as_millis() as f64;
+        last_frame_time = now_time;
+
         handle_input(&mut window, &mut app);
 
-        app.update(width, height);
+        app.update(width, height, delta_time);
 
         let mut pixel_buffer = vec![0u32; width * height];
         let current_font = app.get_current_font(); // 現在のフォントを取得

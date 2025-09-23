@@ -39,6 +39,7 @@ pub fn start() -> Result<(), JsValue> {
     app.borrow_mut().on_event(AppEvent::Start);
 
     let size = Rc::new(RefCell::new((0, 0)));
+    let last_time = Rc::new(RefCell::new(0.0));
 
     // 初期サイズ設定とリサイズハンドラ
     {
@@ -90,7 +91,12 @@ pub fn start() -> Result<(), JsValue> {
     *g.borrow_mut() = Some(Closure::<dyn FnMut()>::new(move || {
         let (width, height) = *size.borrow();
 
-        app.borrow_mut().update(width, height);
+        let now = crate::timestamp::now();
+        let mut last_time_borrow = last_time.borrow_mut();
+        let delta_time = if *last_time_borrow > 0.0 { now - *last_time_borrow } else { 16.6 }; // 初回フレームは60FPSと仮定
+        *last_time_borrow = now;
+
+        app.borrow_mut().update(width, height, delta_time);
 
         let app_borrow = app.borrow();
         let current_font = app_borrow.get_current_font();
@@ -159,16 +165,13 @@ pub fn start() -> Result<(), JsValue> {
                                 gui_renderer::draw_text(&mut pixel_buffer, width, current_font, &base_text, (pen_x as f32, y as f32), pixel_font_size, color);
 
                                 if let Some(ruby) = ruby_text {
-                                    // FIX: &base_text と &ruby を渡す
                                     let (base_w, ..) = gui_renderer::measure_text(current_font, &base_text, pixel_font_size);
                                     let (ruby_w, ..) = gui_renderer::measure_text(current_font, &ruby, ruby_pixel_font_size);
                                     let ruby_x = pen_x as f32 + (base_w as f32 - ruby_w as f32) / 2.0;
                                     let ruby_y = y as f32 - ruby_pixel_font_size*0.5;
-                                    // FIX: &ruby を渡す
                                     gui_renderer::draw_text(&mut pixel_buffer, width, current_font, &ruby, (ruby_x, ruby_y), ruby_pixel_font_size, color);
                                 }
                                 
-                                // FIX: &base_text を渡す
                                 pen_x += gui_renderer::measure_text(current_font, &base_text, pixel_font_size).0 as i32;
                             }
                             LowerTypingSegment::Active { elements } => {

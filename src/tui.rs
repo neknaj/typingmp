@@ -23,7 +23,7 @@ use crossterm::{
 #[cfg(not(feature = "uefi"))]
 use std::io::{stdout, Write};
 #[cfg(not(feature = "uefi"))]
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[cfg(not(feature = "uefi"))]
 const VIRTUAL_CELL_WIDTH: usize = 1;
@@ -52,6 +52,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     app.on_event(AppEvent::Start);
 
     let mut previous_buffer = Vec::new();
+    let mut last_frame_time = Instant::now();
 
     while !app.should_quit {
         let (cols, rows) = terminal::size()?;
@@ -60,7 +61,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         let virtual_width = cols * VIRTUAL_CELL_WIDTH;
         let virtual_height = rows * VIRTUAL_CELL_HEIGHT;
         
-        app.update(virtual_width, virtual_height);
+        let now_time = Instant::now();
+        let delta_time = now_time.duration_since(last_frame_time).as_millis() as f64;
+        last_frame_time = now_time;
+        
+        app.update(virtual_width, virtual_height, delta_time);
 
         let mut current_buffer = vec![' '; cols * rows];
 
@@ -383,22 +388,29 @@ fn draw_buffer_to_terminal(
 ) -> std::io::Result<()> {
     if previous_buffer.len() != current_buffer.len() {
         execute!(stdout, terminal::Clear(terminal::ClearType::All))?;
-    }
-    
-    for (y, (current_row, previous_row)) in current_buffer
-        .chunks(width)
-        .zip(previous_buffer.chunks(width).chain(std::iter::repeat([].as_slice())))
-        .enumerate()
-    {
-        if current_row != previous_row || previous_buffer.is_empty() {
-            let line: String = current_row.iter().collect();
+        for (y, row) in current_buffer.chunks(width).enumerate() {
+            let line: String = row.iter().collect();
             if y < u16::MAX as usize {
                 execute!(stdout, cursor::MoveTo(0, y as u16), Print(line))?;
+            }
+        }
+    } else {
+        for (y, (current_row, previous_row)) in current_buffer
+            .chunks(width)
+            .zip(previous_buffer.chunks(width))
+            .enumerate()
+        {
+            if current_row != previous_row {
+                let line: String = current_row.iter().collect();
+                if y < u16::MAX as usize {
+                    execute!(stdout, cursor::MoveTo(0, y as u16), Print(line))?;
+                }
             }
         }
     }
     stdout.flush()
 }
+
 
 /// キーボード入力を処理する
 #[cfg(not(feature = "uefi"))]

@@ -79,8 +79,8 @@ pub fn run() -> Status {
             }
         }
 
-        // updateメソッドからフォント引数を削除
-        app.update(width, height);
+        // updateメソッドに10msの固定デルタ時間を渡す
+        app.update(width, height, 10.0);
 
         let background_color = ui::ACTIVE_COLOR;
         let mut pixel_buffer: alloc::vec::Vec<BltPixel> = alloc::vec![
@@ -198,11 +198,9 @@ pub fn run() -> Status {
                             LowerTypingSegment::Active { elements } => {
                                 for el in elements {
                                     let (text, color) = match el {
-                                        // FIX: `to_string(character)` を `to_string(&character)` に変更
                                         ActiveLowerElement::Typed { character, is_correct } => (alloc::string::ToString::to_string(&character), if is_correct { ui::CORRECT_COLOR } else { ui::INCORRECT_COLOR }),
                                         ActiveLowerElement::Cursor => (alloc::string::ToString::to_string(&'|'), ui::CURSOR_COLOR),
                                         ActiveLowerElement::UnconfirmedInput(s) => (s.clone(), ui::UNCONFIRMED_COLOR),
-                                        // FIX: `to_string(c)` を `to_string(&c)` に変更
                                         ActiveLowerElement::LastIncorrectInput(c) => (alloc::string::ToString::to_string(&c), ui::WRONG_KEY_COLOR),
                                     };
                                     draw_text(&mut pixel_buffer, width, current_font, text.as_str(), (pen_x as f32, y as f32), pixel_font_size, color);

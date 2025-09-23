@@ -17,10 +17,6 @@ use std::{
     vec::Vec,
 };
 
-
-#[cfg(feature = "uefi")]
-use core_maths::CoreFloat;
-
 use crate::model::{Model, ResultModel, Scroll, TypingModel, TypingStatus};
 use crate::parser;
 use crate::typing;
@@ -158,7 +154,7 @@ impl<'a> App<'a> {
     }
 
     /// 毎フレームの状態更新（スクロール計算など）
-    pub fn update(&mut self, width: usize, height: usize) {
+    pub fn update(&mut self, width: usize, height: usize, delta_time: f64) {
         if self.state != AppState::Typing {
             return;
         }
@@ -221,10 +217,11 @@ impl<'a> App<'a> {
                 // 3. Calculate target scroll position so the cursor is centered
                 let target_scroll = cursor_x_offset - total_width / 2.0;
 
-                // 4. Smoothly update the scroll value
-                let now = model.scroll.scroll as f32;
-                let d = target_scroll - now;
-                model.scroll.scroll += (d * (d.powi(2)) / (100000.0 + d.powi(2))) as f64;
+                // 4. Smoothly update the scroll value using delta_time for frame-rate independence
+                let now = model.scroll.scroll;
+                let diff = target_scroll as f64 - now;
+                let scroll_speed_factor = 5.0; // Adjust this value for faster/slower scrolling
+                model.scroll.scroll += diff * scroll_speed_factor * (delta_time / 1000.0);
             }
         }
     }
