@@ -45,7 +45,8 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     }
 
     let mut is_correct = false;
-    let mut advance_chars = 0; // How many characters to advance model.status.char_ by
+    let mut advance_chars = 0;
+    let mut is_romaji_in_progress = false;
 
     let line_content = &model.content.lines[current_line_idx];
     let segment_content = &line_content.segments[model.status.segment as usize];
@@ -54,23 +55,34 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
         Segment::Annotated { reading, .. } => reading,
     };
 
-    // --- 1. Directly typed a correct character? ---
-    if model.status.unconfirmed.is_empty() {
-        if let Some(target_char) = target_reading.chars().nth(model.status.char_ as usize) {
-            if input == target_char {
-                is_correct = true;
-                advance_chars = 1;
-            }
+    fn normalize_char(c: char) -> char {
+        let lower = c.to_lowercase().next().unwrap_or(c);
+        if lower >= 'ァ' && lower <= 'ヶ' {
+            std::char::from_u32(lower as u32 - 0x60).unwrap_or(lower)
+        } else {
+            lower
         }
     }
 
-    // --- 2. If not a direct hit, try romanji ---
+    // --- 1. Prioritize direct character match (e.g., from flick input) ---
+    // This check runs regardless of the unconfirmed (romaji) buffer.
+    if let Some(target_char) = target_reading.chars().nth(model.status.char_ as usize) {
+        if normalize_char(input) == normalize_char(target_char) {
+            is_correct = true;
+            advance_chars = 1;
+            // A direct match is authoritative and clears any pending romaji.
+            model.status.unconfirmed.clear();
+        }
+    }
+
+    // --- 2. If no direct match, attempt to process as romaji ---
     if !is_correct {
         let start_char_index = model.status.char_ as usize;
         if let Some((start_byte_index, _)) = target_reading.char_indices().nth(start_char_index) {
             let remaining_slice = &target_reading[start_byte_index..];
             let mut expect = Vec::new();
 
+            // Find all possible romaji patterns for the current position
             for (key, values) in model.layout.mapping.iter() {
                 if remaining_slice.starts_with(key) {
                     for v in values {
@@ -80,36 +92,43 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
                     }
                 }
             }
-            
-            log(&format!("  [Expect List] Found {} candidates:", expect.len()));
-            for (key, val) in &expect { log(&format!("    - Key: '{}', Value: {}", key, val)); }
 
-            for (key, val_str) in expect {
+            if !expect.is_empty() {
+                log(&format!("  [Expect List] Found {} candidates:", expect.len()));
+                for (key, val) in &expect { log(&format!("    - Key: '{}', Value: {}", key, val)); }
+
                 let mut current_input_str = model.status.unconfirmed.iter().collect::<String>();
                 current_input_str.push(input);
 
-                if val_str == current_input_str { // Romanji completed
-                    is_correct = true;
-                    model.status.unconfirmed.clear();
-                    advance_chars = key.chars().count();
-                    break;
-                } else if val_str.starts_with(&current_input_str) { // Romanji in progress
-                    is_correct = true;
-                    model.status.unconfirmed.push(input);
-                    advance_chars = 0;
-                    break;
+                for (key, val_str) in expect {
+                    let lower_val_str = val_str.to_lowercase();
+                    let lower_current_input_str = current_input_str.to_lowercase();
+
+                    if lower_val_str == lower_current_input_str { // Romanji completed
+                        is_correct = true;
+                        model.status.unconfirmed.clear();
+                        advance_chars = key.chars().count();
+                        break;
+                    } else if lower_val_str.starts_with(&lower_current_input_str) { // Romanji in progress
+                        is_correct = true;
+                        is_romaji_in_progress = true; // Mark that we don't advance the cursor yet
+                        model.status.unconfirmed.push(input);
+                        break;
+                    }
                 }
             }
         }
     }
 
-    // --- 3. Update model state based on outcome ---
+    // --- 3. Update model state based on the outcome ---
     if is_correct {
         model.status.last_wrong_keydown = None;
-        let correctness_segment = &mut model.typing_correctness.lines[current_line_idx].segments[model.status.segment as usize];
-        let start_char_pos = model.status.char_ as usize;
+        // Only advance cursor/correctness map if it's not a partial romaji input
+        if !is_romaji_in_progress {
+            let correctness_segment = &mut model.typing_correctness.lines[current_line_idx].segments[model.status.segment as usize];
+            let start_char_pos = model.status.char_ as usize;
 
-        if advance_chars > 0 { // A direct hit or completed romanji
+            // Check if any character being marked as correct was previously incorrect
             let mut has_error = false;
             for i in 0..advance_chars {
                 if correctness_segment.chars.get(start_char_pos + i) == Some(&TypingCorrectnessChar::Incorrect) {
@@ -118,7 +137,8 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
                 }
             }
             let new_status = if has_error { TypingCorrectnessChar::Incorrect } else { TypingCorrectnessChar::Correct };
-            
+
+            // Update correctness map for all advanced characters
             for i in 0..advance_chars {
                  if let Some(c) = correctness_segment.chars.get_mut(start_char_pos + i) {
                     *c = new_status.clone();
@@ -128,17 +148,22 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
         }
     } else { // Incorrect keypress
         model.status.last_wrong_keydown = Some(input);
-        model.status.unconfirmed.clear(); // Incorrect romanji input should clear the buffer.
+        model.status.unconfirmed.clear(); // Any incorrect keypress clears the romaji buffer
         let char_pos = model.status.char_ as usize;
-        let segment = &mut model.typing_correctness.lines[current_line_idx].segments[model.status.segment as usize];
-        if let Some(c) = segment.chars.get_mut(char_pos) { *c = TypingCorrectnessChar::Incorrect; }
+        // Mark the current target character as incorrect
+        if let Some(segment) = model.typing_correctness.lines[current_line_idx].segments.get_mut(model.status.segment as usize) {
+            if let Some(c) = segment.chars.get_mut(char_pos) {
+                *c = TypingCorrectnessChar::Incorrect;
+            }
+        }
     }
-    
+
     model.user_input.last_mut().unwrap().inputs.push(TypingInput { key: input, timestamp, is_correct });
 
     // --- 4. Check for segment/line/game completion ---
     let mut is_finished = false;
-    if advance_chars > 0 { // Check only if the cursor has advanced
+    // Only check for completion if the cursor actually moved
+    if advance_chars > 0 {
         if model.status.char_ as usize >= target_reading.chars().count() {
             model.status.char_ = 0;
             model.status.segment += 1;
@@ -151,7 +176,7 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
             }
         }
     }
-    
+
     log(&format!("  [Result] is_correct: {}, is_finished: {}", is_correct, is_finished));
     log(&format!("  [State After] line: {}, seg: {}, char: {}, unconfirmed: {:?}",
         model.status.line, model.status.segment, model.status.char_, model.status.unconfirmed));
