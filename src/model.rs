@@ -19,9 +19,6 @@ use core::fmt;
 
 use crate::layout_data;
 
-// (Content, Line, Segment, Model, TypingModel, etc. の定義は変更なし)
-// ...
-
 #[derive(Debug, Clone)]
 pub struct Content {
     pub title: Line,

@@ -94,23 +94,10 @@ pub fn run() -> Status {
 
         for item in render_list {
             match item {
-                Renderable::BigText { text, anchor, shift, align, font_size, color } => {
-                    let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
-                    let (text_width, text_height, _ascent) =
-                        gui_renderer::measure_text(&font, text.as_str(), pixel_font_size);
-                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
-                    let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
-                    draw_text(
-                        &mut pixel_buffer,
-                        width,
-                        &font,
-                        text.as_str(),
-                        (x as f32, y as f32),
-                        pixel_font_size,
-                        color,
-                    );
-                }
-                Renderable::Text { text, anchor, shift, align, font_size, color } => {
+                Renderable::BigText { text, anchor, shift, align, font_size, color } |
+                Renderable::Text { text, anchor, shift, align, font_size, color } |
+                Renderable::TypingBase { text, anchor, shift, align, font_size, color } |
+                Renderable::TypingRuby { text, anchor, shift, align, font_size, color } => {
                     let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
                     let (text_width, text_height, _ascent) =
                         gui_renderer::measure_text(&font, text.as_str(), pixel_font_size);

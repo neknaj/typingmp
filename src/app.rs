@@ -24,6 +24,7 @@ use core_maths::CoreFloat;
 use crate::model::{Model, ResultModel, Scroll, TypingModel, TypingStatus};
 use crate::parser;
 use crate::typing;
+use crate::ui; // typing_rendererの代わりにuiをインポート
 use crate::renderer::gui_renderer;
 use ab_glyph::FontRef;
 
@@ -139,7 +140,7 @@ impl App {
         }
 
         if let Some(model) = self.typing_model.as_mut() {
-            let base_font_size_enum = crate::ui::FontSize::WindowHeight(0.125);
+            let base_font_size_enum = crate::ui::FontSize::WindowHeight(ui::BASE_FONT_SIZE_RATIO);
             let base_pixel_font_size = crate::renderer::calculate_pixel_font_size(base_font_size_enum, width, height);
 
             if let Some(current_line_content) = model.content.lines.get(model.status.line as usize) {

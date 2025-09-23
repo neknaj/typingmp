@@ -1,3 +1,4 @@
+// src/renderer.rs
 // uefi featureが有効な場合、標準のallocクレートをインポート
 #[cfg(feature = "uefi")]
 extern crate alloc;
@@ -167,57 +168,106 @@ pub mod gui_renderer {
 pub mod tui_renderer {
     use super::*;
 
-    /// 全画面に大きなテキストを描画し、文字バッファを返す
-    pub fn render(
+    // TUIの1文字の縦横比をおよそ2:1と仮定
+    const TUI_CHAR_ASPECT_RATIO: f32 = 2.0;
+    // アートの1セルを構成する仮想ピクセル数。小さいほど高解像度（大きく）なる
+    const ART_V_PIXELS_PER_CELL: f32 = 2.0;
+
+    /// 指定されたテキストをASCIIアート化し、(文字バッファ, 幅, 高さ)を返す
+    pub fn render_text_to_art(
         font: &FontRef,
         text: &str,
-        width: usize,
-        height: usize,
-        ui_font_size: FontSize,
-    ) -> Vec<char> {
-        let mut buffer = vec![' '; width * height];
-        let font_size = super::calculate_pixel_font_size(ui_font_size, width, height);
-        let scale = font_size / (font.ascent_unscaled() - font.descent_unscaled());
-        let mut pen_x = 2.0;
-        let pen_y = height as f32 * 0.7;
-
-        for character in text.chars() {
-            let glyph = font
-                .glyph_id(character)
-                .with_scale_and_position(font_size, point(pen_x, pen_y));
-            if let Some(outlined) = font.outline_glyph(glyph) {
-                draw_glyph_to_char_buffer(&mut buffer, width, &outlined);
-            }
-            pen_x += font.h_advance_unscaled(font.glyph_id(character)) * scale;
+        font_size_px: f32,
+    ) -> (Vec<char>, usize, usize) {
+        if text.is_empty() {
+            return (Vec::new(), 0, 0);
         }
-        buffer
-    }
 
-    /// アウトライン化されたグリフを文字バッファに描画する（内部関数）
-    fn draw_glyph_to_char_buffer(buffer: &mut Vec<char>, width: usize, outlined: &OutlinedGlyph) {
-        let bounds = outlined.px_bounds();
-        outlined.draw(|x, y, c| {
-            let buffer_x = bounds.min.x as usize + x as usize;
-            let buffer_y = bounds.min.y as usize + y as usize;
-            let height = buffer.len() / width;
-            if buffer_x < width && buffer_y < height {
-                let index = buffer_y * width + buffer_x;
-                let coverage_char = match (c * 4.0).round() as u8 {
-                    0 => ' ',
-                    1 => '.',
-                    2 => '*',
-                    3 => '#',
-                    _ => '@',
-                };
-                if buffer[index] == ' ' {
-                    buffer[index] = coverage_char;
-                }
+        let scale = PxScale::from(font_size_px);
+        let scaled_font = font.as_scaled(scale);
+        let ascent = scaled_font.ascent();
+
+        // アート全体のピクセル単位でのバウンディングボックスを計算
+        let mut min_x = f32::MAX;
+        let mut max_x = f32::MIN;
+        let mut min_y = f32::MAX;
+        let mut max_y = f32::MIN;
+        let mut pen_x = 0.0;
+        let mut last_glyph = None;
+
+        for c in text.chars() {
+            let glyph_id = font.glyph_id(c);
+            if let Some(last) = last_glyph {
+                pen_x += scaled_font.kern(last, glyph_id);
             }
-        });
-    }
+            if let Some(outlined) = font.outline_glyph(glyph_id.with_scale(scale)) {
+                let bounds = outlined.px_bounds();
+                min_x = min_x.min(pen_x + bounds.min.x);
+                max_x = max_x.max(pen_x + bounds.max.x);
+                min_y = min_y.min(ascent + bounds.min.y);
+                max_y = max_y.max(ascent + bounds.max.y);
+            }
+            pen_x += scaled_font.h_advance(glyph_id);
+            last_glyph = Some(glyph_id);
+        }
+        max_x = max_x.max(pen_x); // 最後の文字の右端も考慮
 
-    /// テキストの描画サイズ（幅と高さ）を計算する
-    pub fn measure_text(text: &str) -> (u32, u32) {
-        (text.chars().count() as u32, 1)
+        if min_x > max_x { // テキストに描画可能なグリフがなかった場合
+            return (Vec::new(), 0, 0);
+        }
+
+        let art_cell_height = ART_V_PIXELS_PER_CELL;
+        let art_cell_width = art_cell_height / TUI_CHAR_ASPECT_RATIO;
+
+        let art_width = ((max_x - min_x) / art_cell_width).ceil() as usize;
+        let art_height = ((max_y - min_y) / art_cell_height).ceil() as usize;
+
+        if art_width == 0 || art_height == 0 {
+            return (Vec::new(), 0, 0);
+        }
+
+        let mut coverage_buffer = vec![0.0f32; art_width * art_height];
+
+        // グリフを描画し、各セルのカバレッジを計算
+        pen_x = 0.0;
+        last_glyph = None;
+        for c in text.chars() {
+            let glyph_id = font.glyph_id(c);
+            if let Some(last) = last_glyph {
+                pen_x += scaled_font.kern(last, glyph_id);
+            }
+            let glyph = glyph_id.with_scale_and_position(scale, point(pen_x, ascent));
+            if let Some(outlined) = font.outline_glyph(glyph) {
+                let bounds = outlined.px_bounds();
+                outlined.draw(|x, y, v| {
+                    let px = bounds.min.x + x as f32 - min_x;
+                    let py = bounds.min.y + y as f32 - min_y;
+
+                    let cell_x = (px / art_cell_width) as i32;
+                    let cell_y = (py / art_cell_height) as i32;
+
+                    if cell_x >= 0 && cell_x < art_width as i32 && cell_y >= 0 && cell_y < art_height as i32 {
+                        let index = cell_y as usize * art_width + cell_x as usize;
+                        coverage_buffer[index] = (coverage_buffer[index] + v).min(1.0);
+                    }
+                });
+            }
+            pen_x += scaled_font.h_advance(glyph_id);
+            last_glyph = Some(glyph_id);
+        }
+
+        // カバレッジを文字に変換
+        let char_buffer = coverage_buffer
+            .into_iter()
+            .map(|c| match (c * 4.99) as u8 {
+                0 => ' ',
+                1 => '.',
+                2 => '*',
+                3 => '#',
+                _ => '@',
+            })
+            .collect();
+
+        (char_buffer, art_width, art_height)
     }
 }

@@ -1,3 +1,4 @@
+// ./src/main.rs
 #![cfg_attr(feature = "uefi", no_std)]
 #![cfg_attr(feature = "uefi", no_main)]
 
@@ -14,8 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // "gui" が無効で "tui" が有効な場合にコンパイルされるブロック
     #[cfg(all(not(feature = "gui"), feature = "tui"))]
     {
-        println!("Starting TUI version... (Press 'q' to exit)");
-        // std::thread::sleep(std::time::Duration::from_secs(2));
+        println!("Starting TUI version... (Press ESC to exit)");
         return rust_multibackend_app::tui::run();
     }
 

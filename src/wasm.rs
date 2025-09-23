@@ -94,7 +94,9 @@ pub fn start() -> Result<(), JsValue> {
                     crate::renderer::draw_linear_gradient(&mut pixel_buffer, width, height, gradient.start_color, gradient.end_color, (0.0, 0.0), (width as f32, height as f32));
                 }
                 Renderable::BigText { text, anchor, shift, align, font_size, color } |
-                Renderable::Text { text, anchor, shift, align, font_size, color } => {
+                Renderable::Text { text, anchor, shift, align, font_size, color } |
+                Renderable::TypingBase { text, anchor, shift, align, font_size, color } |
+                Renderable::TypingRuby { text, anchor, shift, align, font_size, color } => {
                     let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
                     let (text_width, text_height, _) = gui_renderer::measure_text(&font, &text, pixel_font_size);
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);

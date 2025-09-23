@@ -23,6 +23,7 @@ const WRONG_KEY_COLOR: u32 = 0xFF_F55252;
 const CURSOR_COLOR: u32 = 0xFF_FFFFFF;
 
 // --- Layout Control Constants ---
+pub const BASE_FONT_SIZE_RATIO: f32 = 0.125;
 const UPPER_ROW_Y_OFFSET_FACTOR: f32 = 1.2;
 const LOWER_ROW_Y_OFFSET_FACTOR: f32 = 0.5;
 const RUBY_Y_OFFSET_FACTOR: f32 = 1.0;
@@ -47,7 +48,7 @@ pub fn build_typing_renderables(
     let status = &model.status;
     let scroll_offset = model.scroll.scroll as f32;
 
-    let base_font_size = FontSize::WindowHeight(0.125);
+    let base_font_size = FontSize::WindowHeight(BASE_FONT_SIZE_RATIO);
     let base_pixel_font_size = crate::renderer::calculate_pixel_font_size(base_font_size, width, height);
     let ruby_pixel_font_size = base_pixel_font_size * 0.4;
     let small_ruby_pixel_font_size = base_pixel_font_size * 0.3;
@@ -91,7 +92,14 @@ pub fn build_typing_renderables(
             // Center the ruby above the base text we just drew.
             let ruby_x = upper_pen_x + (base_w as f32 - ruby_w as f32) / 2.0;
             let ruby_y = upper_y - ruby_pixel_font_size * RUBY_Y_OFFSET_FACTOR;
-            renderables.push(Renderable::Text { text: reading.clone(), anchor: Anchor::TopLeft, shift: Shift {x: ruby_x / width as f32, y: ruby_y / height as f32}, align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top}, font_size: FontSize::WindowHeight(0.125 * 0.4), color });
+            renderables.push(Renderable::Text {
+                text: reading.clone(),
+                anchor: Anchor::TopLeft,
+                shift: Shift {x: ruby_x / width as f32, y: ruby_y / height as f32},
+                align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top},
+                font_size: FontSize::WindowHeight(BASE_FONT_SIZE_RATIO * 0.4),
+                color
+            });
         }
 
         // IMPORTANT: Advance the pen by the BASE width.
@@ -122,7 +130,14 @@ pub fn build_typing_renderables(
             // Center the ruby above the base text we just drew.
             let ruby_x = lower_pen_x + (base_w as f32 - small_reading_w as f32) / 2.0;
             let ruby_y = lower_y - small_ruby_pixel_font_size * RUBY_Y_OFFSET_FACTOR;
-            renderables.push(Renderable::Text { text: reading.clone(), anchor: Anchor::TopLeft, shift: Shift { x: ruby_x / width as f32, y: ruby_y / height as f32 }, align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top}, font_size: FontSize::WindowHeight(0.125 * 0.3), color });
+            renderables.push(Renderable::Text {
+                text: reading.clone(),
+                anchor: Anchor::TopLeft,
+                shift: Shift { x: ruby_x / width as f32, y: ruby_y / height as f32 },
+                align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top},
+                font_size: FontSize::WindowHeight(BASE_FONT_SIZE_RATIO * 0.3),
+                color
+            });
         }
         
         // IMPORTANT: Advance the pen by the BASE width.

@@ -13,19 +13,19 @@ use crate::model::{Model, TypingModel, ResultModel, TypingCorrectnessContent, Ty
 use crate::model::{Content, Segment};
 
 // Helper function for logging to handle both native and wasm targets.
-fn log(message: &str) {
+fn log(_message: &str) {
     // TUIモード (`tui` featureが有効で `gui` featureが無効) の場合はログを出力しない
     #[cfg(any(not(feature = "tui"), feature = "gui"))]
     {
         #[cfg(not(target_arch = "wasm32"))]
         {
             #[cfg(not(feature = "uefi"))]
-            println!("{}", message);
+            println!("{}", _message);
             #[cfg(feature = "uefi")]
-            uefi::println!("{}", message);
+            uefi::println!("{}", _message);
         }
         #[cfg(target_arch = "wasm32")]
-        web_sys::console::log_1(&message.into());
+        web_sys::console::log_1(&_message.into());
     }
 }
 
