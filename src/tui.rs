@@ -1,7 +1,7 @@
 // src/tui.rs
 
 #[cfg(not(feature = "uefi"))]
-use crate::app::{App, AppEvent, TuiDisplayMode}; // TuiDisplayMode をインポート
+use crate::app::{App, AppEvent, Fonts, TuiDisplayMode};
 #[cfg(not(feature = "uefi"))]
 use crate::model::Segment;
 #[cfg(not(feature = "uefi"))]
@@ -33,14 +33,22 @@ const VIRTUAL_CELL_HEIGHT: usize = 1;
 /// TUIアプリケーションのメイン関数
 #[cfg(not(feature = "uefi"))]
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let font_data = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
-    let font = FontRef::try_from_slice(font_data).map_err(|_| "Failed to load font from slice")?;
+    let yuji_font_data = include_bytes!("../fonts/YujiSyuku-Regular.ttf");
+    let yuji_font = FontRef::try_from_slice(yuji_font_data).map_err(|_| "Failed to load Yuji Syuku font")?;
+    
+    let noto_font_data = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
+    let noto_font = FontRef::try_from_slice(noto_font_data).map_err(|_| "Failed to load Noto Serif JP font")?;
+
+    let fonts = Fonts {
+        yuji_syuku: yuji_font,
+        noto_serif: noto_font,
+    };
 
     let mut stdout = stdout();
     terminal::enable_raw_mode()?;
     execute!(stdout, terminal::EnterAlternateScreen, cursor::Hide)?;
 
-    let mut app = App::new();
+    let mut app = App::new(fonts);
     app.on_event(AppEvent::Start);
 
     let mut previous_buffer = Vec::new();
@@ -51,11 +59,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         let virtual_width = cols * VIRTUAL_CELL_WIDTH;
         let virtual_height = rows * VIRTUAL_CELL_HEIGHT;
-        app.update(virtual_width, virtual_height, &font);
+        
+        app.update(virtual_width, virtual_height);
 
         let mut current_buffer = vec![' '; cols * rows];
 
-        let render_list = ui::build_ui(&app, &font, virtual_width, virtual_height);
+        let current_font = app.get_current_font();
+        let render_list = ui::build_ui(&app, current_font, virtual_width, virtual_height);
 
         for item in render_list {
             match item {
@@ -64,7 +74,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     match app.tui_display_mode {
                         TuiDisplayMode::AsciiArt | TuiDisplayMode::Braille => {
                             let is_braille = app.tui_display_mode == TuiDisplayMode::Braille;
-                            draw_art_text(&mut current_buffer, &font, &text, anchor, shift, align, font_size, cols, rows, is_braille);
+                            draw_art_text(&mut current_buffer, current_font, &text, anchor, shift, align, font_size, cols, rows, is_braille);
                         }
                         TuiDisplayMode::SimpleText => {
                             draw_plain_text(&mut current_buffer, &text, anchor, shift, align, cols, rows);
@@ -89,10 +99,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             let renderer = if is_braille { tui_renderer::render_text_to_braille_art } else { tui_renderer::render_text_to_art };
 
                             let total_width: u32 = segments.iter().map(|seg| {
-                                renderer(&font, &seg.base_text, font_size_px).1 as u32
+                                renderer(current_font, &seg.base_text, font_size_px).1 as u32
                             }).sum();
                             
-                            let (_, _, line_total_height, line_ascent) = renderer(&font, "|", font_size_px);
+                            let (_, _, line_total_height, line_ascent) = renderer(current_font, "|", font_size_px);
 
                             if total_width == 0 { continue; }
 
@@ -101,14 +111,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             let line_baseline_y = line_start_y + line_ascent as i32;
 
                             for seg in segments {
-                                let (art_buffer, art_width, _, char_ascent) = renderer(&font, &seg.base_text, font_size_px);
+                                let (art_buffer, art_width, _, char_ascent) = renderer(current_font, &seg.base_text, font_size_px);
                                 let blit_y = line_baseline_y - char_ascent as i32;
                                 blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, 0, pen_x as isize, blit_y as isize);
 
                                 if let Some(ruby) = &seg.ruby_text {
                                     if is_braille {
                                         let ruby_font_size_px = font_size_px * 0.5;
-                                        let (ruby_art_buffer, ruby_art_width, ruby_art_height, _) = tui_renderer::render_text_to_braille_art(&font, &ruby, ruby_font_size_px);
+                                        let (ruby_art_buffer, ruby_art_width, ruby_art_height, _) = tui_renderer::render_text_to_braille_art(current_font, &ruby, ruby_font_size_px);
                                         let ruby_anchor_pos = (pen_x + (art_width as i32 / 2), line_start_y - 1);
                                         let (ruby_x, ruby_y) = ui::calculate_aligned_position(ruby_anchor_pos, ruby_art_width as u32, ruby_art_height as u32, Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Bottom });
                                         blit_art(&mut current_buffer, cols, rows, &ruby_art_buffer, ruby_art_width, ruby_art_height, ruby_x as isize, ruby_y as isize);
@@ -149,12 +159,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                             Segment::Plain { text } => text,
                                             Segment::Annotated { base, .. } => base,
                                         };
-                                        renderer(&font, base_text, font_size_px).1 as u32
+                                        renderer(current_font, base_text, font_size_px).1 as u32
                                     }).sum()
                                 })
                             });
                             
-                            let (_, _, line_total_height, line_ascent) = renderer(&font, "|", font_size_px);
+                            let (_, _, line_total_height, line_ascent) = renderer(current_font, "|", font_size_px);
 
                             if total_width == 0 { continue; }
 
@@ -165,14 +175,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             for seg in segments {
                                 match seg {
                                     LowerTypingSegment::Completed { base_text, ruby_text, .. } => {
-                                        let (art_buffer, art_width, _, char_ascent) = renderer(&font, &base_text, font_size_px);
+                                        let (art_buffer, art_width, _, char_ascent) = renderer(current_font, &base_text, font_size_px);
                                         let blit_y = line_baseline_y - char_ascent as i32;
                                         blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, 0, pen_x as isize, blit_y as isize);
 
                                         if let Some(ruby) = ruby_text {
                                             if is_braille {
                                                 let ruby_font_size_px = font_size_px * 0.5;
-                                                let (ruby_art_buffer, ruby_art_width, ruby_art_height, _) = tui_renderer::render_text_to_braille_art(&font, &ruby, ruby_font_size_px);
+                                                let (ruby_art_buffer, ruby_art_width, ruby_art_height, _) = tui_renderer::render_text_to_braille_art(current_font, &ruby, ruby_font_size_px);
                                                 let ruby_anchor_pos = (pen_x + (art_width as i32 / 2), line_start_y - 1);
                                                 let (ruby_x, ruby_y) = ui::calculate_aligned_position(ruby_anchor_pos, ruby_art_width as u32, ruby_art_height as u32, Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Bottom });
                                                 blit_art(&mut current_buffer, cols, rows, &ruby_art_buffer, ruby_art_width, ruby_art_height, ruby_x as isize, ruby_y as isize);
@@ -189,7 +199,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                         for el in elements {
                                             match el {
                                                 ActiveLowerElement::Typed { character, .. } => {
-                                                    let (art_buffer, art_width, _, char_ascent) = renderer(&font, &character.to_string(), font_size_px);
+                                                    let (art_buffer, art_width, _, char_ascent) = renderer(current_font, &character.to_string(), font_size_px);
                                                     let blit_y = line_baseline_y - char_ascent as i32;
                                                     blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, 0, pen_x as isize, blit_y as isize);
                                                     pen_x += art_width as i32;
@@ -210,13 +220,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                                     }
                                                 }
                                                 ActiveLowerElement::UnconfirmedInput(s) => {
-                                                    let (art_buffer, art_width, _, char_ascent) = renderer(&font, &s, font_size_px);
+                                                    let (art_buffer, art_width, _, char_ascent) = renderer(current_font, &s, font_size_px);
                                                     let blit_y = line_baseline_y - char_ascent as i32;
                                                     blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, 0, pen_x as isize, blit_y as isize);
                                                     pen_x += art_width as i32;
                                                 }
                                                 ActiveLowerElement::LastIncorrectInput(c) => {
-                                                    let (art_buffer, art_width, _, char_ascent) = renderer(&font, &c.to_string(), font_size_px);
+                                                    let (art_buffer, art_width, _, char_ascent) = renderer(current_font, &c.to_string(), font_size_px);
                                                     let blit_y = line_baseline_y - char_ascent as i32;
                                                     blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, 0, pen_x as isize, blit_y as isize);
                                                     pen_x += art_width as i32;

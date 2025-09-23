@@ -38,85 +38,93 @@ pub enum AppState {
     ProblemSelection,
     Typing,
     Result,
+    Settings, // 設定画面の状態を追加
 }
 
 /// TUIの描画モードを定義するenum
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum TuiDisplayMode {
-    /// ASCIIアートでリッチに表示するモード
     AsciiArt,
-    /// シンプルなテキストで表示するモード
     SimpleText,
-    /// 点字パターンで高解像度表示するモード
     Braille,
+}
+
+/// 利用可能なフォントを定義するenum
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub enum FontChoice {
+    YujiSyuku,
+    NotoSerifJP,
+}
+
+/// ロードされたフォントデータを保持する構造体
+pub struct Fonts<'a> {
+    pub yuji_syuku: FontRef<'a>,
+    pub noto_serif: FontRef<'a>,
 }
 
 #[cfg(target_arch = "wasm32")]
 const MENU_ITEM_COUNT: usize = 1;
 
 #[cfg(not(target_arch = "wasm32"))]
-const MENU_ITEM_COUNT: usize = 2;
+const MENU_ITEM_COUNT: usize = 3; // "Settings" を追加
 
 /// アプリケーションで発生するイベントを定義するenum
 pub enum AppEvent {
     Start,
     ChangeScene,
-    /// 文字入力イベント (タイムスタンプも受け取るように変更)
     Char { c: char, timestamp: f64 },
-    /// バックスペースイベント
     Backspace,
-    /// 上キーイベント
     Up,
-    /// 下キーイベント
     Down,
-    /// エンターキーイベント
     Enter,
-    /// エスケープキーイベント
     Escape,
-    /// TUIの描画モードを切り替えるイベント
     CycleTuiMode,
-    /// アプリケーション終了イベント
     Quit,
 }
 
 /// アプリケーション全体で共有される状態を保持する構造体
-pub struct App {
-    /// 現在のアプリケーションの状態
+pub struct App<'a> {
     pub state: AppState,
-    /// メインメニューで選択されている項目
     pub selected_main_menu_item: usize,
-    /// 問題選択画面で選択されている項目
     pub selected_problem_item: usize,
-    /// 問題のリスト
+    pub selected_settings_item: usize,
     pub problem_list: &'static [&'static str],
-    /// タイピング中の状態モデル
     pub typing_model: Option<TypingModel>,
-    /// 結果画面の状態モデル
     pub result_model: Option<ResultModel>,
-    /// 画面下部に表示されるステータスメッセージ
     pub status_text: String,
-    /// 画面右下に表示される操作方法テキスト
     pub instructions_text: String,
-    /// TUIの描画モード
     pub tui_display_mode: TuiDisplayMode,
-    /// アプリケーションが終了すべきかどうかを示すフラグ
     pub should_quit: bool,
+    // フォント管理用のフィールド
+    pub fonts: Fonts<'a>,
+    pub font_choice: FontChoice,
 }
 
-impl App {
+impl<'a> App<'a> {
     /// Appの新しいインスタンスを生成する
-    pub fn new() -> Self {
+    pub fn new(fonts: Fonts<'a>) -> Self {
         Self {
             state: AppState::MainMenu,
             selected_main_menu_item: 0,
             selected_problem_item: 0,
+            selected_settings_item: 0,
             problem_list: PROBLEM_FILES_NAMES,
             typing_model: None,
             result_model: None,
             status_text: String::new(),
             instructions_text: String::new(),
-            tui_display_mode: TuiDisplayMode::AsciiArt, // 初期モードを設定
+            tui_display_mode: TuiDisplayMode::AsciiArt,
             should_quit: false,
+            fonts,
+            font_choice: FontChoice::YujiSyuku, // デフォルトフォント
+        }
+    }
+
+    /// 現在選択されているフォントへの参照を取得する
+    pub fn get_current_font(&self) -> &FontRef<'a> {
+        match self.font_choice {
+            FontChoice::YujiSyuku => &self.fonts.yuji_syuku,
+            FontChoice::NotoSerifJP => &self.fonts.noto_serif,
         }
     }
 
@@ -150,12 +158,18 @@ impl App {
     }
 
     /// 毎フレームの状態更新（スクロール計算など）
-    pub fn update(&mut self, width: usize, height: usize, font: &FontRef) {
+    pub fn update(&mut self, width: usize, height: usize) {
         if self.state != AppState::Typing {
             return;
         }
 
         if let Some(model) = self.typing_model.as_mut() {
+            // ブロック内で不変参照を取得することで借用ルール違反を回避
+            let font = match self.font_choice {
+                FontChoice::YujiSyuku => &self.fonts.yuji_syuku,
+                FontChoice::NotoSerifJP => &self.fonts.noto_serif,
+            };
+
             let base_font_size_enum = crate::ui::FontSize::WindowHeight(ui::BASE_FONT_SIZE_RATIO);
             let base_pixel_font_size = crate::renderer::calculate_pixel_font_size(base_font_size_enum, width, height);
 
@@ -202,7 +216,7 @@ impl App {
                 // 4. Smoothly update the scroll value
                 let now = model.scroll.scroll as f32;
                 let d = target_scroll - now;
-                model.scroll.scroll += (d * (d.powi(2)) / (1000000.0 + d.powi(2))) as f64;
+                model.scroll.scroll += (d * (d.powi(2)) / (100000.0 + d.powi(2))) as f64;
             }
         }
     }
@@ -210,33 +224,24 @@ impl App {
     /// アプリケーションイベントを処理する
     pub fn on_event(&mut self, event: AppEvent) {
         // --- グローバルイベントの処理 ---
-        // モード切り替えイベントは、現在のシーンに関わらず常に処理する
         if let AppEvent::CycleTuiMode = event {
             self.tui_display_mode = match self.tui_display_mode {
                 TuiDisplayMode::AsciiArt => TuiDisplayMode::SimpleText,
                 TuiDisplayMode::SimpleText => TuiDisplayMode::Braille,
                 TuiDisplayMode::Braille => TuiDisplayMode::AsciiArt,
             };
-            // モードが変更されたことをユーザーに通知
             self.status_text = format!("Display Mode: {:?}", self.tui_display_mode);
-            return; // モード変更時は他のイベント処理をスキップ
+            return;
         }
 
         // --- シーンごとのイベント処理 ---
         if let AppEvent::ChangeScene = event {
             match self.state {
-                AppState::MainMenu => {
-                    self.instructions_text = "Up/Down: Navigate | Enter: Select".to_string();
-                }
-                AppState::ProblemSelection => {
-                    self.instructions_text = "Up/Down: Select | Enter: Start | ESC: Back".to_string();
-                }
-                AppState::Typing => {
-                    self.instructions_text = "ESC: Back to Menu | Tab: Cycle Mode".to_string();
-                }
-                AppState::Result => {
-                    self.instructions_text = "Enter/ESC: Back to Menu".to_string();
-                }
+                AppState::MainMenu => self.instructions_text = "Up/Down: Navigate | Enter: Select".to_string(),
+                AppState::ProblemSelection => self.instructions_text = "Up/Down: Select | Enter: Start | ESC: Back".to_string(),
+                AppState::Typing => self.instructions_text = "ESC: Back to Menu | Tab: Cycle Mode".to_string(),
+                AppState::Result => self.instructions_text = "Enter/ESC: Back to Menu".to_string(),
+                AppState::Settings => self.instructions_text = "Up/Down: Select | Enter: Apply | ESC: Back".to_string(),
             }
         }
 
@@ -244,47 +249,38 @@ impl App {
             AppState::MainMenu => {
                 self.status_text = "Welcome to Neknaj Typing Multi-Platform".to_string();
                 match event {
-                    AppEvent::Up => {
-                        if self.selected_main_menu_item > 0 {
-                            self.selected_main_menu_item -= 1;
-                        }
-                    }
-                    AppEvent::Down => {
-                        if self.selected_main_menu_item < MENU_ITEM_COUNT - 1 {
-                            self.selected_main_menu_item += 1;
-                        }
-                    }
+                    AppEvent::Up => if self.selected_main_menu_item > 0 { self.selected_main_menu_item -= 1; },
+                    AppEvent::Down => if self.selected_main_menu_item < MENU_ITEM_COUNT - 1 { self.selected_main_menu_item += 1; },
                     AppEvent::Enter => match self.selected_main_menu_item {
                         0 => {
                             self.state = AppState::ProblemSelection;
                             self.on_event(AppEvent::ChangeScene);
                         }
                         1 => {
+                            self.state = AppState::Settings;
+                            self.on_event(AppEvent::ChangeScene);
+                        }
+                        2 => {
                             #[cfg(not(target_arch = "wasm32"))]
-                            {
-                                self.should_quit = true;
-                            }
+                            { self.should_quit = true; }
                         }
                         _ => {}
                     },
                     _ => {}
                 }
             }
-            AppState::ProblemSelection => {
-                self.status_text = "Select a problem to type.".to_string();
+            AppState::Settings => {
+                self.status_text = "Select a font.".to_string();
                 match event {
-                    AppEvent::Up => {
-                        if self.selected_problem_item > 0 {
-                            self.selected_problem_item -= 1;
-                        }
-                    }
-                    AppEvent::Down => {
-                        if self.selected_problem_item < self.problem_list.len() - 1 {
-                            self.selected_problem_item += 1;
-                        }
-                    }
+                    AppEvent::Up => if self.selected_settings_item > 0 { self.selected_settings_item -= 1; },
+                    AppEvent::Down => if self.selected_settings_item < 1 { self.selected_settings_item += 1; },
                     AppEvent::Enter => {
-                        self.start_typing_session(self.selected_problem_item);
+                        self.font_choice = match self.selected_settings_item {
+                            0 => FontChoice::YujiSyuku,
+                            _ => FontChoice::NotoSerifJP,
+                        };
+                        self.state = AppState::MainMenu;
+                        self.on_event(AppEvent::ChangeScene);
                     }
                     AppEvent::Escape => {
                         self.state = AppState::MainMenu;
@@ -293,29 +289,26 @@ impl App {
                     _ => {}
                 }
             }
+            AppState::ProblemSelection => {
+                self.status_text = "Select a problem to type.".to_string();
+                match event {
+                    AppEvent::Up => if self.selected_problem_item > 0 { self.selected_problem_item -= 1; },
+                    AppEvent::Down => if self.selected_problem_item < self.problem_list.len() - 1 { self.selected_problem_item += 1; },
+                    AppEvent::Enter => self.start_typing_session(self.selected_problem_item),
+                    AppEvent::Escape => {
+                        self.state = AppState::MainMenu;
+                        self.on_event(AppEvent::ChangeScene);
+                    }
+                    _ => {}
+                }
+            }
             AppState::Typing => {
-                // ステータステキストをリセット
                 self.status_text = "Start typing!".to_string();
                 match event {
                     AppEvent::Char { c, timestamp } => {
-                        #[cfg(any(not(feature = "tui"), feature = "gui"))]
-                        {
-                            #[cfg(not(target_arch = "wasm32"))]
-                            {
-                                #[cfg(not(feature = "uefi"))]
-                                println!("[APP] Received char: '{}'", c);
-                                #[cfg(feature = "uefi")]
-                                uefi::println!("[APP] Received char: '{}'", c);
-                            }
-                            #[cfg(target_arch = "wasm32")]
-                            web_sys::console::log_1(&format!("[APP] Received char: '{}'", c).into());
-                        }
-
                         if let Some(model) = self.typing_model.take() {
                             match typing::key_input(model, c, timestamp) {
-                                Model::Typing(new_model) => {
-                                    self.typing_model = Some(new_model);
-                                }
+                                Model::Typing(new_model) => self.typing_model = Some(new_model),
                                 Model::Result(result_model) => {
                                     self.result_model = Some(result_model);
                                     self.state = AppState::Result;
@@ -338,7 +331,7 @@ impl App {
                     let metrics = typing::calculate_total_metrics(&result.typing_model);
                     self.status_text = format!(
                         "Complete! Speed: {:.2} kpm, Accuracy: {:.2}%",
-                        metrics.speed * 60.0, // kpm is often chars per minute
+                        metrics.speed * 60.0,
                         metrics.accuracy * 100.0
                     );
                 }

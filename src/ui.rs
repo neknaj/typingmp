@@ -20,7 +20,7 @@ use alloc::{format, string::{String, ToString}};
 #[cfg(not(feature = "uefi"))]
 use std::string::{String, ToString};
 
-use crate::app::{App, AppState};
+use crate::app::{App, AppState, FontChoice};
 use crate::model::{Segment, TypingCorrectnessChar, TypingCorrectnessSegment};
 use crate::renderer::gui_renderer;
 use crate::typing; // For calculate_total_metrics
@@ -173,7 +173,7 @@ pub enum Renderable {
 const MENU_ITEMS: [&str; 1] = ["Start Typing"];
 
 #[cfg(not(target_arch = "wasm32"))]
-const MENU_ITEMS: [&str; 2] = ["Start Typing", "Quit"];
+const MENU_ITEMS: [&str; 3] = ["Start Typing", "Settings", "Quit"];
 
 // --- タイピング画面のレイアウト定数 ---
 pub const BASE_FONT_SIZE_RATIO: f32 = 0.3;
@@ -190,18 +190,20 @@ pub const CURSOR_COLOR: u32 = 0xFF_FFFFFF;
 pub const UNCONFIRMED_COLOR: u32 = 0xFF_CCCCCC;
 
 /// Appの状態を受け取り、描画リスト（UIレイアウト）を構築する
-pub fn build_ui(app: &App, font: &FontRef, width: usize, height: usize) -> Vec<Renderable> {
+pub fn build_ui<'a>(app: &App<'a>, font: &FontRef<'a>, width: usize, height: usize) -> Vec<Renderable> {
     let mut render_list = Vec::new();
 
     let menu_gradient = Gradient { start_color: 0xFF_000010, end_color: 0xFF_000000 };
     let typing_gradient = Gradient { start_color: 0xFF_100010, end_color: 0xFF_000000 };
     let result_gradient = Gradient { start_color: 0xFF_101000, end_color: 0xFF_000000 };
+    let settings_gradient = Gradient { start_color: 0xFF_001010, end_color: 0xFF_000000 };
 
     match app.state {
         AppState::MainMenu => build_main_menu_ui(app, &mut render_list, menu_gradient),
         AppState::Typing => build_typing_ui(app, &mut render_list, typing_gradient, font, width, height),
         AppState::ProblemSelection => build_problem_selection_ui(app, &mut render_list, menu_gradient),
         AppState::Result => build_result_ui(app, &mut render_list, result_gradient),
+        AppState::Settings => build_settings_ui(app, &mut render_list, settings_gradient),
     }
 
     if app.state != AppState::Typing {
@@ -216,7 +218,6 @@ pub fn build_ui(app: &App, font: &FontRef, width: usize, height: usize) -> Vec<R
     }
 
     // --- 画面下部の共通UI ---
-    // GUIビルドの場合は "GUI" を表示
     #[cfg(feature = "gui")]
     {
         render_list.push(Renderable::Text {
@@ -229,7 +230,6 @@ pub fn build_ui(app: &App, font: &FontRef, width: usize, height: usize) -> Vec<R
         });
     }
 
-    // TUIビルドの場合は現在のモードを表示 (GUIとTUIが両方有効な場合はGUIが優先される)
     #[cfg(all(feature = "tui", not(feature = "gui")))]
     {
         let mode_text = format!("TUI {:?}", app.tui_display_mode);
@@ -259,10 +259,10 @@ fn build_main_menu_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gr
     render_list.push(Renderable::Background { gradient });
     render_list.push(Renderable::BigText {
         text: "Neknaj Typing MP".to_string(),
-        anchor: Anchor::Center,
-        shift: Shift { x: 0.0, y: -0.3 },
-        align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
-        font_size: FontSize::WindowHeight(0.25),
+        anchor: Anchor::TopCenter,
+        shift: Shift { x: 0.0, y: 0.1 },
+        align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
+        font_size: FontSize::WindowHeight(0.20),
         color: 0xFF_FFFFFF,
     });
     for (i, item) in MENU_ITEMS.iter().enumerate() {
@@ -274,7 +274,50 @@ fn build_main_menu_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gr
         render_list.push(Renderable::Text {
             text,
             anchor: Anchor::Center,
-            shift: Shift { x: 0.0, y: -0.1 + (i as f32 * 0.1) },
+            shift: Shift { x: 0.0, y: 0.0 + (i as f32 * 0.1) },
+            align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
+            font_size: FontSize::WindowHeight(0.05),
+            color,
+        });
+    }
+}
+
+fn build_settings_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient) {
+    render_list.push(Renderable::Background { gradient });
+    render_list.push(Renderable::BigText {
+        text: "Settings".to_string(),
+        anchor: Anchor::TopCenter,
+        shift: Shift { x: 0.0, y: 0.1 },
+        align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
+        font_size: FontSize::WindowHeight(0.2),
+        color: 0xFF_FFFFFF,
+    });
+
+    let fonts = [
+        (FontChoice::YujiSyuku, "Yuji Syuku"),
+        (FontChoice::NotoSerifJP, "Noto Serif JP"),
+    ];
+
+    for (i, (font_choice, name)) in fonts.iter().enumerate() {
+        let is_selected = i == app.selected_settings_item;
+        let is_active = *font_choice == app.font_choice;
+
+        let mut display_text = if is_selected {
+            format!("> {}", name)
+        } else {
+            format!("  {}", name)
+        };
+        
+        if is_active {
+            display_text.push_str(" *");
+        }
+
+        let color = if is_selected { 0xFF_FFFF00 } else { 0xFF_FFFFFF };
+
+        render_list.push(Renderable::Text {
+            text: display_text,
+            anchor: Anchor::Center,
+            shift: Shift { x: 0.0, y: 0.0 + (i as f32 * 0.1) },
             align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
             font_size: FontSize::WindowHeight(0.05),
             color,
@@ -284,12 +327,12 @@ fn build_main_menu_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gr
 
 fn build_problem_selection_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient) {
     render_list.push(Renderable::Background { gradient });
-    render_list.push(Renderable::Text {
+    render_list.push(Renderable::BigText {
         text: "Select Problem".to_string(),
         anchor: Anchor::TopCenter,
         shift: Shift { x: 0.0, y: 0.1 },
-        align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
-        font_size: FontSize::WindowHeight(0.1),
+        align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
+        font_size: FontSize::WindowHeight(0.2),
         color: 0xFF_FFFFFF,
     });
 
@@ -337,7 +380,7 @@ fn is_segment_correct(segment: &TypingCorrectnessSegment) -> bool {
     !segment.chars.iter().any(|c| *c == TypingCorrectnessChar::Incorrect)
 }
 
-fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient, font: &FontRef, width: usize, height: usize) {
+fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradient: Gradient, font: &FontRef<'a>, width: usize, height: usize) {
     render_list.push(Renderable::Background { gradient });
 
     if let Some(model) = &app.typing_model {

@@ -1,7 +1,7 @@
 // src/gui.rs
 
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
-use crate::app::{App, AppEvent};
+use crate::app::{App, AppEvent, Fonts}; // Fontsをインポート
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
 use crate::renderer::{calculate_pixel_font_size, draw_linear_gradient, gui_renderer};
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
@@ -11,7 +11,7 @@ use ab_glyph::FontRef;
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
 
-// --- Windows固有のインポートと処理 (変更なし) ---
+// ... (Windows固有の処理は変更なし)
 #[cfg(all(target_os = "windows", not(feature = "uefi")))]
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 #[cfg(all(target_os = "windows", not(feature = "uefi")))]
@@ -32,13 +32,21 @@ const DWMWA_BORDER_COLOR: u32 = 37;
 fn rgb_to_colorref(r: u8, g: u8, b: u8) -> u32 {
     ((b as u32) << 16) | ((g as u32) << 8) | (r as u32)
 }
-// --- End Windows固有のインポートと処理 ---
 
 /// GUIアプリケーションのメイン関数
 #[cfg(not(feature = "uefi"))]
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let font_data = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
-    let font = FontRef::try_from_slice(font_data).map_err(|_| "Failed to load font from slice")?;
+    // フォントの読み込み
+    let yuji_font_data = include_bytes!("../fonts/YujiSyuku-Regular.ttf");
+    let yuji_font = FontRef::try_from_slice(yuji_font_data).map_err(|_| "Failed to load Yuji Syuku font")?;
+    
+    let noto_font_data = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
+    let noto_font = FontRef::try_from_slice(noto_font_data).map_err(|_| "Failed to load Noto Serif JP font")?;
+
+    let fonts = Fonts {
+        yuji_syuku: yuji_font,
+        noto_serif: noto_font,
+    };
 
     let mut width = 800;
     let mut height = 500;
@@ -49,10 +57,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         WindowOptions { resize: true, ..WindowOptions::default() },
     )?;
     window.set_target_fps(60);
-    
-    // (Windows固有のコードは変更なし)
 
-    let mut app = App::new();
+    let mut app = App::new(fonts); // Appにフォントを渡す
     app.on_event(AppEvent::Start);
 
     while window.is_open() && !app.should_quit {
@@ -64,10 +70,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         handle_input(&mut window, &mut app);
 
-        app.update(width, height, &font);
+        app.update(width, height);
 
         let mut pixel_buffer = vec![0u32; width * height];
-        let render_list = ui::build_ui(&app, &font, width, height);
+        let current_font = app.get_current_font(); // 現在のフォントを取得
+        let render_list = ui::build_ui(&app, current_font, width, height);
 
         for item in render_list {
             match item {
@@ -77,19 +84,19 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Renderable::BigText { text, anchor, shift, align, font_size, color } |
                 Renderable::Text { text, anchor, shift, align, font_size, color } => {
                     let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
-                    let (text_width, text_height, _) = gui_renderer::measure_text(&font, &text, pixel_font_size);
+                    let (text_width, text_height, _) = gui_renderer::measure_text(current_font, &text, pixel_font_size);
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
                     let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
-                    gui_renderer::draw_text(&mut pixel_buffer, width, &font, &text, (x as f32, y as f32), pixel_font_size, color);
+                    gui_renderer::draw_text(&mut pixel_buffer, width, current_font, &text, (x as f32, y as f32), pixel_font_size, color);
                 }
                 Renderable::TypingUpper { segments, anchor, shift, align, font_size } => {
                     let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
                     let ruby_pixel_font_size = pixel_font_size * 0.4;
                     
                     let total_width = segments.iter().map(|seg| {
-                        gui_renderer::measure_text(&font, &seg.base_text, pixel_font_size).0
+                        gui_renderer::measure_text(current_font, &seg.base_text, pixel_font_size).0
                     }).sum::<u32>();
-                    let total_height = gui_renderer::measure_text(&font, " ", pixel_font_size).1;
+                    let total_height = gui_renderer::measure_text(current_font, " ", pixel_font_size).1;
 
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
                     let (mut pen_x, y) = ui::calculate_aligned_position(anchor_pos, total_width, total_height, align);
@@ -101,24 +108,24 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             UpperSegmentState::Active => ui::ACTIVE_COLOR,
                             UpperSegmentState::Pending => ui::PENDING_COLOR,
                         };
-                        gui_renderer::draw_text(&mut pixel_buffer, width, &font, &seg.base_text, (pen_x as f32, y as f32), pixel_font_size, color);
+                        gui_renderer::draw_text(&mut pixel_buffer, width, current_font, &seg.base_text, (pen_x as f32, y as f32), pixel_font_size, color);
                         
                         if let Some(ruby) = &seg.ruby_text {
-                            let (base_w, ..) = gui_renderer::measure_text(&font, &seg.base_text, pixel_font_size);
-                            let (ruby_w, ..) = gui_renderer::measure_text(&font, ruby, ruby_pixel_font_size);
+                            let (base_w, ..) = gui_renderer::measure_text(current_font, &seg.base_text, pixel_font_size);
+                            let (ruby_w, ..) = gui_renderer::measure_text(current_font, ruby, ruby_pixel_font_size);
                             let ruby_x = pen_x as f32 + (base_w as f32 - ruby_w as f32) / 2.0;
                             let ruby_y = y as f32 - ruby_pixel_font_size*0.5;
-                            gui_renderer::draw_text(&mut pixel_buffer, width, &font, ruby, (ruby_x, ruby_y), ruby_pixel_font_size, color);
+                            gui_renderer::draw_text(&mut pixel_buffer, width, current_font, ruby, (ruby_x, ruby_y), ruby_pixel_font_size, color);
                         }
                         
-                        let (seg_width, _, _) = gui_renderer::measure_text(&font, &seg.base_text, pixel_font_size);
+                        let (seg_width, _, _) = gui_renderer::measure_text(current_font, &seg.base_text, pixel_font_size);
                         pen_x += seg_width as i32;
                     }
                 }
                 Renderable::TypingLower { segments, anchor, shift, align, font_size, target_line_total_width } => {
                     let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
                     let ruby_pixel_font_size = pixel_font_size * 0.3;
-                    let total_height = gui_renderer::measure_text(&font, " ", pixel_font_size).1;
+                    let total_height = gui_renderer::measure_text(current_font, " ", pixel_font_size).1;
 
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
                     let (mut pen_x, y) = ui::calculate_aligned_position(anchor_pos, target_line_total_width, total_height, align);
@@ -126,31 +133,29 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     for seg in segments {
                         match seg {
                             LowerTypingSegment::Completed { base_text, ruby_text, is_correct } => {
-                                // FIX: `*is_correct` を `is_correct` に変更
                                 let color = if is_correct { ui::CORRECT_COLOR } else { ui::INCORRECT_COLOR };
-                                gui_renderer::draw_text(&mut pixel_buffer, width, &font, &base_text, (pen_x as f32, y as f32), pixel_font_size, color);
+                                gui_renderer::draw_text(&mut pixel_buffer, width, current_font, &base_text, (pen_x as f32, y as f32), pixel_font_size, color);
                                 
                                 if let Some(ruby) = ruby_text {
-                                    let (base_w, ..) = gui_renderer::measure_text(&font, &base_text, pixel_font_size);
-                                    let (ruby_w, ..) = gui_renderer::measure_text(&font, &ruby, ruby_pixel_font_size);
+                                    let (base_w, ..) = gui_renderer::measure_text(current_font, &base_text, pixel_font_size);
+                                    let (ruby_w, ..) = gui_renderer::measure_text(current_font, &ruby, ruby_pixel_font_size);
                                     let ruby_x = pen_x as f32 + (base_w as f32 - ruby_w as f32) / 2.0;
                                     let ruby_y = y as f32 - ruby_pixel_font_size*0.5;
-                                    gui_renderer::draw_text(&mut pixel_buffer, width, &font, &ruby, (ruby_x, ruby_y), ruby_pixel_font_size, color);
+                                    gui_renderer::draw_text(&mut pixel_buffer, width, current_font, &ruby, (ruby_x, ruby_y), ruby_pixel_font_size, color);
                                 }
 
-                                pen_x += gui_renderer::measure_text(&font, &base_text, pixel_font_size).0 as i32;
+                                pen_x += gui_renderer::measure_text(current_font, &base_text, pixel_font_size).0 as i32;
                             }
                             LowerTypingSegment::Active { elements } => {
                                 for el in elements {
                                     let (text, color) = match el {
-                                        // FIX: `*is_correct` を `is_correct` に変更
                                         ActiveLowerElement::Typed { character, is_correct } => (character.to_string(), if is_correct { ui::CORRECT_COLOR } else { ui::INCORRECT_COLOR }),
                                         ActiveLowerElement::Cursor => ("|".to_string(), ui::CURSOR_COLOR),
                                         ActiveLowerElement::UnconfirmedInput(s) => (s.clone(), ui::UNCONFIRMED_COLOR),
                                         ActiveLowerElement::LastIncorrectInput(c) => (c.to_string(), ui::WRONG_KEY_COLOR),
                                     };
-                                    gui_renderer::draw_text(&mut pixel_buffer, width, &font, &text, (pen_x as f32, y as f32), pixel_font_size, color);
-                                    pen_x += gui_renderer::measure_text(&font, &text, pixel_font_size).0 as i32;
+                                    gui_renderer::draw_text(&mut pixel_buffer, width, current_font, &text, (pen_x as f32, y as f32), pixel_font_size, color);
+                                    pen_x += gui_renderer::measure_text(current_font, &text, pixel_font_size).0 as i32;
                                 }
                             }
                         }
@@ -163,11 +168,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-// (handle_input と key_to_char は変更なし)
 #[cfg(not(feature = "uefi"))]
 fn handle_input(window: &mut Window, app: &mut App) {
     if window.is_key_pressed(Key::Escape, KeyRepeat::No) {
         app.on_event(AppEvent::Escape);
+    }
+    if window.is_key_pressed(Key::Tab, KeyRepeat::No) {
+        app.on_event(AppEvent::CycleTuiMode);
     }
     for key in window.get_keys_pressed(KeyRepeat::Yes) {
         match key {
@@ -233,7 +240,6 @@ fn key_to_char(key: Key, is_shift: bool) -> Option<char> {
         _ => None,
     }
 }
-
 
 #[cfg(feature = "uefi")]
 pub fn run() -> Result<(), Box<dyn core::error::Error>> {
