@@ -160,7 +160,7 @@ pub fn start() -> Result<(), JsValue> {
                 for c in value.chars() {
                     app.on_event(AppEvent::Char { c, timestamp: crate::timestamp::now() });
                 }
-                input_clone.set_value("");
+                // input_clone.set_value("");
             }
         });
         input_element.add_event_listener_with_callback("input", closure.as_ref().unchecked_ref())?;
@@ -304,8 +304,8 @@ pub fn start() -> Result<(), JsValue> {
         // --- IMEリセット処理（可変借用） ---
         let mut app_borrow_mut = app.borrow_mut();
         if app_borrow_mut.should_reset_ime {
-            // let _ = ime_input_element.blur();
-            // let _ = ime_input_element.focus();
+            let _ = ime_input_element.blur();
+            let _ = ime_input_element.focus();
             app_borrow_mut.should_reset_ime = false;
         }
 
