@@ -106,10 +106,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, 0, pen_x as isize, blit_y as isize);
 
                                 if let Some(ruby) = &seg.ruby_text {
-                                    let (ruby_width, _) = measure_plain_text(ruby);
-                                    let ruby_anchor_pos = (pen_x + (art_width as i32 / 2), line_start_y - 3);
-                                    let (ruby_x, ruby_y) = ui::calculate_aligned_position(ruby_anchor_pos, ruby_width, 1, Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Bottom });
-                                    draw_plain_text_at(&mut current_buffer, ruby, ruby_x, ruby_y, cols);
+                                    if is_braille {
+                                        let ruby_font_size_px = font_size_px * 0.5;
+                                        let (ruby_art_buffer, ruby_art_width, ruby_art_height, _) = tui_renderer::render_text_to_braille_art(&font, &ruby, ruby_font_size_px);
+                                        let ruby_anchor_pos = (pen_x + (art_width as i32 / 2), line_start_y - 1);
+                                        let (ruby_x, ruby_y) = ui::calculate_aligned_position(ruby_anchor_pos, ruby_art_width as u32, ruby_art_height as u32, Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Bottom });
+                                        blit_art(&mut current_buffer, cols, rows, &ruby_art_buffer, ruby_art_width, ruby_art_height, ruby_x as isize, ruby_y as isize);
+                                    } else {
+                                        let (ruby_width, _) = measure_plain_text(ruby);
+                                        let ruby_anchor_pos = (pen_x + (art_width as i32 / 2), line_start_y - 1);
+                                        let (ruby_x, ruby_y) = ui::calculate_aligned_position(ruby_anchor_pos, ruby_width, 1, Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Bottom });
+                                        draw_plain_text_at(&mut current_buffer, ruby, ruby_x, ruby_y, cols);
+                                    }
                                 }
                                 pen_x += art_width as i32;
                             }
@@ -162,10 +170,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                         blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, 0, pen_x as isize, blit_y as isize);
 
                                         if let Some(ruby) = ruby_text {
-                                            let (ruby_width, _) = measure_plain_text(&ruby);
-                                            let ruby_anchor = (pen_x + (art_width as i32 / 2), line_start_y - 3);
-                                            let (rx, ry) = ui::calculate_aligned_position(ruby_anchor, ruby_width, 1, Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Bottom });
-                                            draw_plain_text_at(&mut current_buffer, &ruby, rx, ry, cols);
+                                            if is_braille {
+                                                let ruby_font_size_px = font_size_px * 0.5;
+                                                let (ruby_art_buffer, ruby_art_width, ruby_art_height, _) = tui_renderer::render_text_to_braille_art(&font, &ruby, ruby_font_size_px);
+                                                let ruby_anchor_pos = (pen_x + (art_width as i32 / 2), line_start_y - 1);
+                                                let (ruby_x, ruby_y) = ui::calculate_aligned_position(ruby_anchor_pos, ruby_art_width as u32, ruby_art_height as u32, Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Bottom });
+                                                blit_art(&mut current_buffer, cols, rows, &ruby_art_buffer, ruby_art_width, ruby_art_height, ruby_x as isize, ruby_y as isize);
+                                            } else {
+                                                let (ruby_width, _) = measure_plain_text(&ruby);
+                                                let ruby_anchor = (pen_x + (art_width as i32 / 2), line_start_y - 1);
+                                                let (rx, ry) = ui::calculate_aligned_position(ruby_anchor, ruby_width, 1, Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Bottom });
+                                                draw_plain_text_at(&mut current_buffer, &ruby, rx, ry, cols);
+                                            }
                                         }
                                         pen_x += art_width as i32;
                                     }
