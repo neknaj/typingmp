@@ -163,6 +163,11 @@ impl<'a> App<'a> {
         self.result_model = None;
         self.state = AppState::Typing;
         self.on_event(AppEvent::ChangeScene);
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.should_reset_ime = true; // タイピング開始時にIMEをリセット（フォーカスを当てる）
+        }
     }
 
     /// 毎フレームの状態更新（スクロール計算など）
