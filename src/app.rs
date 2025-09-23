@@ -19,7 +19,7 @@ use std::{
 
 
 #[cfg(feature = "uefi")]
-use core_maths::CoreFloat; 
+use core_maths::CoreFloat;
 
 use crate::model::{Model, ResultModel, Scroll, TypingModel, TypingStatus};
 use crate::parser;
@@ -38,6 +38,17 @@ pub enum AppState {
     ProblemSelection,
     Typing,
     Result,
+}
+
+/// TUIの描画モードを定義するenum
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub enum TuiDisplayMode {
+    /// ASCIIアートでリッチに表示するモード
+    AsciiArt,
+    /// シンプルなテキストで表示するモード
+    SimpleText,
+    /// 点字パターンで高解像度表示するモード
+    Braille,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -62,6 +73,8 @@ pub enum AppEvent {
     Enter,
     /// エスケープキーイベント
     Escape,
+    /// TUIの描画モードを切り替えるイベント
+    CycleTuiMode,
     /// アプリケーション終了イベント
     Quit,
 }
@@ -84,6 +97,8 @@ pub struct App {
     pub status_text: String,
     /// 画面右下に表示される操作方法テキスト
     pub instructions_text: String,
+    /// TUIの描画モード
+    pub tui_display_mode: TuiDisplayMode,
     /// アプリケーションが終了すべきかどうかを示すフラグ
     pub should_quit: bool,
 }
@@ -100,6 +115,7 @@ impl App {
             result_model: None,
             status_text: String::new(),
             instructions_text: String::new(),
+            tui_display_mode: TuiDisplayMode::AsciiArt, // 初期モードを設定
             should_quit: false,
         }
     }
@@ -193,7 +209,20 @@ impl App {
 
     /// アプリケーションイベントを処理する
     pub fn on_event(&mut self, event: AppEvent) {
-        // AppStateが変更されたときにシーン固有の初期化を行う
+        // --- グローバルイベントの処理 ---
+        // モード切り替えイベントは、現在のシーンに関わらず常に処理する
+        if let AppEvent::CycleTuiMode = event {
+            self.tui_display_mode = match self.tui_display_mode {
+                TuiDisplayMode::AsciiArt => TuiDisplayMode::SimpleText,
+                TuiDisplayMode::SimpleText => TuiDisplayMode::Braille,
+                TuiDisplayMode::Braille => TuiDisplayMode::AsciiArt,
+            };
+            // モードが変更されたことをユーザーに通知
+            self.status_text = format!("Display Mode: {:?}", self.tui_display_mode);
+            return; // モード変更時は他のイベント処理をスキップ
+        }
+
+        // --- シーンごとのイベント処理 ---
         if let AppEvent::ChangeScene = event {
             match self.state {
                 AppState::MainMenu => {
@@ -203,7 +232,7 @@ impl App {
                     self.instructions_text = "Up/Down: Select | Enter: Start | ESC: Back".to_string();
                 }
                 AppState::Typing => {
-                    self.instructions_text = "ESC: Back to Menu".to_string();
+                    self.instructions_text = "ESC: Back to Menu | Tab: Cycle Mode".to_string();
                 }
                 AppState::Result => {
                     self.instructions_text = "Enter/ESC: Back to Menu".to_string();
@@ -265,6 +294,7 @@ impl App {
                 }
             }
             AppState::Typing => {
+                // ステータステキストをリセット
                 self.status_text = "Start typing!".to_string();
                 match event {
                     AppEvent::Char { c, timestamp } => {

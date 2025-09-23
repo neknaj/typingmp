@@ -167,6 +167,8 @@ pub mod gui_renderer {
 /// TUIバックエンド用の文字ベースレンダラ
 pub mod tui_renderer {
     use super::*;
+    #[cfg(not(feature = "uefi"))]
+    use std::convert::TryFrom;
 
     // TUIの1文字の縦横比をおよそ2:1と仮定
     const TUI_CHAR_ASPECT_RATIO: f32 = 2.0;
@@ -178,7 +180,7 @@ pub mod tui_renderer {
         font: &FontRef,
         text: &str,
         font_size_px: f32,
-    ) -> (Vec<char>, usize, usize, usize) { // <- 戻り値にアセント(usize)を追加
+    ) -> (Vec<char>, usize, usize, usize) {
         if text.is_empty() {
             return (Vec::new(), 0, 0, 0);
         }
@@ -273,7 +275,130 @@ pub mod tui_renderer {
             })
             .collect();
 
-        // 戻り値にascent_in_cellsを追加
+        (char_buffer, art_width, art_height, ascent_in_cells)
+    }
+
+    /// 指定されたテキストを点字アート化し、(文字バッファ, 幅, 高さ, アセント)を返す
+    pub fn render_text_to_braille_art(
+        font: &FontRef,
+        text: &str,
+        font_size_px: f32,
+    ) -> (Vec<char>, usize, usize, usize) {
+        if text.is_empty() {
+            return (Vec::new(), 0, 0, 0);
+        }
+
+        let scale = PxScale::from(font_size_px);
+        let scaled_font = font.as_scaled(scale);
+        let ascent = scaled_font.ascent();
+
+        // アート全体のピクセル単位でのバウンディングボックスを計算 (ASCIIアート版と同じ)
+        let mut min_x = f32::MAX;
+        let mut max_x = f32::MIN;
+        let mut min_y = f32::MAX;
+        let mut max_y = f32::MIN;
+        let mut pen_x = 0.0;
+        let mut last_glyph = None;
+
+        for c in text.chars() {
+            let glyph_id = font.glyph_id(c);
+            if let Some(last) = last_glyph {
+                pen_x += scaled_font.kern(last, glyph_id);
+            }
+            if let Some(outlined) = font.outline_glyph(glyph_id.with_scale(scale)) {
+                let bounds = outlined.px_bounds();
+                min_x = min_x.min(pen_x + bounds.min.x);
+                max_x = max_x.max(pen_x + bounds.max.x);
+                min_y = min_y.min(ascent + bounds.min.y);
+                max_y = max_y.max(ascent + bounds.max.y);
+            }
+            pen_x += scaled_font.h_advance(glyph_id);
+            last_glyph = Some(glyph_id);
+        }
+        max_x = max_x.max(pen_x);
+
+        if min_x > max_x {
+            return (Vec::new(), 0, 0, 0);
+        }
+        
+        // 点字は 4x2 のグリッド。1文字セル(高さ=幅*2)の比率に合わせる
+        let art_cell_height = 4.0; 
+        // FIX: アスペクト比の計算を修正
+        let art_cell_width = art_cell_height / TUI_CHAR_ASPECT_RATIO;
+
+        let art_width = ((max_x - min_x) / art_cell_width).ceil() as usize;
+        let art_height = ((max_y - min_y) / art_cell_height).ceil() as usize;
+
+        if art_width == 0 || art_height == 0 {
+            return (Vec::new(), 0, 0, 0);
+        }
+        
+        let ascent_in_pixels = ascent - min_y;
+        let ascent_in_cells = (ascent_in_pixels / art_cell_height).floor().max(0.0) as usize;
+        
+        // グリフのピクセルカバレッジを計算するための高解像度バッファ
+        // 点字の各ドットに対応させるため、TUIセルの2x4倍の解像度にする
+        let sub_w = art_width * 2;
+        let sub_h = art_height * 4;
+        let mut sub_pixel_buffer = vec![0.0f32; sub_w * sub_h];
+
+        pen_x = 0.0;
+        last_glyph = None;
+        for c in text.chars() {
+            let glyph_id = font.glyph_id(c);
+            if let Some(last) = last_glyph {
+                pen_x += scaled_font.kern(last, glyph_id);
+            }
+            let glyph = glyph_id.with_scale_and_position(scale, point(pen_x, ascent));
+            if let Some(outlined) = font.outline_glyph(glyph) {
+                let bounds = outlined.px_bounds();
+                outlined.draw(|x, y, v| {
+                    let px = bounds.min.x + x as f32 - min_x;
+                    let py = bounds.min.y + y as f32 - min_y;
+
+                    // 高解像度バッファのどのサブピクセルに対応するか計算
+                    let sub_x = (px / art_cell_width * 2.0) as i32;
+                    let sub_y = (py / art_cell_height * 4.0) as i32;
+
+                    if sub_x >= 0 && sub_x < sub_w as i32 && sub_y >= 0 && sub_y < sub_h as i32 {
+                        let index = sub_y as usize * sub_w + sub_x as usize;
+                        sub_pixel_buffer[index] = (sub_pixel_buffer[index] + v).min(1.0);
+                    }
+                });
+            }
+            pen_x += scaled_font.h_advance(glyph_id);
+            last_glyph = Some(glyph_id);
+        }
+        
+        // 高解像度バッファから点字文字バッファを生成
+        let mut char_buffer = Vec::with_capacity(art_width * art_height);
+        // 点字ドットとビットのマッピング
+        // 1 • • 4  -> bit 0, 3
+        // 2 • • 5  -> bit 1, 4
+        // 3 • • 6  -> bit 2, 5
+        // 7 • • 8  -> bit 6, 7
+        const BIT_MAP: [[u8; 2]; 4] = [[0, 3], [1, 4], [2, 5], [6, 7]];
+
+        for y in 0..art_height {
+            for x in 0..art_width {
+                let mut braille_byte: u32 = 0;
+                // 2x4 のサブピクセルをチェック
+                for dy in 0..4 {
+                    for dx in 0..2 {
+                        let sub_x = x * 2 + dx;
+                        let sub_y = y * 4 + dy;
+                        let index = sub_y * sub_w + sub_x;
+                        if sub_pixel_buffer[index] > 0.3 { // カバレッジの閾値
+                            braille_byte |= 1 << BIT_MAP[dy][dx];
+                        }
+                    }
+                }
+                // Unicodeの点字パターンは U+2800 から始まる
+                let braille_char = char::try_from(0x2800 + braille_byte).unwrap_or(' ');
+                char_buffer.push(braille_char);
+            }
+        }
+
         (char_buffer, art_width, art_height, ascent_in_cells)
     }
 }

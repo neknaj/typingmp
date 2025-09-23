@@ -213,15 +213,44 @@ pub fn build_ui(app: &App, font: &FontRef, width: usize, height: usize) -> Vec<R
             font_size: FontSize::WindowHeight(0.04),
             color: 0xFF_CCCCCC,
         });
+    }
+
+    // --- 画面下部の共通UI ---
+    // GUIビルドの場合は "GUI" を表示
+    #[cfg(feature = "gui")]
+    {
         render_list.push(Renderable::Text {
-            text: app.instructions_text.clone(),
+            text: "GUI".to_string(),
             anchor: Anchor::BottomRight,
-            shift: Shift { x: -0.01, y: -0.02 },
+            shift: Shift { x: -0.01, y: -0.06 },
             align: Align { horizontal: HorizontalAlign::Right, vertical: VerticalAlign::Bottom },
             font_size: FontSize::WindowHeight(0.04),
-            color: 0xFF_CCCCCC,
+            color: 0xFF_AAAAAA,
         });
     }
+
+    // TUIビルドの場合は現在のモードを表示 (GUIとTUIが両方有効な場合はGUIが優先される)
+    #[cfg(all(feature = "tui", not(feature = "gui")))]
+    {
+        let mode_text = format!("TUI {:?}", app.tui_display_mode);
+        render_list.push(Renderable::Text {
+            text: mode_text,
+            anchor: Anchor::BottomRight,
+            shift: Shift { x: -0.01, y: -0.06 },
+            align: Align { horizontal: HorizontalAlign::Right, vertical: VerticalAlign::Bottom },
+            font_size: FontSize::WindowHeight(0.04),
+            color: 0xFF_AAAAAA,
+        });
+    }
+
+    render_list.push(Renderable::Text {
+        text: app.instructions_text.clone(),
+        anchor: Anchor::BottomRight,
+        shift: Shift { x: -0.01, y: -0.02 },
+        align: Align { horizontal: HorizontalAlign::Right, vertical: VerticalAlign::Bottom },
+        font_size: FontSize::WindowHeight(0.04),
+        color: 0xFF_CCCCCC,
+    });
 
     render_list
 }

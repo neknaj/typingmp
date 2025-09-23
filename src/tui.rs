@@ -1,7 +1,7 @@
 // src/tui.rs
 
 #[cfg(not(feature = "uefi"))]
-use crate::app::{App, AppEvent};
+use crate::app::{App, AppEvent, TuiDisplayMode}; // TuiDisplayMode をインポート
 #[cfg(not(feature = "uefi"))]
 use crate::model::Segment;
 #[cfg(not(feature = "uefi"))]
@@ -61,123 +61,174 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             match item {
                 Renderable::Background { .. } => { /* TUIでは何もしない */ }
                 Renderable::BigText { text, anchor, shift, align, font_size, .. } => {
-                    draw_art_text(&mut current_buffer, &font, &text, anchor, shift, align, font_size, cols, rows);
+                    match app.tui_display_mode {
+                        TuiDisplayMode::AsciiArt | TuiDisplayMode::Braille => {
+                            let is_braille = app.tui_display_mode == TuiDisplayMode::Braille;
+                            draw_art_text(&mut current_buffer, &font, &text, anchor, shift, align, font_size, cols, rows, is_braille);
+                        }
+                        TuiDisplayMode::SimpleText => {
+                            draw_plain_text(&mut current_buffer, &text, anchor, shift, align, cols, rows);
+                        }
+                    }
                 }
                 Renderable::Text { text, anchor, shift, align, .. } => {
                     draw_plain_text(&mut current_buffer, &text, anchor, shift, align, cols, rows);
                 }
                 Renderable::TypingUpper { segments, anchor, shift, align, font_size, .. } => {
-                    let target_art_height_in_cells = calculate_target_art_height(font_size, cols, rows);
-                    if target_art_height_in_cells == 0 { continue; }
-                    let font_size_px = target_art_height_in_cells as f32 * tui_renderer::ART_V_PIXELS_PER_CELL;
+                    match app.tui_display_mode {
+                        TuiDisplayMode::AsciiArt | TuiDisplayMode::Braille => {
+                            let is_braille = app.tui_display_mode == TuiDisplayMode::Braille;
+                            let target_art_height_in_cells = calculate_target_art_height(font_size, cols, rows);
+                            if target_art_height_in_cells == 0 { continue; }
+                            
+                            let mut font_size_px = target_art_height_in_cells as f32 * tui_renderer::ART_V_PIXELS_PER_CELL;
+                            if is_braille {
+                                font_size_px *= 2.0;
+                            }
 
-                    let total_width: u32 = segments.iter().map(|seg| {
-                        tui_renderer::render_text_to_art(&font, &seg.base_text, font_size_px).1 as u32
-                    }).sum();
-                    
-                    let (_, _, line_total_height, line_ascent) = tui_renderer::render_text_to_art(&font, "|", font_size_px);
+                            let renderer = if is_braille { tui_renderer::render_text_to_braille_art } else { tui_renderer::render_text_to_art };
 
-                    if total_width == 0 { continue; }
+                            let total_width: u32 = segments.iter().map(|seg| {
+                                renderer(&font, &seg.base_text, font_size_px).1 as u32
+                            }).sum();
+                            
+                            let (_, _, line_total_height, line_ascent) = renderer(&font, "|", font_size_px);
 
-                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, cols, rows);
-                    let (mut pen_x, line_start_y) = ui::calculate_aligned_position(anchor_pos, total_width, line_total_height as u32, align);
-                    let line_baseline_y = line_start_y + line_ascent as i32;
+                            if total_width == 0 { continue; }
 
-                    for seg in segments {
-                        let (art_buffer, art_width, _, char_ascent) = tui_renderer::render_text_to_art(&font, &seg.base_text, font_size_px);
-                        let blit_y = line_baseline_y - char_ascent as i32;
-                        blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, 0, pen_x as isize, blit_y as isize);
+                            let anchor_pos = ui::calculate_anchor_position(anchor, shift, cols, rows);
+                            let (mut pen_x, line_start_y) = ui::calculate_aligned_position(anchor_pos, total_width, line_total_height as u32, align);
+                            let line_baseline_y = line_start_y + line_ascent as i32;
 
-                        if let Some(ruby) = &seg.ruby_text {
-                            let (ruby_width, _) = measure_plain_text(ruby);
-                            let ruby_anchor_pos = (pen_x + (art_width as i32 / 2), line_start_y - 3);
-                            let (ruby_x, ruby_y) = ui::calculate_aligned_position(ruby_anchor_pos, ruby_width, 1, Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Bottom });
-                            draw_plain_text_at(&mut current_buffer, ruby, ruby_x, ruby_y, cols);
-                        }
-                        pen_x += art_width as i32;
-                    }
-                }
-                Renderable::TypingLower { segments, anchor, shift, align, font_size, .. } => {
-                    let target_art_height_in_cells = calculate_target_art_height(font_size, cols, rows);
-                    if target_art_height_in_cells == 0 { continue; }
-                    let font_size_px = target_art_height_in_cells as f32 * tui_renderer::ART_V_PIXELS_PER_CELL;
-
-                    let total_width: u32 = app.typing_model.as_ref().map_or(0, |m| {
-                        m.content.lines.get(m.status.line as usize).map_or(0, |line| {
-                            line.segments.iter().map(|seg| {
-                                let base_text = match seg {
-                                    Segment::Plain { text } => text,
-                                    Segment::Annotated { base, .. } => base,
-                                };
-                                tui_renderer::render_text_to_art(&font, base_text, font_size_px).1 as u32
-                            }).sum()
-                        })
-                    });
-                    
-                    let (_, _, line_total_height, line_ascent) = tui_renderer::render_text_to_art(&font, "|", font_size_px);
-
-                    if total_width == 0 { continue; }
-
-                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, cols, rows);
-                    let (mut pen_x, line_start_y) = ui::calculate_aligned_position(anchor_pos, total_width, line_total_height as u32, align);
-                    let line_baseline_y = line_start_y + line_ascent as i32;
-
-                    for seg in segments {
-                        match seg {
-                            LowerTypingSegment::Completed { base_text, ruby_text, .. } => {
-                                let (art_buffer, art_width, _, char_ascent) = tui_renderer::render_text_to_art(&font, &base_text, font_size_px);
+                            for seg in segments {
+                                let (art_buffer, art_width, _, char_ascent) = renderer(&font, &seg.base_text, font_size_px);
                                 let blit_y = line_baseline_y - char_ascent as i32;
                                 blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, 0, pen_x as isize, blit_y as isize);
 
-                                if let Some(ruby) = ruby_text {
-                                    let (ruby_width, _) = measure_plain_text(&ruby);
-                                    // --- 修正箇所 START: ルビの位置を1セル上にずらす ---
-                                    let ruby_anchor = (pen_x + (art_width as i32 / 2), line_start_y - 3);
-                                    // --- 修正箇所 END ---
-                                    let (rx, ry) = ui::calculate_aligned_position(ruby_anchor, ruby_width, 1, Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Bottom });
-                                    draw_plain_text_at(&mut current_buffer, &ruby, rx, ry, cols);
+                                if let Some(ruby) = &seg.ruby_text {
+                                    let (ruby_width, _) = measure_plain_text(ruby);
+                                    let ruby_anchor_pos = (pen_x + (art_width as i32 / 2), line_start_y - 3);
+                                    let (ruby_x, ruby_y) = ui::calculate_aligned_position(ruby_anchor_pos, ruby_width, 1, Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Bottom });
+                                    draw_plain_text_at(&mut current_buffer, ruby, ruby_x, ruby_y, cols);
                                 }
                                 pen_x += art_width as i32;
                             }
-                            LowerTypingSegment::Active { elements } => {
-                                for el in elements {
-                                    match el {
-                                        ActiveLowerElement::Typed { character, .. } => {
-                                            let (art_buffer, art_width, _, char_ascent) = tui_renderer::render_text_to_art(&font, &character.to_string(), font_size_px);
-                                            let blit_y = line_baseline_y - char_ascent as i32;
-                                            blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, 0, pen_x as isize, blit_y as isize);
-                                            pen_x += art_width as i32;
+                        }
+                        TuiDisplayMode::SimpleText => {
+                            let text = segments.iter().map(|s| s.base_text.clone()).collect::<String>();
+                            draw_simple_typing_text(&mut current_buffer, &text, anchor, shift, align, cols, rows);
+                        }
+                    }
+                }
+                Renderable::TypingLower { segments, anchor, shift, align, font_size, .. } => {
+                     match app.tui_display_mode {
+                        TuiDisplayMode::AsciiArt | TuiDisplayMode::Braille => {
+                            let is_braille = app.tui_display_mode == TuiDisplayMode::Braille;
+                            let target_art_height_in_cells = calculate_target_art_height(font_size, cols, rows);
+                            if target_art_height_in_cells == 0 { continue; }
+
+                            let mut font_size_px = target_art_height_in_cells as f32 * tui_renderer::ART_V_PIXELS_PER_CELL;
+                            if is_braille {
+                                font_size_px *= 2.0;
+                            }
+
+                             let renderer = if is_braille { tui_renderer::render_text_to_braille_art } else { tui_renderer::render_text_to_art };
+
+                            let total_width: u32 = app.typing_model.as_ref().map_or(0, |m| {
+                                m.content.lines.get(m.status.line as usize).map_or(0, |line| {
+                                    line.segments.iter().map(|seg| {
+                                        let base_text = match seg {
+                                            Segment::Plain { text } => text,
+                                            Segment::Annotated { base, .. } => base,
+                                        };
+                                        renderer(&font, base_text, font_size_px).1 as u32
+                                    }).sum()
+                                })
+                            });
+                            
+                            let (_, _, line_total_height, line_ascent) = renderer(&font, "|", font_size_px);
+
+                            if total_width == 0 { continue; }
+
+                            let anchor_pos = ui::calculate_anchor_position(anchor, shift, cols, rows);
+                            let (mut pen_x, line_start_y) = ui::calculate_aligned_position(anchor_pos, total_width, line_total_height as u32, align);
+                            let line_baseline_y = line_start_y + line_ascent as i32;
+
+                            for seg in segments {
+                                match seg {
+                                    LowerTypingSegment::Completed { base_text, ruby_text, .. } => {
+                                        let (art_buffer, art_width, _, char_ascent) = renderer(&font, &base_text, font_size_px);
+                                        let blit_y = line_baseline_y - char_ascent as i32;
+                                        blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, 0, pen_x as isize, blit_y as isize);
+
+                                        if let Some(ruby) = ruby_text {
+                                            let (ruby_width, _) = measure_plain_text(&ruby);
+                                            let ruby_anchor = (pen_x + (art_width as i32 / 2), line_start_y - 3);
+                                            let (rx, ry) = ui::calculate_aligned_position(ruby_anchor, ruby_width, 1, Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Bottom });
+                                            draw_plain_text_at(&mut current_buffer, &ruby, rx, ry, cols);
                                         }
-                                        // --- 修正箇所 START: カーソルを手動描画に戻す ---
-                                        ActiveLowerElement::Cursor => {
-                                            let cursor_height = line_total_height;
-                                            for y_offset in 0..cursor_height {
-                                                let target_y = line_start_y + y_offset as i32;
-                                                if target_y >= 0 && target_y < rows as i32 && pen_x >= 0 && pen_x < cols as i32 {
-                                                    let index = (target_y as usize * cols) + pen_x as usize;
-                                                    if index < current_buffer.len() {
-                                                        current_buffer[index] = '|';
+                                        pen_x += art_width as i32;
+                                    }
+                                    LowerTypingSegment::Active { elements } => {
+                                        for el in elements {
+                                            match el {
+                                                ActiveLowerElement::Typed { character, .. } => {
+                                                    let (art_buffer, art_width, _, char_ascent) = renderer(&font, &character.to_string(), font_size_px);
+                                                    let blit_y = line_baseline_y - char_ascent as i32;
+                                                    blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, 0, pen_x as isize, blit_y as isize);
+                                                    pen_x += art_width as i32;
+                                                }
+                                                ActiveLowerElement::Cursor => {
+                                                    if !is_braille {
+                                                        let cursor_height = line_total_height;
+                                                        for y_offset in 0..cursor_height {
+                                                            let target_y = line_start_y + y_offset as i32;
+                                                            if target_y >= 0 && target_y < rows as i32 && pen_x >= 0 && pen_x < cols as i32 {
+                                                                let index = (target_y as usize * cols) + pen_x as usize;
+                                                                if index < current_buffer.len() {
+                                                                    current_buffer[index] = '|';
+                                                                }
+                                                            }
+                                                        }
+                                                        pen_x += 1;
                                                     }
                                                 }
+                                                ActiveLowerElement::UnconfirmedInput(s) => {
+                                                    let (art_buffer, art_width, _, char_ascent) = renderer(&font, &s, font_size_px);
+                                                    let blit_y = line_baseline_y - char_ascent as i32;
+                                                    blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, 0, pen_x as isize, blit_y as isize);
+                                                    pen_x += art_width as i32;
+                                                }
+                                                ActiveLowerElement::LastIncorrectInput(c) => {
+                                                    let (art_buffer, art_width, _, char_ascent) = renderer(&font, &c.to_string(), font_size_px);
+                                                    let blit_y = line_baseline_y - char_ascent as i32;
+                                                    blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, 0, pen_x as isize, blit_y as isize);
+                                                    pen_x += art_width as i32;
+                                                }
                                             }
-                                            pen_x += 1;
-                                        }
-                                        // --- 修正箇所 END ---
-                                        ActiveLowerElement::UnconfirmedInput(s) => {
-                                            let (art_buffer, art_width, _, char_ascent) = tui_renderer::render_text_to_art(&font, &s, font_size_px);
-                                            let blit_y = line_baseline_y - char_ascent as i32;
-                                            blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, 0, pen_x as isize, blit_y as isize);
-                                            pen_x += art_width as i32;
-                                        }
-                                        ActiveLowerElement::LastIncorrectInput(c) => {
-                                            let (art_buffer, art_width, _, char_ascent) = tui_renderer::render_text_to_art(&font, &c.to_string(), font_size_px);
-                                            let blit_y = line_baseline_y - char_ascent as i32;
-                                            blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, 0, pen_x as isize, blit_y as isize);
-                                            pen_x += art_width as i32;
                                         }
                                     }
                                 }
                             }
+                        }
+                        TuiDisplayMode::SimpleText => {
+                            let mut text_to_draw = String::new();
+                            for seg in segments {
+                                match seg {
+                                    LowerTypingSegment::Completed { base_text, .. } => text_to_draw.push_str(&base_text),
+                                    LowerTypingSegment::Active { elements } => {
+                                        for el in elements {
+                                            match el {
+                                                ActiveLowerElement::Typed { character, .. } => text_to_draw.push(character),
+                                                ActiveLowerElement::Cursor => text_to_draw.push('|'),
+                                                ActiveLowerElement::UnconfirmedInput(s) => text_to_draw.push_str(&s),
+                                                ActiveLowerElement::LastIncorrectInput(c) => text_to_draw.push(c),
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            draw_simple_typing_text(&mut current_buffer, &text_to_draw, anchor, shift, align, cols, rows);
                         }
                     }
                 }
@@ -195,7 +246,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// ASCIIアートをバッファに転写する
+/// ASCIIまたは点字アートをバッファに転写する
 #[cfg(not(feature = "uefi"))]
 fn blit_art(
     buffer: &mut [char], buf_w: usize, buf_h: usize,
@@ -212,7 +263,7 @@ fn blit_art(
                 let target_x = start_x + x as isize;
                 if target_x >= 0 && target_x < buf_w as isize {
                     let art_char = art[y * art_w + x];
-                    if art_char != ' ' {
+                    if art_char != ' ' { // Don't blit spaces
                         buffer[target_y as usize * buf_w + target_x as usize] = art_char;
                     }
                 }
@@ -254,17 +305,25 @@ fn draw_plain_text_at(buffer: &mut [char], text: &str, x: i32, y: i32, width: us
 }
 
 
-/// AA化されたテキストを描画する
+/// AA化または点字化されたテキストを描画する
 #[cfg(not(feature = "uefi"))]
 fn draw_art_text(
     buffer: &mut [char], font: &FontRef, text: &str, anchor: Anchor, shift: Shift, align: Align, font_size: FontSize,
-    cols: usize, rows: usize,
+    cols: usize, rows: usize, is_braille: bool,
 ) {
     let target_art_height_in_cells = calculate_target_art_height(font_size, cols, rows);
     if target_art_height_in_cells == 0 { return; }
 
-    let font_size_px = target_art_height_in_cells as f32 * tui_renderer::ART_V_PIXELS_PER_CELL;
-    let (art_buffer, art_width, art_height, _) = tui_renderer::render_text_to_art(font, text, font_size_px);
+    let mut font_size_px = target_art_height_in_cells as f32 * tui_renderer::ART_V_PIXELS_PER_CELL;
+    if is_braille {
+        font_size_px *= 2.0;
+    }
+
+    let (art_buffer, art_width, art_height, _) = if is_braille {
+        tui_renderer::render_text_to_braille_art(font, text, font_size_px)
+    } else {
+        tui_renderer::render_text_to_art(font, text, font_size_px)
+    };
 
     if art_width == 0 || art_height == 0 { return; }
     
@@ -328,10 +387,25 @@ fn handle_input(app: &mut App) -> std::io::Result<()> {
                     KeyCode::Down => app.on_event(AppEvent::Down),
                     KeyCode::Enter => app.on_event(AppEvent::Enter),
                     KeyCode::Esc => app.on_event(AppEvent::Escape),
+                    KeyCode::Tab => app.on_event(AppEvent::CycleTuiMode),
                     _ => {}
                 }
             }
         }
     }
     Ok(())
+}
+
+/// シンプルモード用にテキストを描画するヘルパー関数
+#[cfg(not(feature = "uefi"))]
+fn draw_simple_typing_text(
+    buffer: &mut [char],
+    text: &str,
+    anchor: Anchor,
+    shift: Shift,
+    align: Align,
+    width: usize,
+    height: usize,
+) {
+    draw_plain_text(buffer, text, anchor, shift, align, width, height);
 }
