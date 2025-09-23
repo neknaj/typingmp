@@ -113,7 +113,7 @@ impl<'a> App<'a> {
             result_model: None,
             status_text: String::new(),
             instructions_text: String::new(),
-            tui_display_mode: TuiDisplayMode::AsciiArt,
+            tui_display_mode: TuiDisplayMode::Braille,
             should_quit: false,
             fonts,
             font_choice: FontChoice::YujiSyuku, // デフォルトフォント
@@ -183,6 +183,14 @@ impl<'a> App<'a> {
                     gui_renderer::measure_text(font, text, base_pixel_font_size).0 as f32
                 }).sum::<f32>();
 
+                // セッション開始時の最初のフレームで、スクロールの初期値を設定する
+                // これにより、テキストが画面の右側からスライドインする演出が生まれる
+                // user_inputが空かつscrollが0.0の場合をセッション開始直後と判断
+                if model.user_input.is_empty() && model.scroll.scroll == 0.0 {
+                    // テキストブロックの左端が画面の右端に来るようにスクロール値を計算
+                    model.scroll.scroll = (-(width as f32 / 2.0) - (total_width / 2.0)) as f64;
+                }
+
                 // 2. Calculate the width up to the cursor
                 let mut cursor_x_offset = 0.0;
                 // Add width of completed segments (based on BASE text)
@@ -226,9 +234,9 @@ impl<'a> App<'a> {
         // --- グローバルイベントの処理 ---
         if let AppEvent::CycleTuiMode = event {
             self.tui_display_mode = match self.tui_display_mode {
+                TuiDisplayMode::Braille => TuiDisplayMode::AsciiArt,
                 TuiDisplayMode::AsciiArt => TuiDisplayMode::SimpleText,
                 TuiDisplayMode::SimpleText => TuiDisplayMode::Braille,
-                TuiDisplayMode::Braille => TuiDisplayMode::AsciiArt,
             };
             self.status_text = format!("Display Mode: {:?}", self.tui_display_mode);
             return;
