@@ -37,6 +37,9 @@ pub mod tui;
 #[cfg(feature = "wasm")]
 pub mod wasm;
 
+#[cfg(all(feature = "wasm", debug_assertions))]
+pub mod wasm_debug_logger;
+
 // "uefi" featureが有効な時だけコンパイルされるUEFIバックエンドモジュール
 #[cfg(feature = "uefi")]
 pub mod uefi;

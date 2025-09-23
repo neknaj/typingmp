@@ -43,7 +43,7 @@ winapi = { version = "0.3", features = ["dwmapi", "windef", "minwindef"], option
 # WASM用のオプショナルな依存関係
 wasm-bindgen = { version = "0.2.87", optional = true }
 console_error_panic_hook = { version = "0.1.7", optional = true }
-getrandom = { version = "0.2", optional = true }
+getrandom = { version = "0.2", optional = true, features = ["js"] }
 
 # UEFI用のオプショナルな依存関係
 uefi = { version = "0.35.0", optional = true, features = ["alloc", "panic_handler", "logger" ] }
@@ -64,6 +64,9 @@ features = [
     'Blob',
     'Url',
     'KeyboardEvent',
+    'WebSocket',
+    'ErrorEvent',
+    'CloseEvent'
 ]
 
 

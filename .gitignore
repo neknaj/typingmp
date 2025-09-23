@@ -2,3 +2,5 @@
 /pkg
 /src.txt
 /uefi_image
+/node_modules
+/logs

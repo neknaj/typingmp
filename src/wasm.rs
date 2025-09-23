@@ -15,8 +15,19 @@ thread_local! {
     static APP_INSTANCE: RefCell<Option<Rc<RefCell<App<'static>>>>> = RefCell::new(None);
 }
 
+// --- デバッグ用のログ出力ヘルパー関数を追加 ---
+#[cfg(debug_assertions)]
+fn debug_log(message: &str) {
+    crate::wasm_debug_logger::log(message);
+}
+#[cfg(not(debug_assertions))]
+fn debug_log(_message: &str) {
+    // リリースビルドでは何もしない
+}
+
 #[wasm_bindgen]
 pub fn trigger_event(event_type: &str) {
+    debug_log(&format!("Triggered event: {}", event_type));
     APP_INSTANCE.with(|instance| {
         if let Some(app_rc) = instance.borrow().as_ref() {
             let mut app = app_rc.borrow_mut();
@@ -36,6 +47,13 @@ pub fn trigger_event(event_type: &str) {
 #[wasm_bindgen(start)]
 #[cfg(feature = "wasm")]
 pub fn start() -> Result<(), JsValue> {
+    #[cfg(debug_assertions)]
+    {
+        crate::wasm_debug_logger::init();
+    }
+    
+    debug_log("Application starting.");
+
     console_error_panic_hook::set_once();
     let window = web_sys::window().unwrap();
     let document = window.document().unwrap();

@@ -2,5 +2,9 @@
     "liveServer.settings.port": 5503,
     "rust-analyzer.cargo.features": [
         "wasm"
+    ],
+    "liveServer.settings.ignoreFiles": [
+        "./logs/*",
+        "./src/*",
     ]
 }

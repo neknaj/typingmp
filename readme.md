@@ -6,10 +6,6 @@
 
 It serves as both a functional typing tutor for Japanese Romaji input and a technical showcase of clean architecture, platform abstraction, and Rust's versatility.
 
-<!-- TODO: Add a GIF showcasing the different backends in action -->
-![image](https://github.com/user-attachments/assets/51553c31-97b5-4b36-9b5a-7e3f81e3d930)
-
-
 ## ✨ Features
 
 -   **True Multi-Platform Support**: The same logic runs seamlessly on:
@@ -113,6 +109,7 @@ cargo run --features tui
     This command builds the Rust code, generates JavaScript bindings, and places all necessary files in a `pkg` directory.
     ```bash
     wasm-pack build --target web -- --features wasm
+    wasm-pack build --target web --dev -- --features wasm
     ```
 
 2.  **Start a Local Web Server:**
