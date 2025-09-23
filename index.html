@@ -3,8 +3,8 @@
 
 <head>
     <meta charset="utf-8" />
-    <title>Neknaj Typing Multi-Platform</title>
-    <meta property="og:title" content="Neknaj Typing Multi-Platform">
+    <title>Neknaj Typing Multi-Platform wasm edition</title>
+    <meta property="og:title" content="Neknaj Typing Multi-Platform wasm edition">
     <meta property="og:description" content="クロスプラットフォーム対応のタイピング練習アプリケーションです。">
     <meta property="og:type" content="website">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
@@ -79,6 +79,10 @@
                 display: flex;
             }
         }
+
+        .description {
+            opacity: 0;
+        }
     </style>
 </head>
 
@@ -87,6 +91,10 @@
     <div id="canvas-wrapper">
         <!-- CanvasはRustコードによってここに追加される -->
     </div>
+
+    <p class="description">
+        クロスプラットフォーム対応のタイピング練習アプリケーションです。
+    </p>
 
     <div id="controls-container">
         <button id="key-up">▲</button>
@@ -104,6 +112,16 @@
 
     async function run() {
         await init();
+
+        const copyToClipboardOnce = async () => {
+            try {
+                await navigator.clipboard.writeText('Neknaj Typing MP wasm edition');
+                console.log('Copied to clipboard on user interaction.');
+            } catch (err) {
+                console.error('Failed to copy to clipboard: ', err);
+            }
+        };
+        document.body.addEventListener('pointerdown', copyToClipboardOnce, { once: true });
 
         const adjustHeight = () => {
             if (window.visualViewport) {
