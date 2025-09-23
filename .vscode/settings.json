@@ -1,6 +1,6 @@
 {
     "liveServer.settings.port": 5503,
     "rust-analyzer.cargo.features": [
-        "uefi"
+        "wasm"
     ]
 }

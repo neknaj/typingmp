@@ -1,5 +1,6 @@
 // src/wasm.rs
 
+// ... use宣言やthread_local!, trigger_event関数は変更なし ...
 use crate::app::{App, AppEvent, Fonts};
 use crate::renderer::{calculate_pixel_font_size, gui_renderer};
 use crate::ui::{self, ActiveLowerElement, LowerTypingSegment, Renderable, UpperSegmentState};
@@ -8,7 +9,30 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::Clamped;
-use web_sys::{CanvasRenderingContext2d, ImageData, KeyboardEvent};
+use wasm_bindgen::JsCast;
+use web_sys::{CanvasRenderingContext2d, HtmlInputElement, ImageData, InputEvent, KeyboardEvent};
+
+thread_local! {
+    static APP_INSTANCE: RefCell<Option<Rc<RefCell<App<'static>>>>> = RefCell::new(None);
+}
+
+#[wasm_bindgen]
+pub fn trigger_event(event_type: &str) {
+    APP_INSTANCE.with(|instance| {
+        if let Some(app_rc) = instance.borrow().as_ref() {
+            let mut app = app_rc.borrow_mut();
+            match event_type {
+                "Up" => app.on_event(AppEvent::Up),
+                "Down" => app.on_event(AppEvent::Down),
+                "Enter" => app.on_event(AppEvent::Enter),
+                "Backspace" => app.on_event(AppEvent::Backspace),
+                "Escape" => app.on_event(AppEvent::Escape),
+                _ => {},
+            }
+        }
+    });
+}
+
 
 #[wasm_bindgen(start)]
 #[cfg(feature = "wasm")]
@@ -18,15 +42,37 @@ pub fn start() -> Result<(), JsValue> {
     let document = window.document().unwrap();
     let body = document.body().unwrap();
 
-    let canvas = document.create_element("canvas")?.dyn_into::<web_sys::HtmlCanvasElement>()?;
-    body.append_child(&canvas)?;
-    let context = canvas.get_context("2d")?.unwrap().dyn_into::<CanvasRenderingContext2d>()?;
+    let input_element = document
+        .create_element("input")?
+        .dyn_into::<HtmlInputElement>()?;
+    input_element.set_type("text");
+    {
+        input_element.set_attribute("inputmode", "text")?;
+        input_element.set_attribute("autocapitalize", "off")?;
+        input_element.set_attribute("autocorrect", "off")?;
+        input_element.set_attribute("autocomplete", "off")?;
+        input_element.set_attribute("spellcheck", "false")?;
+    }
+    body.append_child(&input_element)?;
 
-    let yuji_font_data = include_bytes!("../fonts/YujiSyuku-Regular.ttf");
+    // ▼▼▼ [追加箇所] canvasを配置するラッパー要素を取得 ▼▼▼
+    let wrapper = document
+        .get_element_by_id("canvas-wrapper")
+        .ok_or_else(|| JsValue::from_str("Missing #canvas-wrapper element"))?;
+
+    let canvas = document.create_element("canvas")?.dyn_into::<web_sys::HtmlCanvasElement>()?;
+    
+    // ▼▼▼ [修正箇所] canvasをbodyではなくラッパーに追加する ▼▼▼
+    wrapper.append_child(&canvas)?;
+    
+    let context = canvas.get_context("2d")?.unwrap().dyn_into::<CanvasRenderingContext2d>()?;
+    
+    // ... 以降のコードは変更ありません ...
+    let yuji_font_data: &'static [u8] = include_bytes!("../fonts/YujiSyuku-Regular.ttf");
     let yuji_font = FontRef::try_from_slice(yuji_font_data)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
-    let noto_font_data = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
+    let noto_font_data: &'static [u8] = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
     let noto_font = FontRef::try_from_slice(noto_font_data)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
@@ -38,46 +84,64 @@ pub fn start() -> Result<(), JsValue> {
     let app = Rc::new(RefCell::new(App::new(fonts)));
     app.borrow_mut().on_event(AppEvent::Start);
 
+    APP_INSTANCE.with(|instance| {
+        *instance.borrow_mut() = Some(app.clone());
+    });
+
     let size = Rc::new(RefCell::new((0, 0)));
     let last_time = Rc::new(RefCell::new(0.0));
 
-    // 初期サイズ設定とリサイズハンドラ
     {
-        let window_clone = window.clone();
+        let input_clone = input_element.clone();
+        let closure = Closure::<dyn FnMut()>::new(move || {
+            let _ = input_clone.focus();
+        });
+        canvas.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())?;
+        closure.forget();
+    }
+
+    {
         let canvas_clone = canvas.clone();
         let size_clone = size.clone();
-        let resize_handler = Closure::<dyn FnMut()>::new(move || {
-            let width = window_clone.inner_width().unwrap().as_f64().unwrap() as u32;
-            let height = window_clone.inner_height().unwrap().as_f64().unwrap() as u32;
+        let resize_closure = Closure::<dyn FnMut()>::new(move || {
+            let width = canvas_clone.client_width() as u32;
+            let height = canvas_clone.client_height() as u32;
             canvas_clone.set_width(width);
             canvas_clone.set_height(height);
             *size_clone.borrow_mut() = (width as usize, height as usize);
         });
-        window.add_event_listener_with_callback("resize", resize_handler.as_ref().unchecked_ref())?;
-        
-        let width = window.inner_width().unwrap().as_f64().unwrap() as u32;
-        let height = window.inner_height().unwrap().as_f64().unwrap() as u32;
-        canvas.set_width(width);
-        canvas.set_height(height);
-        *size.borrow_mut() = (width as usize, height as usize);
-        
-        resize_handler.forget();
+        window.add_event_listener_with_callback("resize", resize_closure.as_ref().unchecked_ref())?;
+        resize_closure.as_ref().unchecked_ref::<js_sys::Function>().call0(&JsValue::NULL).unwrap();
+        resize_closure.forget();
     }
-
-    // キーボードイベントのリスナーを設定
+    
+    // ... (キーボードリスナーやメインループも変更なし)
     {
         let app_clone = app.clone();
         let closure = Closure::<dyn FnMut(_)>::new(move |event: KeyboardEvent| {
-            event.prevent_default();
-
             let mut app = app_clone.borrow_mut();
+            
             match event.key().as_str() {
-                "ArrowUp" => app.on_event(AppEvent::Up),
-                "ArrowDown" => app.on_event(AppEvent::Down),
-                "Backspace" => app.on_event(AppEvent::Backspace),
-                "Enter" => app.on_event(AppEvent::Enter),
-                "Escape" => app.on_event(AppEvent::Escape),
-                key if key.len() == 1 => app.on_event(AppEvent::Char { c: key.chars().next().unwrap(), timestamp: crate::timestamp::now() }),
+                "ArrowUp" => {
+                    event.prevent_default();
+                    app.on_event(AppEvent::Up)
+                },
+                "ArrowDown" => {
+                    event.prevent_default();
+                    app.on_event(AppEvent::Down)
+                },
+                "Backspace" => {
+                    event.prevent_default();
+                    app.on_event(AppEvent::Backspace)
+                },
+                "Enter" => {
+                    event.prevent_default();
+                    app.on_event(AppEvent::Enter)
+                },
+                "Escape" => {
+                    event.prevent_default();
+                    app.on_event(AppEvent::Escape)
+                },
                 _ => {}
             }
         });
@@ -85,15 +149,38 @@ pub fn start() -> Result<(), JsValue> {
         closure.forget();
     }
 
-    // requestAnimationFrameによるメインループ
+    {
+        let app_clone = app.clone();
+        let input_clone = input_element.clone();
+        let closure = Closure::<dyn FnMut(_)>::new(move |event: InputEvent| {
+            event.prevent_default();
+
+            let value = input_clone.value();
+            if !value.is_empty() {
+                let mut app = app_clone.borrow_mut();
+                for c in value.chars() {
+                    app.on_event(AppEvent::Char { c, timestamp: crate::timestamp::now() });
+                }
+                input_clone.set_value("");
+            }
+        });
+        input_element.add_event_listener_with_callback("input", closure.as_ref().unchecked_ref())?;
+        closure.forget();
+    }
+
     let f = Rc::new(RefCell::new(None));
     let g = f.clone();
     *g.borrow_mut() = Some(Closure::<dyn FnMut()>::new(move || {
         let (width, height) = *size.borrow();
+        
+        if width == 0 || height == 0 {
+            request_animation_frame(f.borrow().as_ref().unwrap());
+            return;
+        }
 
         let now = crate::timestamp::now();
         let mut last_time_borrow = last_time.borrow_mut();
-        let delta_time = if *last_time_borrow > 0.0 { now - *last_time_borrow } else { 16.6 }; // 初回フレームは60FPSと仮定
+        let delta_time = if *last_time_borrow > 0.0 { now - *last_time_borrow } else { 16.6 };
         *last_time_borrow = now;
 
         app.borrow_mut().update(width, height, delta_time);
@@ -212,6 +299,7 @@ pub fn start() -> Result<(), JsValue> {
         request_animation_frame(f.borrow().as_ref().unwrap());
     }));
     request_animation_frame(g.borrow().as_ref().unwrap());
+    
     Ok(())
 }
 

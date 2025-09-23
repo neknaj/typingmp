@@ -57,6 +57,8 @@ features = [
     'Window',
     'Element',
     'HtmlCanvasElement',
+    'HtmlInputElement',
+    'InputEvent',
     'CanvasRenderingContext2d',
     'ImageData',
     'Blob',

@@ -170,7 +170,7 @@ pub enum Renderable {
 }
 
 #[cfg(target_arch = "wasm32")]
-const MENU_ITEMS: [&str; 1] = ["Start Typing", "Settings"];
+const MENU_ITEMS: [&str; 2] = ["Start Typing", "Settings"];
 
 #[cfg(not(target_arch = "wasm32"))]
 const MENU_ITEMS: [&str; 3] = ["Start Typing", "Settings", "Quit"];
