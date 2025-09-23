@@ -171,7 +171,7 @@ pub mod tui_renderer {
     use std::convert::TryFrom;
 
     // TUIの1文字の縦横比をおよそ2:1と仮定
-    const TUI_CHAR_ASPECT_RATIO: f32 = 2.0;
+    pub const TUI_CHAR_ASPECT_RATIO: f32 = 2.0;
     // アートの1セルを構成する仮想ピクセル数。小さいほど高解像度（大きく）なる
     pub const ART_V_PIXELS_PER_CELL: f32 = 2.0;
 

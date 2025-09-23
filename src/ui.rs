@@ -176,8 +176,8 @@ const MENU_ITEMS: [&str; 1] = ["Start Typing"];
 const MENU_ITEMS: [&str; 3] = ["Start Typing", "Settings", "Quit"];
 
 // --- タイピング画面のレイアウト定数 ---
-pub const BASE_FONT_SIZE_RATIO: f32 = 0.3;
-const UPPER_ROW_Y_OFFSET_FACTOR: f32 = 1.0;
+pub const BASE_FONT_SIZE_RATIO: f32 = 0.2;
+const UPPER_ROW_Y_OFFSET_FACTOR: f32 = 1.3;
 const LOWER_ROW_Y_OFFSET_FACTOR: f32 = 0.2;
 
 // --- 色定義 ---
