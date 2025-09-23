@@ -3,6 +3,8 @@
 #[cfg(not(feature = "uefi"))]
 use crate::app::{App, AppEvent};
 #[cfg(not(feature = "uefi"))]
+use crate::model::Segment;
+#[cfg(not(feature = "uefi"))]
 use crate::renderer::tui_renderer;
 #[cfg(not(feature = "uefi"))]
 use crate::ui::{
@@ -69,19 +71,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if target_art_height_in_cells == 0 { continue; }
                     let font_size_px = target_art_height_in_cells as f32 * tui_renderer::ART_V_PIXELS_PER_CELL;
 
-                    let arts: Vec<_> = segments.iter().map(|seg| {
-                        tui_renderer::render_text_to_art(&font, &seg.base_text, font_size_px)
-                    }).collect();
-                    let total_width: usize = arts.iter().map(|(_, w, _)| *w).sum();
-                    let total_height: usize = arts.first().map(|(_, _, h)| *h).unwrap_or(0);
+                    let total_width: u32 = segments.iter().map(|seg| {
+                        tui_renderer::render_text_to_art(&font, &seg.base_text, font_size_px).1 as u32
+                    }).sum();
+                    let total_height = target_art_height_in_cells as u32;
+
                     if total_width == 0 { continue; }
 
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, cols, rows);
-                    let (mut pen_x, start_y) = ui::calculate_aligned_position(anchor_pos, total_width as u32, total_height as u32, align);
+                    let (mut pen_x, start_y) = ui::calculate_aligned_position(anchor_pos, total_width, total_height, align);
 
-                    for (i, (art_buffer, art_width, art_height)) in arts.iter().map(|(b,w,h)|(b,*w,*h)).enumerate() {
-                        let seg = &segments[i];
-
+                    for seg in segments {
+                        let (art_buffer, art_width, art_height) = tui_renderer::render_text_to_art(&font, &seg.base_text, font_size_px);
                         blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, art_height, pen_x as isize, start_y as isize);
 
                         if let Some(ruby) = &seg.ruby_text {
@@ -98,50 +99,67 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if target_art_height_in_cells == 0 { continue; }
                     let font_size_px = target_art_height_in_cells as f32 * tui_renderer::ART_V_PIXELS_PER_CELL;
 
-                    let mut total_width = 0;
-                    let mut seg_info = Vec::new();
-                    for seg in &segments {
-                        match seg {
-                            LowerTypingSegment::Completed { base_text, .. } => {
-                                let (_, w, _) = tui_renderer::render_text_to_art(&font, base_text, font_size_px);
-                                total_width += w;
-                                seg_info.push((w, true));
-                            }
-                            LowerTypingSegment::Active { elements } => {
-                                let text = get_active_lower_text(elements);
-                                let (w, _) = measure_plain_text(&text);
-                                total_width += w as usize;
-                                seg_info.push((w as usize, false));
-                            }
-                        }
-                    }
-                    let total_height = target_art_height_in_cells;
+                    let total_width: u32 = app.typing_model.as_ref().map_or(0, |m| {
+                        m.content.lines.get(m.status.line as usize).map_or(0, |line| {
+                            line.segments.iter().map(|seg| {
+                                let base_text = match seg {
+                                    Segment::Plain { text } => text,
+                                    Segment::Annotated { base, .. } => base,
+                                };
+                                tui_renderer::render_text_to_art(&font, base_text, font_size_px).1 as u32
+                            }).sum()
+                        })
+                    });
+                    let total_height = target_art_height_in_cells as u32;
+
                     if total_width == 0 { continue; }
 
                     let anchor_pos = ui::calculate_anchor_position(anchor, shift, cols, rows);
-                    let (mut pen_x, start_y) = ui::calculate_aligned_position(anchor_pos, total_width as u32, total_height as u32, align);
+                    let (mut pen_x, start_y) = ui::calculate_aligned_position(anchor_pos, total_width, total_height, align);
 
-                    for (i, seg) in segments.iter().enumerate() {
-                        let (seg_width, is_art) = seg_info[i];
-                        if is_art {
-                            if let LowerTypingSegment::Completed { base_text, ruby_text, .. } = seg {
-                                let (art_buffer, art_width, art_height) = tui_renderer::render_text_to_art(&font, base_text, font_size_px);
+                    for seg in segments {
+                        match seg {
+                            LowerTypingSegment::Completed { base_text, ruby_text, .. } => {
+                                // FIX: `base_text` (String) を `&` で借用して `&str` にする
+                                let (art_buffer, art_width, art_height) = tui_renderer::render_text_to_art(&font, &base_text, font_size_px);
                                 blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, art_height, pen_x as isize, start_y as isize);
+
                                 if let Some(ruby) = ruby_text {
-                                    let (ruby_width, _) = measure_plain_text(ruby);
+                                    // FIX: `ruby` (String) を `&` で借用して `&str` にする
+                                    let (ruby_width, _) = measure_plain_text(&ruby);
                                     let ruby_anchor = (pen_x + (art_width as i32 / 2), start_y);
                                     let (rx, ry) = ui::calculate_aligned_position(ruby_anchor, ruby_width, 1, Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Bottom });
-                                    draw_plain_text_at(&mut current_buffer, ruby, rx, ry, cols);
+                                    // FIX: `ruby` (String) を `&` で借用して `&str` にする
+                                    draw_plain_text_at(&mut current_buffer, &ruby, rx, ry, cols);
+                                }
+                                pen_x += art_width as i32;
+                            }
+                            LowerTypingSegment::Active { elements } => {
+                                for el in elements {
+                                    let plain_y = start_y + (total_height as i32 / 2);
+                                    match el {
+                                        ActiveLowerElement::Typed { character, .. } => {
+                                            let (art_buffer, art_width, art_height) = tui_renderer::render_text_to_art(&font, &character.to_string(), font_size_px);
+                                            blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, art_height, pen_x as isize, start_y as isize);
+                                            pen_x += art_width as i32;
+                                        }
+                                        ActiveLowerElement::Cursor => {
+                                            draw_plain_text_at(&mut current_buffer, "|", pen_x, plain_y, cols);
+                                            pen_x += 1;
+                                        }
+                                        ActiveLowerElement::UnconfirmedInput(s) => {
+                                            // FIX: `s` (String) を `&` で借用して `&str` にする
+                                            draw_plain_text_at(&mut current_buffer, &s, pen_x, plain_y, cols);
+                                            pen_x += s.chars().count() as i32;
+                                        }
+                                        ActiveLowerElement::LastIncorrectInput(c) => {
+                                            draw_plain_text_at(&mut current_buffer, &c.to_string(), pen_x, plain_y, cols);
+                                            pen_x += 1;
+                                        }
+                                    }
                                 }
                             }
-                        } else {
-                            if let LowerTypingSegment::Active { elements } = seg {
-                                let text = get_active_lower_text(elements);
-                                let plain_y = start_y + (total_height as i32 / 2);
-                                draw_plain_text_at(&mut current_buffer, &text, pen_x, plain_y, cols);
-                            }
                         }
-                        pen_x += seg_width as i32;
                     }
                 }
             }
@@ -246,24 +264,6 @@ fn calculate_target_art_height(font_size: FontSize, cols: usize, rows: usize) ->
         }
     }
 }
-
-/// ActiveLowerElementのスライスから表示用の文字列を生成するヘルパー関数
-#[cfg(not(feature = "uefi"))]
-fn get_active_lower_text(elements: &[ActiveLowerElement]) -> String {
-    let mut text = String::new();
-    for el in elements {
-        match el {
-            // FIX: `character` をデリファレンス
-            ActiveLowerElement::Typed { character, .. } => text.push(*character),
-            ActiveLowerElement::Cursor => text.push('|'),
-            ActiveLowerElement::UnconfirmedInput(s) => text.push_str(s),
-            // FIX: `c` をデリファレンス
-            ActiveLowerElement::LastIncorrectInput(c) => text.push(*c),
-        }
-    }
-    text
-}
-
 
 #[cfg(feature = "uefi")]
 pub fn run() -> Result<(), Box<dyn core::error::Error>> {
