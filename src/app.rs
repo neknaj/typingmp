@@ -99,6 +99,8 @@ pub struct App<'a> {
 impl<'a> App<'a> {
     /// Appの新しいインスタンスを生成する
     pub fn new(fonts: Fonts<'a>) -> Self {
+        #[cfg(feature = "uefi")]
+        uefi::println!("APP: START");
         Self {
             state: AppState::MainMenu,
             selected_main_menu_item: 0,
@@ -158,8 +160,12 @@ impl<'a> App<'a> {
         if self.state != AppState::Typing {
             return;
         }
+        // delta_timeが極端に大きい場合（デバッガで停止した場合など）にスクロールが飛びすぎるのを防ぐ
+        // 100ms (0.1秒) を上限とする
+        let clamped_delta_time = delta_time.min(100.0);
 
         if let Some(model) = self.typing_model.as_mut() {
+
             // ブロック内で不変参照を取得することで借用ルール違反を回避
             let font = match self.font_choice {
                 FontChoice::YujiSyuku => &self.fonts.yuji_syuku,
@@ -192,14 +198,14 @@ impl<'a> App<'a> {
                 // Add width of completed segments (based on BASE text)
                 for i in 0..model.status.segment as usize {
                     if let Some(seg) = current_line_content.segments.get(i) {
-                         let text = match seg {
+                        let text = match seg {
                             crate::model::Segment::Plain { text } => text.as_str(),
                             crate::model::Segment::Annotated { base, .. } => base.as_str(),
                         };
                         cursor_x_offset += gui_renderer::measure_text(font, text, base_pixel_font_size).0 as f32;
                     }
                 }
-                
+
                 // For the current segment, add the width of the typed READING text
                 if let Some(seg) = current_line_content.segments.get(model.status.segment as usize) {
                     let reading_text = match seg {
@@ -221,7 +227,7 @@ impl<'a> App<'a> {
                 let now = model.scroll.scroll;
                 let diff = target_scroll as f64 - now;
                 let scroll_speed_factor = 5.0; // Adjust this value for faster/slower scrolling
-                model.scroll.scroll += diff * scroll_speed_factor * (delta_time / 1000.0);
+                model.scroll.scroll += diff * scroll_speed_factor * (clamped_delta_time / 1000.0);
             }
         }
     }
