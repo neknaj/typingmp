@@ -14,12 +14,18 @@ pub fn now() -> f64 {
     js_sys::Date::now()
 }
 
-// UEFI環境では高解像度の単調タイマーを簡単に取得できないため、
-// uefi.rs のメインループで時間を管理する。
-// この関数は理論上呼ばれないが、万が一のために0.0を返す。
 #[cfg(feature = "uefi")]
 pub fn now() -> f64 {
-    // この実装は使われない。
-    // uefi.rsで直接タイムスタンプを生成してTypingInputに渡す。
-    0.0
+    use uefi::runtime;
+    // uefi::println!("get time");
+    let res = runtime::get_time().unwrap();
+    let mut timestamp_ms: f64 = 0.0;
+    timestamp_ms += res.year() as f64 * 31_536_000_000.0; // 1年
+    timestamp_ms += res.month() as f64 * 2_628_000_000.0; // 1ヶ月
+    timestamp_ms += res.day() as f64 * 86_400_000.0; // 1日
+    timestamp_ms += res.hour() as f64 * 3_600_000.0; // 1時間
+    timestamp_ms += res.minute() as f64 * 60_000.0; // 1分
+    timestamp_ms += res.second() as f64 * 1_000.0; // 1秒
+    timestamp_ms += res.nanosecond() as f64 / 1_000_000.0; // ナノ秒をミリ秒に
+    timestamp_ms
 }

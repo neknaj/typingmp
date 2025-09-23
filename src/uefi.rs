@@ -11,6 +11,7 @@ use uefi::boot::{EventType, TimerTrigger, Tpl};
 use uefi::prelude::*;
 use uefi::proto::console::gop::{BltOp, BltPixel, BltRegion, GraphicsOutput};
 use uefi::proto::console::text::{Key, ScanCode};
+use core_maths::CoreFloat;
 
 pub fn run() -> Status {
     uefi::helpers::init().unwrap();
@@ -42,6 +43,9 @@ pub fn run() -> Status {
         unsafe { uefi::boot::create_event(EventType::TIMER, Tpl::APPLICATION, None, None).unwrap() };
     uefi::boot::set_timer(&timer_event, TimerTrigger::Relative(100_000)).unwrap();
 
+    // 最後のフレームからの経過時間を記録するための変数を初期化
+    let mut last_frame_time = crate::timestamp::now();
+
     let mut events = [timer_event];
 
     while !app.should_quit {
@@ -55,6 +59,10 @@ pub fn run() -> Status {
             collected_keys
         });
 
+        let now_time = crate::timestamp::now();
+        let delta_time = now_time - last_frame_time;
+        last_frame_time = now_time;
+
         for key in keys {
             match key {
                 Key::Printable(c) => {
@@ -66,7 +74,7 @@ pub fn run() -> Status {
                     } else {
                         app.on_event(AppEvent::Char {
                             c: ch,
-                            timestamp: 0.0, // UEFIでは正確なタイムスタンプは無いため0.0
+                            timestamp: now_time,
                         });
                     }
                 }
@@ -79,8 +87,7 @@ pub fn run() -> Status {
             }
         }
 
-        // updateメソッドに10msの固定デルタ時間を渡す
-        app.update(width, height, 10.0);
+        app.update(width, height, delta_time);
 
         let background_color = ui::ACTIVE_COLOR;
         let mut pixel_buffer: alloc::vec::Vec<BltPixel> = alloc::vec![
