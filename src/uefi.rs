@@ -4,7 +4,7 @@ extern crate alloc;
 
 use crate::app::{App, AppEvent};
 use crate::renderer::{calculate_pixel_font_size, gui_renderer, BG_COLOR};
-use crate::ui::{self, Renderable};
+use crate::ui::{self, ActiveLowerElement, LowerTypingSegment, Renderable, UpperSegmentState};
 use ab_glyph::{point, Font, FontRef, OutlinedGlyph, PxScale, ScaleFont};
 use alloc::vec::Vec;
 use uefi::boot::{EventType, TimerTrigger, Tpl};
@@ -15,33 +15,27 @@ use uefi::proto::console::text::{Key, ScanCode};
 pub fn run() -> Status {
     uefi::helpers::init().unwrap();
 
-    // Get Graphics Output Protocol
     let gop_handle = uefi::boot::get_handle_for_protocol::<GraphicsOutput>().unwrap();
     let mut gop = uefi::boot::open_protocol_exclusive::<GraphicsOutput>(gop_handle).unwrap();
 
-    // Get current mode info
     let mode_info = gop.current_mode_info();
     let (width, height) = mode_info.resolution();
 
-    // Load font
     let font_data: &[u8] = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
     let font = FontRef::try_from_slice(font_data).expect("Failed to load font");
 
     let mut app = App::new();
     App::on_event(&mut app, AppEvent::Start);
 
-    // Create timer event for the main loop tick
     let timer_event =
         unsafe { uefi::boot::create_event(EventType::TIMER, Tpl::APPLICATION, None, None).unwrap() };
-    uefi::boot::set_timer(&timer_event, TimerTrigger::Relative(100_000)).unwrap(); // 10ms tick
+    uefi::boot::set_timer(&timer_event, TimerTrigger::Relative(100_000)).unwrap();
 
     let mut events = [timer_event];
 
     while !app.should_quit {
-        // Wait for the timer tick
         uefi::boot::wait_for_event(&mut events).unwrap();
 
-        // Read all available keys by returning them from the closure
         let keys: Vec<Key> = uefi::system::with_stdin(|stdin| {
             let mut collected_keys = Vec::new();
             while let Ok(Some(key)) = stdin.read_key() {
@@ -50,21 +44,18 @@ pub fn run() -> Status {
             collected_keys
         });
 
-        // Process the collected keys
         for key in keys {
             match key {
                 Key::Printable(c) => {
                     let ch: char = c.into();
                     if ch == '\u{0008}' {
-                        // Backspace
                         app.on_event(AppEvent::Backspace);
                     } else if ch == '\r' {
-                        // Enter
                         app.on_event(AppEvent::Enter);
                     } else {
                         app.on_event(AppEvent::Char {
                             c: ch,
-                            timestamp: crate::timestamp::now(),
+                            timestamp: 0.0, // UEFIでは正確なタイムスタンプは無いため0.0
                         });
                     }
                 }
@@ -77,10 +68,8 @@ pub fn run() -> Status {
             }
         }
 
-        // 毎フレームの状態更新（スクロール計算など）
         app.update(width, height, &font);
 
-        // Render
         let mut pixel_buffer: alloc::vec::Vec<BltPixel> = alloc::vec![
             BltPixel::new(
                 ((BG_COLOR >> 16) & 0xFF) as u8,
@@ -95,9 +84,7 @@ pub fn run() -> Status {
         for item in render_list {
             match item {
                 Renderable::BigText { text, anchor, shift, align, font_size, color } |
-                Renderable::Text { text, anchor, shift, align, font_size, color } |
-                Renderable::TypingBase { text, anchor, shift, align, font_size, color } |
-                Renderable::TypingRuby { text, anchor, shift, align, font_size, color } => {
+                Renderable::Text { text, anchor, shift, align, font_size, color } => {
                     let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
                     let (text_width, text_height, _ascent) =
                         gui_renderer::measure_text(&font, text.as_str(), pixel_font_size);
@@ -122,17 +109,12 @@ pub fn run() -> Status {
                                 | (pixel.blue as u32),
                         );
                     }
-
                     crate::renderer::draw_linear_gradient(
                         &mut temp_buffer,
-                        width,
-                        height,
-                        gradient.start_color,
-                        gradient.end_color,
-                        (0.0, 0.0),
-                        (width as f32, height as f32),
+                        width, height,
+                        gradient.start_color, gradient.end_color,
+                        (0.0, 0.0), (width as f32, height as f32),
                     );
-
                     for (i, color) in temp_buffer.iter().enumerate() {
                         pixel_buffer[i] = BltPixel::new(
                             ((color >> 16) & 0xFF) as u8,
@@ -141,10 +123,83 @@ pub fn run() -> Status {
                         );
                     }
                 }
+                Renderable::TypingUpper { segments, anchor, shift, align, font_size } => {
+                    let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
+                    let ruby_pixel_font_size = pixel_font_size * 0.4;
+                    
+                    let total_width = segments.iter().map(|seg| {
+                        gui_renderer::measure_text(&font, seg.base_text.as_str(), pixel_font_size).0
+                    }).sum::<u32>();
+                    let total_height = gui_renderer::measure_text(&font, " ", pixel_font_size).1;
+
+                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
+                    let (mut pen_x, y) = ui::calculate_aligned_position(anchor_pos, total_width, total_height, align);
+
+                    for seg in segments {
+                        let color = match seg.state {
+                            UpperSegmentState::Correct => ui::CORRECT_COLOR,
+                            UpperSegmentState::Incorrect => ui::INCORRECT_COLOR,
+                            UpperSegmentState::Active => ui::ACTIVE_COLOR,
+                            UpperSegmentState::Pending => ui::PENDING_COLOR,
+                        };
+                        draw_text(&mut pixel_buffer, width, &font, seg.base_text.as_str(), (pen_x as f32, y as f32), pixel_font_size, color);
+                        
+                        if let Some(ruby) = &seg.ruby_text {
+                            let (base_w, ..) = gui_renderer::measure_text(&font, seg.base_text.as_str(), pixel_font_size);
+                            let (ruby_w, ..) = gui_renderer::measure_text(&font, ruby.as_str(), ruby_pixel_font_size);
+                            let ruby_x = pen_x as f32 + (base_w as f32 - ruby_w as f32) / 2.0;
+                            let ruby_y = y as f32 - ruby_pixel_font_size;
+                            draw_text(&mut pixel_buffer, width, &font, ruby.as_str(), (ruby_x, ruby_y), ruby_pixel_font_size, color);
+                        }
+                        
+                        let (seg_width, _, _) = gui_renderer::measure_text(&font, seg.base_text.as_str(), pixel_font_size);
+                        pen_x += seg_width as i32;
+                    }
+                }
+                Renderable::TypingLower { segments, anchor, shift, align, font_size, target_line_total_width } => {
+                    let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
+                    let ruby_pixel_font_size = pixel_font_size * 0.3;
+                    let total_height = gui_renderer::measure_text(&font, " ", pixel_font_size).1;
+
+                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
+                    let (mut pen_x, y) = ui::calculate_aligned_position(anchor_pos, target_line_total_width, total_height, align);
+
+                    for seg in segments {
+                        match seg {
+                            LowerTypingSegment::Completed { base_text, ruby_text, is_correct } => {
+                                let color = if is_correct { ui::CORRECT_COLOR } else { ui::INCORRECT_COLOR };
+                                draw_text(&mut pixel_buffer, width, &font, base_text.as_str(), (pen_x as f32, y as f32), pixel_font_size, color);
+                                
+                                if let Some(ruby) = ruby_text {
+                                    let (base_w, ..) = gui_renderer::measure_text(&font, base_text.as_str(), pixel_font_size);
+                                    let (ruby_w, ..) = gui_renderer::measure_text(&font, ruby.as_str(), ruby_pixel_font_size);
+                                    let ruby_x = pen_x as f32 + (base_w as f32 - ruby_w as f32) / 2.0;
+                                    let ruby_y = y as f32 - ruby_pixel_font_size;
+                                    draw_text(&mut pixel_buffer, width, &font, ruby.as_str(), (ruby_x, ruby_y), ruby_pixel_font_size, color);
+                                }
+
+                                pen_x += gui_renderer::measure_text(&font, base_text.as_str(), pixel_font_size).0 as i32;
+                            }
+                            LowerTypingSegment::Active { elements } => {
+                                for el in elements {
+                                    let (text, color) = match el {
+                                        // FIX: `to_string(character)` を `to_string(&character)` に変更
+                                        ActiveLowerElement::Typed { character, is_correct } => (alloc::string::ToString::to_string(&character), if is_correct { ui::CORRECT_COLOR } else { ui::INCORRECT_COLOR }),
+                                        ActiveLowerElement::Cursor => (alloc::string::ToString::to_string(&'|'), ui::CURSOR_COLOR),
+                                        ActiveLowerElement::UnconfirmedInput(s) => (s.clone(), ui::UNCONFIRMED_COLOR),
+                                        // FIX: `to_string(c)` を `to_string(&c)` に変更
+                                        ActiveLowerElement::LastIncorrectInput(c) => (alloc::string::ToString::to_string(&c), ui::WRONG_KEY_COLOR),
+                                    };
+                                    draw_text(&mut pixel_buffer, width, &font, text.as_str(), (pen_x as f32, y as f32), pixel_font_size, color);
+                                    pen_x += gui_renderer::measure_text(&font, text.as_str(), pixel_font_size).0 as i32;
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
-        // Blt to video
         gop.blt(BltOp::BufferToVideo {
             buffer: &pixel_buffer,
             src: BltRegion::Full,
@@ -153,7 +208,6 @@ pub fn run() -> Status {
         })
         .unwrap();
 
-        // Reset timer for the next tick
         uefi::boot::set_timer(&events[0], TimerTrigger::Relative(100_000)).unwrap();
     }
 

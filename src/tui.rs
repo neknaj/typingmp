@@ -3,9 +3,9 @@
 #[cfg(not(feature = "uefi"))]
 use crate::app::{App, AppEvent};
 #[cfg(not(feature = "uefi"))]
-use crate::renderer::{calculate_pixel_font_size, tui_renderer};
+use crate::renderer::{tui_renderer};
 #[cfg(not(feature = "uefi"))]
-use crate::ui::{self, Align, Anchor, FontSize, Renderable, Shift};
+use crate::ui::{self, ActiveLowerElement, Align, Anchor, FontSize, LowerTypingSegment, Renderable, Shift};
 #[cfg(not(feature = "uefi"))]
 use ab_glyph::FontRef;
 #[cfg(not(feature = "uefi"))]
@@ -20,7 +20,6 @@ use std::io::{stdout, Write};
 #[cfg(not(feature = "uefi"))]
 use std::time::Duration;
 
-// TUIの1文字の幅と高さを、仮想的なピクセル数で定義
 #[cfg(not(feature = "uefi"))]
 const VIRTUAL_CELL_WIDTH: usize = 1;
 #[cfg(not(feature = "uefi"))]
@@ -41,33 +40,53 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut previous_buffer = Vec::new();
 
-    // メインループ
     while !app.should_quit {
         let (cols, rows) = terminal::size()?;
         let (cols, rows) = (cols as usize, rows as usize);
 
-        // スムーズスクロール等の計算のため、仮想的なピクセルサイズを渡す
         let virtual_width = cols * VIRTUAL_CELL_WIDTH;
         let virtual_height = rows * VIRTUAL_CELL_HEIGHT;
         app.update(virtual_width, virtual_height, &font);
 
         let mut current_buffer = vec![' '; cols * rows];
         
-        // 全バックエンド共通のUI構築ロジックを呼び出す
         let render_list = ui::build_ui(&app, &font, virtual_width, virtual_height);
 
         for item in render_list {
             match item {
                 Renderable::Background { .. } => { /* TUIでは何もしない */ }
-                // BigTextとTypingBaseをAA化の対象とする
-                Renderable::BigText { text, anchor, shift, align, font_size, .. } |
-                Renderable::TypingBase { text, anchor, shift, align, font_size, .. } => {
-                    draw_art_text(&mut current_buffer, &font, &text, anchor, shift, align, font_size, cols, rows, virtual_width, virtual_height);
+                Renderable::BigText { text, anchor, shift, align, font_size, .. } => {
+                    draw_art_text(&mut current_buffer, &font, &text, anchor, shift, align, font_size, cols, rows);
                 }
-                // TextとTypingRubyは通常のテキストとして描画
-                Renderable::Text { text, anchor, shift, align, .. } |
-                Renderable::TypingRuby { text, anchor, shift, align, .. }=> {
+                Renderable::Text { text, anchor, shift, align, .. } => {
                     draw_plain_text(&mut current_buffer, &text, anchor, shift, align, cols, rows);
+                }
+                Renderable::TypingUpper { segments, anchor, shift, align, font_size, .. } => {
+                    let full_text: String = segments.iter().map(|s| s.base_text.as_str()).collect();
+                    draw_art_text(&mut current_buffer, &font, &full_text, anchor, shift, align, font_size, cols, rows);
+                }
+                Renderable::TypingLower { segments, anchor, shift, align, .. } => {
+                    let mut full_text = String::new();
+                    for seg in segments {
+                        match seg {
+                            // FIX: `base_text` を `&base_text` として借用
+                            LowerTypingSegment::Completed { base_text, .. } => full_text.push_str(&base_text),
+                            LowerTypingSegment::Active { elements } => {
+                                for el in elements {
+                                    match el {
+                                        // FIX: `*character` を `character` に変更
+                                        ActiveLowerElement::Typed { character, .. } => full_text.push(character),
+                                        ActiveLowerElement::Cursor => full_text.push('|'),
+                                        // FIX: `s` を `&s` として借用
+                                        ActiveLowerElement::UnconfirmedInput(s) => full_text.push_str(&s),
+                                        // FIX: `*c` を `c` に変更
+                                        ActiveLowerElement::LastIncorrectInput(c) => full_text.push(c),
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    draw_plain_text(&mut current_buffer, &full_text, anchor, shift, align, cols, rows);
                 }
             }
         }
@@ -120,7 +139,6 @@ fn draw_plain_text(
     width: usize, height: usize,
 ) {
     let (text_width, text_height) = measure_plain_text(text);
-    // 画面全体のサイズ(width, height)に対する相対座標を計算
     let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
     let (start_x, start_y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
 
@@ -141,10 +159,8 @@ fn draw_plain_text(
 #[cfg(not(feature = "uefi"))]
 fn draw_art_text(
     buffer: &mut [char], font: &FontRef, text: &str, anchor: Anchor, shift: Shift, align: Align, font_size: FontSize,
-    cols: usize, rows: usize, virtual_width: usize, virtual_height: usize,
+    cols: usize, rows: usize,
 ) {
-    // 【修正箇所】
-    // 1. FontSize (仮想空間での相対的な大きさ) を、TUIの目標セル数に変換する
     let target_art_height_in_cells = match font_size {
         FontSize::WindowHeight(ratio) => (rows as f32 * ratio).ceil() as usize,
         FontSize::WindowAreaSqrt(ratio) => {
@@ -153,24 +169,16 @@ fn draw_art_text(
         }
     };
 
-    if target_art_height_in_cells == 0 {
-        return;
-    }
+    if target_art_height_in_cells == 0 { return; }
 
-    // 2. 目標のセル数から、AAをレンダリングするための適切なピクセルフォントサイズを逆算する
     let font_size_px = target_art_height_in_cells as f32 * tui_renderer::ART_V_PIXELS_PER_CELL;
-
-    // 3. この計算されたフォントサイズでAAを生成する
     let (art_buffer, art_width, art_height) = tui_renderer::render_text_to_art(font, text, font_size_px);
 
-    if art_width == 0 || art_height == 0 {
-        return;
-    }
-
-    // 4. AAの位置決めは、これまで通りTUIのセル数(cols, rows)で行う (ここは変更なし)
+    if art_width == 0 || art_height == 0 { return; }
+    
     let anchor_pos = ui::calculate_anchor_position(anchor, shift, cols, rows);
     let (start_x, start_y) = ui::calculate_aligned_position(anchor_pos, art_width as u32, art_height as u32, align);
-
+    
     blit_art(buffer, cols, rows, &art_buffer, art_width, art_height, start_x as isize, start_y as isize);
 }
 

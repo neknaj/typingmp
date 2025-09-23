@@ -21,7 +21,7 @@ use alloc::{format, string::{String, ToString}};
 use std::string::{String, ToString};
 
 use crate::app::{App, AppState};
-use crate::model::{Segment, TypingCorrectnessChar, TypingCorrectnessSegment, TypingModel};
+use crate::model::{Segment, TypingCorrectnessChar, TypingCorrectnessSegment};
 use crate::renderer::gui_renderer;
 use crate::typing; // For calculate_total_metrics
 use ab_glyph::FontRef; // FontRefを渡すために必要
@@ -86,9 +86,54 @@ pub struct Gradient {
     pub end_color: u32,
 }
 
+/// 上段（目標テキスト）のセグメントの状態
+pub enum UpperSegmentState {
+    /// 完了済み（正しくタイプされた）
+    Correct,
+    /// 完了済み（間違いを含んでいた）
+    Incorrect,
+    /// 未入力
+    Pending,
+    /// 現在入力中のアクティブなセグメント
+    Active,
+}
+
+/// 上段（目標テキスト）を構成する、ルビ付きの1セグメント
+pub struct UpperTypingSegment {
+    pub base_text: String,
+    pub ruby_text: Option<String>,
+    pub state: UpperSegmentState,
+}
+
+/// 下段（入力テキスト）のアクティブ（現在入力中）セグメントを構成する要素
+pub enum ActiveLowerElement {
+    /// タイプ済みの文字（正誤情報付き）
+    Typed { character: char, is_correct: bool },
+    /// カーソル
+    Cursor,
+    /// 未確定のローマ字入力 (例: "k", "ky")
+    UnconfirmedInput(String),
+    /// 直前の誤入力キー
+    LastIncorrectInput(char),
+}
+
+/// 下段（入力テキスト）を構成するセグメント
+pub enum LowerTypingSegment {
+    /// 完了済みのセグメント
+    Completed {
+        base_text: String,
+        ruby_text: Option<String>,
+        is_correct: bool,
+    },
+    /// 現在入力中のアクティブなセグメント
+    Active { elements: Vec<ActiveLowerElement> },
+}
+
 /// 画面に描画すべき要素の種類とレイアウト情報を定義するenum
 pub enum Renderable {
-    Background { gradient: Gradient },
+    Background {
+        gradient: Gradient,
+    },
     Text {
         text: String,
         anchor: Anchor,
@@ -105,21 +150,22 @@ pub enum Renderable {
         font_size: FontSize,
         color: u32,
     },
-    TypingBase {
-        text: String,
+    /// 上段の目標テキスト行全体を表す型
+    TypingUpper {
+        segments: Vec<UpperTypingSegment>,
         anchor: Anchor,
         shift: Shift,
         align: Align,
-        font_size: FontSize,
-        color: u32,
+        font_size: FontSize, // ベーステキストのフォントサイズ
     },
-    TypingRuby {
-        text: String,
+    /// 下段の入力テキスト行全体を表す型
+    TypingLower {
+        segments: Vec<LowerTypingSegment>,
         anchor: Anchor,
         shift: Shift,
         align: Align,
-        font_size: FontSize,
-        color: u32,
+        font_size: FontSize, // 入力テキストのフォントサイズ
+        target_line_total_width: u32,
     },
 }
 
@@ -133,15 +179,15 @@ const MENU_ITEMS: [&str; 2] = ["Start Typing", "Quit"];
 pub const BASE_FONT_SIZE_RATIO: f32 = 0.3;
 const UPPER_ROW_Y_OFFSET_FACTOR: f32 = 1.0;
 const LOWER_ROW_Y_OFFSET_FACTOR: f32 = 0.2;
-const RUBY_Y_OFFSET_FACTOR: f32 = 0.3;
 
 // --- 色定義 ---
-const CORRECT_COLOR: u32 = 0xFF_9097FF;
-const INCORRECT_COLOR: u32 = 0xFF_FF9898;
-const PENDING_COLOR: u32 = 0xFF_999999;
-const WRONG_KEY_COLOR: u32 = 0xFF_F55252;
-const CURSOR_COLOR: u32 = 0xFF_FFFFFF;
-
+pub const CORRECT_COLOR: u32 = 0xFF_9097FF;
+pub const INCORRECT_COLOR: u32 = 0xFF_FF9898;
+pub const PENDING_COLOR: u32 = 0xFF_999999;
+pub const ACTIVE_COLOR: u32 = 0xFF_FFFFFF;
+pub const WRONG_KEY_COLOR: u32 = 0xFF_F55252;
+pub const CURSOR_COLOR: u32 = 0xFF_FFFFFF;
+pub const UNCONFIRMED_COLOR: u32 = 0xFF_CCCCCC;
 
 /// Appの状態を受け取り、描画リスト（UIレイアウト）を構築する
 pub fn build_ui(app: &App, font: &FontRef, width: usize, height: usize) -> Vec<Renderable> {
@@ -187,7 +233,7 @@ fn build_main_menu_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gr
         anchor: Anchor::Center,
         shift: Shift { x: 0.0, y: -0.3 },
         align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
-        font_size: FontSize::WindowHeight(0.2),
+        font_size: FontSize::WindowHeight(0.4),
         color: 0xFF_FFFFFF,
     });
     for (i, item) in MENU_ITEMS.iter().enumerate() {
@@ -258,7 +304,6 @@ fn build_problem_selection_ui(app: &App, render_list: &mut Vec<Renderable>, grad
     }
 }
 
-/// セグメントが正しくタイプされたかをチェックするヘルパー関数
 fn is_segment_correct(segment: &TypingCorrectnessSegment) -> bool {
     !segment.chars.iter().any(|c| *c == TypingCorrectnessChar::Incorrect)
 }
@@ -267,15 +312,110 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
     render_list.push(Renderable::Background { gradient });
 
     if let Some(model) = &app.typing_model {
+        let line_idx = model.status.line as usize;
+        let content_line = if let Some(line) = model.content.lines.get(line_idx) { line } else { return; };
+        let correctness_line = if let Some(line) = model.typing_correctness.lines.get(line_idx) { line } else { return; };
+        let status = &model.status;
+        let scroll_offset = model.scroll.scroll as f32;
+        
+        let base_font_size = FontSize::WindowHeight(BASE_FONT_SIZE_RATIO);
+        let base_pixel_font_size = crate::renderer::calculate_pixel_font_size(base_font_size, width, height);
+        
+        let target_line_total_width = content_line.segments.iter().map(|seg| {
+            let text = match seg {
+                Segment::Plain { text } => text.as_str(),
+                Segment::Annotated { base, .. } => base.as_str(),
+            };
+            gui_renderer::measure_text(font, text, base_pixel_font_size).0
+        }).sum::<u32>();
+
+        // --- 上段（目標テキスト）の構築 ---
+        let mut upper_segments = Vec::new();
+        for (seg_idx, seg) in content_line.segments.iter().enumerate() {
+            let state = if (seg_idx as i32) < status.segment {
+                if is_segment_correct(&correctness_line.segments[seg_idx]) { UpperSegmentState::Correct } else { UpperSegmentState::Incorrect }
+            } else if (seg_idx as i32) == status.segment {
+                UpperSegmentState::Active
+            } else {
+                UpperSegmentState::Pending
+            };
+            
+            let (base_text, ruby_text) = match seg {
+                Segment::Plain { text } => (text.clone(), None),
+                Segment::Annotated { base, reading } => (base.clone(), Some(reading.clone())),
+            };
+            
+            upper_segments.push(UpperTypingSegment { base_text, ruby_text, state });
+        }
+        
+        let upper_y = (height as f32 / 2.0) - base_pixel_font_size * UPPER_ROW_Y_OFFSET_FACTOR;
+        render_list.push(Renderable::TypingUpper {
+            segments: upper_segments,
+            anchor: Anchor::TopCenter,
+            shift: Shift { x: -scroll_offset / width as f32, y: upper_y / height as f32 },
+            align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
+            font_size: base_font_size,
+        });
+
+        // --- 下段（入力テキスト）の構築 ---
+        let mut lower_segments = Vec::new();
+        for seg_idx in 0..(status.segment as usize) {
+            let seg = &content_line.segments[seg_idx];
+            let (base_text, ruby_text) = match seg {
+                Segment::Plain { text } => (text.clone(), None),
+                Segment::Annotated { base, reading } => (base.clone(), Some(reading.clone())),
+            };
+            lower_segments.push(LowerTypingSegment::Completed {
+                base_text,
+                ruby_text,
+                is_correct: is_segment_correct(&correctness_line.segments[seg_idx]),
+            });
+        }
+        
+        if let Some(active_seg_content) = content_line.segments.get(status.segment as usize) {
+            let reading_text = match active_seg_content {
+                Segment::Plain { text } => text,
+                Segment::Annotated { reading, .. } => reading,
+            };
+            let mut active_elements = Vec::new();
+            
+            for (char_idx, character) in reading_text.chars().enumerate().take(status.char_ as usize) {
+                let is_correct = correctness_line.segments[status.segment as usize].chars[char_idx] != TypingCorrectnessChar::Incorrect;
+                active_elements.push(ActiveLowerElement::Typed { character, is_correct });
+            }
+            
+            if let Some(wrong_char) = status.last_wrong_keydown {
+                active_elements.push(ActiveLowerElement::Cursor);
+                active_elements.push(ActiveLowerElement::LastIncorrectInput(wrong_char));
+            } else {
+                if !status.unconfirmed.is_empty() {
+                    let unconfirmed_text: String = status.unconfirmed.iter().collect();
+                    active_elements.push(ActiveLowerElement::UnconfirmedInput(unconfirmed_text));
+                }
+                active_elements.push(ActiveLowerElement::Cursor);
+            }
+
+            lower_segments.push(LowerTypingSegment::Active { elements: active_elements });
+        }
+        
+        let lower_y = (height as f32 / 2.0) + base_pixel_font_size * LOWER_ROW_Y_OFFSET_FACTOR;
+        render_list.push(Renderable::TypingLower {
+            segments: lower_segments,
+            anchor: Anchor::TopCenter,
+            shift: Shift { x: -scroll_offset / width as f32, y: lower_y / height as f32 },
+            align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
+            font_size: base_font_size,
+            target_line_total_width,
+        });
+
         // --- コンテキスト行（前後の行）を描画 ---
-        let current_line_signed = model.status.line;
         let line_count = model.content.lines.len();
         for &offset in &[-1, 1] {
-            let line_to_display_signed = current_line_signed + offset;
+            let line_to_display_signed = model.status.line + offset;
             if line_to_display_signed >= 0 && (line_to_display_signed as usize) < line_count {
-                let line_idx = line_to_display_signed as usize;
+                let line_idx_context = line_to_display_signed as usize;
                 render_list.push(Renderable::Text {
-                    text: model.content.lines[line_idx].to_string(),
+                    text: model.content.lines[line_idx_context].to_string(),
                     anchor: Anchor::Center,
                     shift: Shift { x: 0.0, y: offset as f32 * 0.35 },
                     align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
@@ -285,130 +425,6 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
             }
         }
         
-        // --- メインのタイピング行を描画 ---
-        let line_idx = model.status.line as usize;
-        let content_line = if let Some(line) = model.content.lines.get(line_idx) { line } else { return; };
-        let correctness_line = if let Some(line) = model.typing_correctness.lines.get(line_idx) { line } else { return; };
-        let status = &model.status;
-        let scroll_offset = model.scroll.scroll as f32;
-
-        let base_font_size = FontSize::WindowHeight(BASE_FONT_SIZE_RATIO);
-        let base_pixel_font_size = crate::renderer::calculate_pixel_font_size(base_font_size, width, height);
-        let ruby_pixel_font_size = base_pixel_font_size * 0.4;
-        let small_ruby_pixel_font_size = base_pixel_font_size * 0.3;
-
-        let total_layout_width = content_line.segments.iter().map(|seg| {
-            let text = match seg {
-                Segment::Plain { text } => text.as_str(),
-                Segment::Annotated { base, .. } => base.as_str(),
-            };
-            gui_renderer::measure_text(font, text, base_pixel_font_size).0 as f32
-        }).sum::<f32>();
-
-        let block_start_x = (width as f32 - total_layout_width) / 2.0 - scroll_offset;
-
-        // --- 上段（目標テキスト） ---
-        let upper_y = (height as f32 / 2.0) - base_pixel_font_size * UPPER_ROW_Y_OFFSET_FACTOR;
-        let mut upper_pen_x = block_start_x;
-
-        for (seg_idx, seg) in content_line.segments.iter().enumerate() {
-            let is_typed_segment = seg_idx < status.segment as usize;
-            let color = if is_typed_segment {
-                if is_segment_correct(&correctness_line.segments[seg_idx]) { CORRECT_COLOR } else { INCORRECT_COLOR }
-            } else {
-                PENDING_COLOR
-            };
-
-            let base_text = match seg {
-                Segment::Plain { text } => text,
-                Segment::Annotated { base, .. } => base,
-            };
-            
-            render_list.push(Renderable::TypingBase { text: base_text.to_string(), anchor: Anchor::TopLeft, shift: Shift {x: upper_pen_x / width as f32, y: upper_y / height as f32}, align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top}, font_size: base_font_size, color });
-            
-            if let Segment::Annotated { base, reading, .. } = seg {
-                let (base_w, ..) = gui_renderer::measure_text(font, base, base_pixel_font_size);
-                let (ruby_w, ..) = gui_renderer::measure_text(font, reading, ruby_pixel_font_size);
-                let ruby_x = upper_pen_x + (base_w as f32 - ruby_w as f32) / 2.0;
-                let ruby_y = upper_y - ruby_pixel_font_size * RUBY_Y_OFFSET_FACTOR;
-                render_list.push(Renderable::TypingRuby { text: reading.clone(), anchor: Anchor::TopLeft, shift: Shift {x: ruby_x / width as f32, y: ruby_y / height as f32}, align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top}, font_size: FontSize::WindowHeight(BASE_FONT_SIZE_RATIO * 0.4), color });
-            }
-
-            let (base_w, ..) = gui_renderer::measure_text(font, base_text, base_pixel_font_size);
-            upper_pen_x += base_w as f32;
-        }
-
-        // --- 下段（入力中テキスト） ---
-        let lower_y = (height as f32 / 2.0) + base_pixel_font_size * LOWER_ROW_Y_OFFSET_FACTOR;
-        let mut lower_pen_x = block_start_x;
-        
-        // 完了済みセグメント
-        for seg_idx in 0..(status.segment as usize) {
-            let seg = &content_line.segments[seg_idx];
-            let color = if is_segment_correct(&correctness_line.segments[seg_idx]) { CORRECT_COLOR } else { INCORRECT_COLOR };
-            let base_text = match seg {
-                Segment::Plain { text } => text,
-                Segment::Annotated { base, .. } => base,
-            };
-            render_list.push(Renderable::TypingBase { text: base_text.to_string(), anchor:Anchor::TopLeft, shift: Shift { x: lower_pen_x / width as f32, y: lower_y / height as f32 }, align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top}, font_size: base_font_size, color });
-            if let Segment::Annotated { base, reading, .. } = seg {
-                let (base_w, ..) = gui_renderer::measure_text(font, base, base_pixel_font_size);
-                let (small_reading_w, ..) = gui_renderer::measure_text(font, reading, small_ruby_pixel_font_size);
-                let ruby_x = lower_pen_x + (base_w as f32 - small_reading_w as f32) / 2.0;
-                let ruby_y = lower_y - small_ruby_pixel_font_size * RUBY_Y_OFFSET_FACTOR;
-                render_list.push(Renderable::TypingRuby { text: reading.clone(), anchor: Anchor::TopLeft, shift: Shift { x: ruby_x / width as f32, y: ruby_y / height as f32 }, align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top}, font_size: FontSize::WindowHeight(BASE_FONT_SIZE_RATIO * 0.3), color });
-            }
-            let (base_w, ..) = gui_renderer::measure_text(font, base_text, base_pixel_font_size);
-            lower_pen_x += base_w as f32;
-        }
-
-        // 入力中セグメント
-        if let Some(seg) = content_line.segments.get(status.segment as usize) {
-            let reading_text = match seg {
-                Segment::Plain { text } => text.as_str(),
-                Segment::Annotated { base: _, reading } => reading.as_str(),
-            };
-
-            // 入力済みの部分を色付きで描画
-            let mut reading_width_before: u32 = 0;
-            for (char_idx, character) in reading_text.chars().enumerate().take(status.char_ as usize) {
-                let char_str = character.to_string();
-                let color = match correctness_line.segments[status.segment as usize].chars[char_idx] {
-                    TypingCorrectnessChar::Correct => CORRECT_COLOR,
-                    _ => INCORRECT_COLOR,
-                };
-                let reading_part_up_to_char = reading_text.chars().take(char_idx + 1).collect::<String>();
-                let (reading_width_up_to_char, ..) = gui_renderer::measure_text(font, &reading_part_up_to_char, base_pixel_font_size);
-                let char_advance_width = (reading_width_up_to_char - reading_width_before) as f32;
-                
-                // BigTextを使用して、TUIでAA化されないようにする
-                render_list.push(Renderable::BigText {
-                    text: char_str.clone(),
-                    anchor: Anchor::TopLeft,
-                    shift: Shift { x: lower_pen_x / width as f32, y: lower_y / height as f32 },
-                    align: Align { horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top },
-                    font_size: base_font_size,
-                    color,
-                });
-
-                lower_pen_x += char_advance_width;
-                reading_width_before = reading_width_up_to_char;
-            }
-        }
-        
-        // カーソルと未確定文字
-        let cursor_y = lower_y;
-        render_list.push(Renderable::BigText {text: "|".to_string(), anchor: Anchor::TopLeft, shift: Shift {x: lower_pen_x / width as f32, y: cursor_y / height as f32}, align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top}, font_size: base_font_size, color: CURSOR_COLOR});
-        
-        let extras_x = lower_pen_x + gui_renderer::measure_text(font, "|", base_pixel_font_size).0 as f32 * 0.5;
-        if !status.unconfirmed.is_empty() {
-            let unconfirmed_text: String = status.unconfirmed.iter().collect();
-            render_list.push(Renderable::Text {text: unconfirmed_text, anchor: Anchor::TopLeft, shift: Shift {x: extras_x / width as f32, y: lower_y / height as f32}, align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top}, font_size: base_font_size, color: PENDING_COLOR});
-        } else if let Some(wrong_char) = status.last_wrong_keydown {
-            let wrong_text = wrong_char.to_string();
-            render_list.push(Renderable::Text {text: wrong_text, anchor: Anchor::TopLeft, shift: Shift {x: extras_x / width as f32, y: lower_y / height as f32}, align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top}, font_size: base_font_size, color: WRONG_KEY_COLOR});
-        }
-
         // --- ステータスパネル ---
         let metrics = typing::calculate_total_metrics(model);
         let time = metrics.total_time / 1000.0;
