@@ -109,7 +109,9 @@ cargo run --features tui
     This command builds the Rust code, generates JavaScript bindings, and places all necessary files in a `pkg` directory.
     ```bash
     wasm-pack build --target web -- --features wasm
-    wasm-pack build --target web --dev -- --features wasm
+    ```
+    ```powershell
+    $env:WEBSOCKET_ADDRESS="ws://localhost:8081" ; wasm-pack build --target web --dev -- --features wasm
     ```
 
 2.  **Start a Local Web Server:**

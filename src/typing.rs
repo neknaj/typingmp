@@ -32,13 +32,24 @@ fn log(_message: &str) {
             #[cfg(feature = "uefi")]
             uefi::println!("{}", _message);
         }
+        // --- ▼▼▼ 変更箇所 ▼▼▼ ---
+        // WASMターゲットの場合
         #[cfg(target_arch = "wasm32")]
-        web_sys::console::log_1(&_message.into());
+        {
+            // デバッグビルドの場合はwasm_debug_loggerを使用
+            #[cfg(debug_assertions)]
+            crate::wasm_debug_logger::log(_message);
+
+            // リリースビルドの場合はコンソールに直接出力
+            #[cfg(not(debug_assertions))]
+            web_sys::console::log_1(&_message.into());
+        }
+        // --- ▲▲▲ 変更箇所 ▲▲▲ ---
     }
 }
 
 pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
-    log(&format!("\n--- key_input: '{}' ---", input));
+    log(&format!("\n--- key_input: '{}' --- typing.rs", input));
     log(&format!(
         "  [State Before] line: {}, seg: {}, char: {}, unconfirmed: {:?}",
         model.status.line, model.status.segment, model.status.char_, model.status.unconfirmed

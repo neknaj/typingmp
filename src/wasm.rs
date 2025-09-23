@@ -135,6 +135,14 @@ pub fn start() -> Result<(), JsValue> {
     {
         let app_clone = app.clone();
         let closure = Closure::<dyn FnMut(_)>::new(move |event: KeyboardEvent| {
+            // 生のKeyboardEventの内容をログに出力
+            debug_log(&format!(
+                "[KeyDown wasm.rs] key: '{}', code: '{}', composing: {}",
+                event.key(),
+                event.code(),
+                event.is_composing()
+            ));
+
             let mut app = app_clone.borrow_mut();
             
             match event.key().as_str() {
@@ -170,6 +178,15 @@ pub fn start() -> Result<(), JsValue> {
         let app_clone = app.clone();
         let input_clone = input_element.clone();
         let closure = Closure::<dyn FnMut(_)>::new(move |event: InputEvent| {
+            // 生のInputEventの内容をログに出力
+            debug_log(&format!(
+                "[InputEvent wasm.rs] type: '{}', data: '{:?}', composing: {}, value: '{}'",
+                event.input_type(),
+                event.data(),
+                event.is_composing(),
+                input_clone.value()
+            ));
+
             event.prevent_default();
 
             let value = input_clone.value();

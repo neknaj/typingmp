@@ -29,8 +29,12 @@ pub fn init() {
     CONNECTION_ID.with(|cell| *cell.borrow_mut() = id.clone());
     console_log(&format!("[WASM Logger] Generated Connection ID: {}", id));
     
-    // !!! ここはあなたのPCのIPアドレスに要変更 !!!
-    let server_address = "ws://localhost:8081";
+    // --- ▼▼▼ 変更箇所 ▼▼▼ ---
+    // env!マクロを使い、ビルド時に環境変数 WEBSOCKET_ADDRESS を読み込む
+    // もし環境変数が設定されていない場合、ビルドはエラーで失敗する
+    let server_address = env!("WEBSOCKET_ADDRESS", "Build-time environment variable WEBSOCKET_ADDRESS is not set.");
+    // --- ▲▲▲ 変更箇所 ▲▲▲ ---
+    
     console_log(&format!("[WASM Logger] Attempting to connect to: {}", server_address));
 
     match WebSocket::new(server_address) {
@@ -46,9 +50,9 @@ pub fn init() {
             onopen_callback.forget();
 
             // エラー発生時のコールバック
-            let onerror_callback = Closure::<dyn FnMut(_)>::new(|e: Event| {
+            let onerror_callback = Closure::<dyn FnMut(_)>::new(|_e: Event| {
                 // ErrorEventは詳細情報を持たないので、基本的なEventとしてログ出力
-                console_log_styled(&format!("[WASM Logger] WebSocket error occurred. See browser devtools for details."), "color: red; font-weight: bold;");
+                console_log_styled("[WASM Logger] WebSocket error occurred. See browser devtools for details.", "color: red; font-weight: bold;");
             });
             ws.set_onerror(Some(onerror_callback.as_ref().unchecked_ref()));
             onerror_callback.forget();
@@ -73,6 +77,9 @@ pub fn init() {
 }
 
 pub fn log(message: &str) {
+    // 外部から呼ばれるログ関数は、まずブラウザのコンソールに出力し、
+    // その後WebSocketでの送信を試みる
+    console_log(message);
     log_internal(message);
 }
 
@@ -86,8 +93,12 @@ fn log_internal(message: &str) {
                     let payload = format!(r#"{{"id":"{}","message":"{}"}}"#, id, escaped_message);
                     
                     match ws.send_with_str(&payload) {
-                        Ok(_) => console_log(&format!("[WASM Logger] Sent log: {}", message)),
-                        Err(e) => console_log_styled(&format!("[WASM Logger] Failed to send log: {:?}", e), "color: red;"),
+                        Ok(_) => {
+                            console_log_styled(&format!("[WASM Logger] Log sent to server: {}", message), "color: blue;");
+                        }
+                        Err(e) => {
+                            console_log_styled(&format!("[WASM Logger] Failed to send log: {:?}", e), "color: red;");
+                        }
                     }
                 });
             } else {
