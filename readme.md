@@ -41,3 +41,8 @@ cargo run --features tui
 ```powershell
 .\run_uefi.ps1
 ```
+
+### HyperV windows
+```powershell
+.\run_uefi_hyperv.ps1
+```
