@@ -120,41 +120,52 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     for seg in segments {
                         match seg {
                             LowerTypingSegment::Completed { base_text, ruby_text, .. } => {
-                                // FIX: `base_text` (String) を `&` で借用して `&str` にする
                                 let (art_buffer, art_width, art_height) = tui_renderer::render_text_to_art(&font, &base_text, font_size_px);
                                 blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, art_height, pen_x as isize, start_y as isize);
 
                                 if let Some(ruby) = ruby_text {
-                                    // FIX: `ruby` (String) を `&` で借用して `&str` にする
                                     let (ruby_width, _) = measure_plain_text(&ruby);
                                     let ruby_anchor = (pen_x + (art_width as i32 / 2), start_y);
                                     let (rx, ry) = ui::calculate_aligned_position(ruby_anchor, ruby_width, 1, Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Bottom });
-                                    // FIX: `ruby` (String) を `&` で借用して `&str` にする
                                     draw_plain_text_at(&mut current_buffer, &ruby, rx, ry, cols);
                                 }
                                 pen_x += art_width as i32;
                             }
                             LowerTypingSegment::Active { elements } => {
                                 for el in elements {
-                                    let plain_y = start_y + (total_height as i32 / 2);
                                     match el {
                                         ActiveLowerElement::Typed { character, .. } => {
                                             let (art_buffer, art_width, art_height) = tui_renderer::render_text_to_art(&font, &character.to_string(), font_size_px);
                                             blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, art_height, pen_x as isize, start_y as isize);
                                             pen_x += art_width as i32;
                                         }
+                                        // --- 修正箇所 START ---
                                         ActiveLowerElement::Cursor => {
-                                            draw_plain_text_at(&mut current_buffer, "|", pen_x, plain_y, cols);
-                                            pen_x += 1;
+                                            // Art Textの高さに合わせて縦棒を手動で描画
+                                            let cursor_height = target_art_height_in_cells;
+                                            for y_offset in 0..cursor_height {
+                                                let target_y = start_y + y_offset as i32;
+                                                let target_x = pen_x;
+
+                                                if target_y >= 0 && target_y < rows as i32 && target_x >= 0 && target_x < cols as i32 {
+                                                    let index = (target_y as usize * cols) + target_x as usize;
+                                                    if index < current_buffer.len() {
+                                                        current_buffer[index] = '|';
+                                                    }
+                                                }
+                                            }
+                                            pen_x += 1; // カーソルの幅は1セル
                                         }
+                                        // --- 修正箇所 END ---
                                         ActiveLowerElement::UnconfirmedInput(s) => {
-                                            // FIX: `s` (String) を `&` で借用して `&str` にする
-                                            draw_plain_text_at(&mut current_buffer, &s, pen_x, plain_y, cols);
-                                            pen_x += s.chars().count() as i32;
+                                            let (art_buffer, art_width, art_height) = tui_renderer::render_text_to_art(&font, &s, font_size_px);
+                                            blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, art_height, pen_x as isize, start_y as isize);
+                                            pen_x += art_width as i32;
                                         }
                                         ActiveLowerElement::LastIncorrectInput(c) => {
-                                            draw_plain_text_at(&mut current_buffer, &c.to_string(), pen_x, plain_y, cols);
-                                            pen_x += 1;
+                                            let (art_buffer, art_width, art_height) = tui_renderer::render_text_to_art(&font, &c.to_string(), font_size_px);
+                                            blit_art(&mut current_buffer, cols, rows, &art_buffer, art_width, art_height, pen_x as isize, start_y as isize);
+                                            pen_x += art_width as i32;
                                         }
                                     }
                                 }
