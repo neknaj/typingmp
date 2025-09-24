@@ -13,7 +13,6 @@ use minifb::{Key, KeyRepeat, Window, WindowOptions};
 #[cfg(not(feature = "uefi"))]
 use std::time::Instant;
 
-// ... (Windows固有の処理は変更なし)
 #[cfg(all(target_os = "windows", not(feature = "uefi")))]
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 #[cfg(all(target_os = "windows", not(feature = "uefi")))]
@@ -59,6 +58,39 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         WindowOptions { resize: true, ..WindowOptions::default() },
     )?;
     window.set_target_fps(60);
+
+    #[cfg(all(target_os = "windows", not(feature = "uefi")))]
+    {
+        let caption_color = rgb_to_colorref(0, 0, 0);
+        let text_color = rgb_to_colorref(255, 255, 255);
+        let border_color = rgb_to_colorref(10, 10, 10);
+
+        if let Ok(raw_handle) = window.window_handle() {
+                if let RawWindowHandle::Win32(handle) = raw_handle.as_raw() {
+                let hwnd = handle.hwnd.get() as HWND;
+                unsafe {
+                    DwmSetWindowAttribute(
+                        hwnd,
+                        DWMWA_CAPTION_COLOR,
+                        &caption_color as *const _ as *const c_void,
+                        std::mem::size_of_val(&caption_color) as u32,
+                    );
+                    DwmSetWindowAttribute(
+                        hwnd,
+                        DWMWA_TEXT_COLOR,
+                        &text_color as *const _ as *const c_void,
+                        std::mem::size_of_val(&text_color) as u32,
+                    );
+                    DwmSetWindowAttribute(
+                        hwnd,
+                        DWMWA_BORDER_COLOR,
+                        &border_color as *const _ as *const c_void,
+                        std::mem::size_of_val(&border_color) as u32,
+                    );
+                }
+            }
+        }
+    }
 
     let mut app = App::new(fonts); // Appにフォントを渡す
     app.on_event(AppEvent::Start);
@@ -196,18 +228,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(not(feature = "uefi"))]
 fn handle_input(window: &mut Window, app: &mut App) {
-    if window.is_key_pressed(Key::Escape, KeyRepeat::No) {
-        app.on_event(AppEvent::Escape);
-    }
-    if window.is_key_pressed(Key::Tab, KeyRepeat::No) {
-        app.on_event(AppEvent::CycleTuiMode);
-    }
-    for key in window.get_keys_pressed(KeyRepeat::Yes) {
+    for key in window.get_keys_pressed(KeyRepeat::No) {
         match key {
             Key::Up => app.on_event(AppEvent::Up),
             Key::Down => app.on_event(AppEvent::Down),
             Key::Backspace => app.on_event(AppEvent::Backspace),
             Key::Enter => app.on_event(AppEvent::Enter),
+            Key::Escape => app.on_event(AppEvent::Escape),
             _ => {
                 if let Some(char_key) = key_to_char(key, window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift)) {
                     app.on_event(AppEvent::Char { c: char_key, timestamp: crate::timestamp::now() });
