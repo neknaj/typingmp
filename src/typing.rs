@@ -6,18 +6,18 @@ extern crate alloc;
 #[cfg(feature = "uefi")]
 use alloc::{
     format,
-    string::{String, ToString}, // ToStringをインポート
+    string::{String, ToString},
     vec::Vec,
 };
 #[cfg(not(feature = "uefi"))]
 use std::{
-    string::{String, ToString}, // ToStringをインポート
+    string::{String, ToString},
     vec::Vec,
 };
 
 use crate::model::{
     Content, Model, ResultModel, Segment, TypingCorrectnessChar, TypingCorrectnessContent,
-    TypingCorrectnessLine, TypingCorrectnessSegment, TypingInput, TypingMetrics, TypingModel,
+    TypingCorrectnessLine, TypingCorrectnessSegment, TypingCorrectnessWord, TypingInput, TypingMetrics, TypingModel,
     TypingSession,
 };
 
@@ -32,27 +32,21 @@ fn log(_message: &str) {
             #[cfg(feature = "uefi")]
             uefi::println!("{}", _message);
         }
-        // --- ▼▼▼ 変更箇所 ▼▼▼ ---
-        // WASMターゲットの場合
         #[cfg(target_arch = "wasm32")]
         {
-            // デバッグビルドの場合はwasm_debug_loggerを使用
             #[cfg(debug_assertions)]
             crate::wasm_debug_logger::log(_message);
-
-            // リリースビルドの場合はコンソールに直接出力
             #[cfg(not(debug_assertions))]
             web_sys::console::log_1(&_message.into());
         }
-        // --- ▲▲▲ 変更箇所 ▲▲▲ ---
     }
 }
 
 pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     log(&format!("\n--- key_input: '{}' --- typing.rs", input));
     log(&format!(
-        "  [State Before] line: {}, seg: {}, char: {}, unconfirmed: {:?}",
-        model.status.line, model.status.segment, model.status.char_, model.status.unconfirmed
+        "  [State Before] line: {}, word: {}, seg: {}, char: {}, unconfirmed: {:?}",
+        model.status.line, model.status.word, model.status.segment, model.status.char_, model.status.unconfirmed
     ));
 
     let current_time = timestamp;
@@ -83,130 +77,112 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     let mut is_romaji_in_progress = false;
 
     let line_content = &model.content.lines[current_line_idx];
-    let segment_content = &line_content.segments[model.status.segment as usize];
-    let target_reading = match segment_content {
-        Segment::Plain { text } => text,
-        Segment::Annotated { reading, .. } => reading,
-    };
+    let word_content = &line_content.words[model.status.word as usize];
+
+    // 現在の単語内で、まだタイプされていない全てのセグメントの「読み」を連結してターゲット文字列を生成
+    let target_reading: String = word_content.segments[model.status.segment as usize..]
+        .iter()
+        .map(|seg| match seg {
+            Segment::Plain { text } => text.clone(),
+            Segment::Annotated { reading, .. } => reading.clone(),
+        })
+        .collect();
+    
+    // 現在の文字位置から始まる部分文字列を取得
+    let target_slice = target_reading.chars().skip(model.status.char_ as usize).collect::<String>();
 
     fn normalize_char(c: char) -> char {
         let lower = c.to_lowercase().next().unwrap_or(c);
         if lower >= 'ァ' && lower <= 'ヶ' {
-            // --- ▼▼▼ 変更箇所 ▼▼▼ ---
-            // std::char::from_u32 を core::char::from_u32 に変更
             core::char::from_u32(lower as u32 - 0x60).unwrap_or(lower)
-            // --- ▲▲▲ 変更箇所 ▲▲▲ ---
         } else {
             lower
         }
     }
 
-    // --- 1. Prioritize direct character match (e.g., from flick input) ---
-    // This check runs regardless of the unconfirmed (romaji) buffer.
-    if let Some(target_char) = target_reading.chars().nth(model.status.char_ as usize) {
+    // 1. フリック入力などによる直接の文字一致を優先
+    if let Some(target_char) = target_slice.chars().next() {
         if normalize_char(input) == normalize_char(target_char) {
             is_correct = true;
             advance_chars = 1;
-            // A direct match is authoritative and clears any pending romaji.
             model.status.unconfirmed.clear();
         }
     }
 
-    // --- 2. If no direct match, attempt to process as romaji ---
+    // 2. 直接一致しない場合、ローマ字入力として処理を試みる
     if !is_correct {
-        let start_char_index = model.status.char_ as usize;
-        if let Some((start_byte_index, _)) = target_reading.char_indices().nth(start_char_index) {
-            let remaining_slice = &target_reading[start_byte_index..];
-            let mut expect = Vec::new();
-
-            // Find all possible romaji patterns for the current position
-            for (key, values) in model.layout.mapping.iter() {
-                if remaining_slice.starts_with(key) {
-                    for v in values {
-                        if v.starts_with(&model.status.unconfirmed.iter().collect::<String>()) {
-                            expect.push((key.clone(), (*v).to_string()));
-                        }
+        let mut expect = Vec::new();
+        for (key, values) in model.layout.mapping.iter() {
+            if target_slice.starts_with(key) {
+                for v in values {
+                    if v.starts_with(&model.status.unconfirmed.iter().collect::<String>()) {
+                        expect.push((key.clone(), (*v).to_string()));
                     }
                 }
             }
+        }
 
-            if !expect.is_empty() {
-                log(&format!("  [Expect List] Found {} candidates:", expect.len()));
-                for (key, val) in &expect {
-                    log(&format!("    - Key: '{}', Value: {}", key, val));
-                }
+        if !expect.is_empty() {
+            let mut current_input_str = model.status.unconfirmed.iter().collect::<String>();
+            current_input_str.push(input);
 
-                let mut current_input_str = model.status.unconfirmed.iter().collect::<String>();
-                current_input_str.push(input);
+            for (key, val_str) in expect {
+                let lower_val_str = val_str.to_lowercase();
+                let lower_current_input_str = current_input_str.to_lowercase();
 
-                for (key, val_str) in expect {
-                    let lower_val_str = val_str.to_lowercase();
-                    let lower_current_input_str = current_input_str.to_lowercase();
-
-                    if lower_val_str == lower_current_input_str {
-                        // Romanji completed
-                        is_correct = true;
-                        model.status.unconfirmed.clear();
-                        advance_chars = key.chars().count();
-                        break;
-                    } else if lower_val_str.starts_with(&lower_current_input_str) {
-                        // Romanji in progress
-                        is_correct = true;
-                        is_romaji_in_progress = true; // Mark that we don't advance the cursor yet
-                        model.status.unconfirmed.push(input);
-                        break;
-                    }
+                if lower_val_str == lower_current_input_str {
+                    is_correct = true;
+                    model.status.unconfirmed.clear();
+                    advance_chars = key.chars().count();
+                    break;
+                } else if lower_val_str.starts_with(&lower_current_input_str) {
+                    is_correct = true;
+                    is_romaji_in_progress = true;
+                    model.status.unconfirmed.push(input);
+                    break;
                 }
             }
         }
     }
 
-    // --- 3. Update model state based on the outcome ---
+    // 3. 結果に基づいてモデルの状態を更新
     if is_correct {
         model.status.last_wrong_keydown = None;
-        // Only advance cursor/correctness map if it's not a partial romaji input
         if !is_romaji_in_progress {
-            let correctness_segment = &mut model.typing_correctness.lines[current_line_idx]
-                .segments[model.status.segment as usize];
-            let start_char_pos = model.status.char_ as usize;
+            let mut remaining_advance = advance_chars;
+            let mut current_seg_idx = model.status.segment as usize;
+            let mut current_char_idx = model.status.char_ as usize;
 
-            // Check if any character being marked as correct was previously incorrect
-            let mut has_error = false;
-            for i in 0..advance_chars {
-                if correctness_segment.chars.get(start_char_pos + i)
-                    == Some(&TypingCorrectnessChar::Incorrect)
-                {
-                    has_error = true;
-                    break;
+            while remaining_advance > 0 && current_seg_idx < word_content.segments.len() {
+                let correctness_segment = &mut model.typing_correctness.lines[current_line_idx].words[model.status.word as usize].segments[current_seg_idx];
+                let current_seg_len = correctness_segment.chars.len();
+
+                let chars_to_advance_in_seg = (current_seg_len - current_char_idx).min(remaining_advance);
+
+                // 正誤情報を更新
+                for i in 0..chars_to_advance_in_seg {
+                    if correctness_segment.chars[current_char_idx + i] != TypingCorrectnessChar::Incorrect {
+                        correctness_segment.chars[current_char_idx + i] = TypingCorrectnessChar::Correct;
+                    }
+                }
+
+                remaining_advance -= chars_to_advance_in_seg;
+                current_char_idx += chars_to_advance_in_seg;
+
+                if current_char_idx >= current_seg_len {
+                    current_seg_idx += 1;
+                    current_char_idx = 0;
                 }
             }
-            let new_status = if has_error {
-                TypingCorrectnessChar::Incorrect
-            } else {
-                TypingCorrectnessChar::Correct
-            };
-
-            // Update correctness map for all advanced characters
-            for i in 0..advance_chars {
-                if let Some(c) = correctness_segment.chars.get_mut(start_char_pos + i) {
-                    *c = new_status.clone();
-                }
-            }
-            model.status.char_ += advance_chars as i32;
+            model.status.segment = current_seg_idx as i32;
+            model.status.char_ = current_char_idx as i32;
         }
     } else {
-        // Incorrect keypress
         model.status.last_wrong_keydown = Some(input);
-        model.status.unconfirmed.clear(); // Any incorrect keypress clears the romaji buffer
-        let char_pos = model.status.char_ as usize;
-        // Mark the current target character as incorrect
-        if let Some(segment) = model.typing_correctness.lines[current_line_idx]
-            .segments
-            .get_mut(model.status.segment as usize)
-        {
-            if let Some(c) = segment.chars.get_mut(char_pos) {
-                *c = TypingCorrectnessChar::Incorrect;
-            }
+        model.status.unconfirmed.clear();
+        let correctness_segment = &mut model.typing_correctness.lines[current_line_idx].words[model.status.word as usize].segments[model.status.segment as usize];
+        if let Some(c) = correctness_segment.chars.get_mut(model.status.char_ as usize) {
+            *c = TypingCorrectnessChar::Incorrect;
         }
     }
 
@@ -221,19 +197,17 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
             is_correct,
         });
 
-    // --- 4. Check for segment/line/game completion ---
+    // 4. セグメント、単語、行、全体の完了チェック
     let mut is_finished = false;
-    // Only check for completion if the cursor actually moved
-    if advance_chars > 0 {
-        if model.status.char_ as usize >= target_reading.chars().count() {
-            model.status.char_ = 0;
-            model.status.segment += 1;
-            if model.status.segment as usize >= line_content.segments.len() {
-                model.status.segment = 0;
-                model.status.line += 1;
-                if model.status.line as usize >= model.content.lines.len() {
-                    is_finished = true;
-                }
+    if model.status.segment as usize >= word_content.segments.len() {
+        model.status.segment = 0;
+        model.status.char_ = 0;
+        model.status.word += 1;
+        if model.status.word as usize >= line_content.words.len() {
+            model.status.word = 0;
+            model.status.line += 1;
+            if model.status.line as usize >= model.content.lines.len() {
+                is_finished = true;
             }
         }
     }
@@ -243,8 +217,8 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
         is_correct, is_finished
     ));
     log(&format!(
-        "  [State After] line: {}, seg: {}, char: {}, unconfirmed: {:?}",
-        model.status.line, model.status.segment, model.status.char_, model.status.unconfirmed
+        "  [State After] line: {}, word: {}, seg: {}, char: {}, unconfirmed: {:?}",
+        model.status.line, model.status.word, model.status.segment, model.status.char_, model.status.unconfirmed
     ));
 
     if is_finished {
@@ -256,22 +230,25 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     }
 }
 
-
 pub fn create_typing_correctness_model(content: &Content) -> TypingCorrectnessContent {
     let mut lines = Vec::new();
     for line in &content.lines {
-        let mut segments = Vec::new();
-        for segment in &line.segments {
-            let target_text = match segment {
-                Segment::Plain { text } => text,
-                Segment::Annotated { base: _, reading } => reading,
-            };
-            let chars = target_text.chars()
-                .map(|_| TypingCorrectnessChar::Pending)
-                .collect();
-            segments.push(TypingCorrectnessSegment { chars });
+        let mut words = Vec::new();
+        for word in &line.words {
+            let mut segments = Vec::new();
+            for segment in &word.segments {
+                let target_text = match segment {
+                    Segment::Plain { text } => text,
+                    Segment::Annotated { base: _, reading } => reading,
+                };
+                let chars = target_text.chars()
+                    .map(|_| TypingCorrectnessChar::Pending)
+                    .collect();
+                segments.push(TypingCorrectnessSegment { chars });
+            }
+            words.push(TypingCorrectnessWord { segments });
         }
-        lines.push(TypingCorrectnessLine { segments });
+        lines.push(TypingCorrectnessLine { words });
     }
     TypingCorrectnessContent { lines }
 }

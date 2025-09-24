@@ -29,11 +29,9 @@ pub fn init() {
     CONNECTION_ID.with(|cell| *cell.borrow_mut() = id.clone());
     console_log(&format!("[WASM Logger] Generated Connection ID: {}", id));
     
-    // --- ▼▼▼ 変更箇所 ▼▼▼ ---
     // env!マクロを使い、ビルド時に環境変数 WEBSOCKET_ADDRESS を読み込む
     // もし環境変数が設定されていない場合、ビルドはエラーで失敗する
     let server_address = env!("WEBSOCKET_ADDRESS", "Build-time environment variable WEBSOCKET_ADDRESS is not set.");
-    // --- ▲▲▲ 変更箇所 ▲▲▲ ---
     
     console_log(&format!("[WASM Logger] Attempting to connect to: {}", server_address));
 

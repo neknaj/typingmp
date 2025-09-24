@@ -21,7 +21,7 @@ use alloc::{format, string::{String, ToString}};
 use std::string::{String, ToString};
 
 use crate::app::{App, AppState, FontChoice};
-use crate::model::{Segment, TypingCorrectnessChar, TypingCorrectnessSegment};
+use crate::model::{Segment, TypingCorrectnessChar, TypingCorrectnessSegment, TypingCorrectnessWord};
 use crate::renderer::gui_renderer;
 use crate::typing; // For calculate_total_metrics
 use ab_glyph::FontRef; // FontRefを渡すために必要
@@ -387,6 +387,10 @@ fn build_problem_selection_ui(app: &App, render_list: &mut Vec<Renderable>, grad
     }
 }
 
+fn is_word_correct(word: &TypingCorrectnessWord) -> bool {
+    word.segments.iter().all(is_segment_correct)
+}
+
 fn is_segment_correct(segment: &TypingCorrectnessSegment) -> bool {
     !segment.chars.iter().any(|c| *c == TypingCorrectnessChar::Incorrect)
 }
@@ -404,7 +408,7 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
         let base_font_size = FontSize::WindowHeight(BASE_FONT_SIZE_RATIO);
         let base_pixel_font_size = crate::renderer::calculate_pixel_font_size(base_font_size, width, height);
         
-        let target_line_total_width = content_line.segments.iter().map(|seg| {
+        let target_line_total_width = content_line.words.iter().flat_map(|w| &w.segments).map(|seg| {
             let text = match seg {
                 Segment::Plain { text } => text.as_str(),
                 Segment::Annotated { base, .. } => base.as_str(),
@@ -414,21 +418,29 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
 
         // --- 上段（目標テキスト）の構築 ---
         let mut upper_segments = Vec::new();
-        for (seg_idx, seg) in content_line.segments.iter().enumerate() {
-            let state = if (seg_idx as i32) < status.segment {
-                if is_segment_correct(&correctness_line.segments[seg_idx]) { UpperSegmentState::Correct } else { UpperSegmentState::Incorrect }
-            } else if (seg_idx as i32) == status.segment {
-                UpperSegmentState::Active
-            } else {
-                UpperSegmentState::Pending
-            };
-            
-            let (base_text, ruby_text) = match seg {
-                Segment::Plain { text } => (text.clone(), None),
-                Segment::Annotated { base, reading } => (base.clone(), Some(reading.clone())),
-            };
-            
-            upper_segments.push(UpperTypingSegment { base_text, ruby_text, state });
+        for (word_idx, word) in content_line.words.iter().enumerate() {
+            for (seg_idx, seg) in word.segments.iter().enumerate() {
+                 let state = if (word_idx as i32) < status.word {
+                    if is_word_correct(&correctness_line.words[word_idx]) { UpperSegmentState::Correct } else { UpperSegmentState::Incorrect }
+                } else if (word_idx as i32) == status.word {
+                    if (seg_idx as i32) < status.segment {
+                         if is_segment_correct(&correctness_line.words[word_idx].segments[seg_idx]) { UpperSegmentState::Correct } else { UpperSegmentState::Incorrect }
+                    } else if (seg_idx as i32) == status.segment {
+                        UpperSegmentState::Active
+                    } else {
+                        UpperSegmentState::Pending
+                    }
+                } else {
+                    UpperSegmentState::Pending
+                };
+
+                let (base_text, ruby_text) = match seg {
+                    Segment::Plain { text } => (text.clone(), None),
+                    Segment::Annotated { base, reading } => (base.clone(), Some(reading.clone())),
+                };
+                
+                upper_segments.push(UpperTypingSegment { base_text, ruby_text, state });
+            }
         }
         
         let upper_y = (height as f32 / 2.0) - base_pixel_font_size * UPPER_ROW_Y_OFFSET_FACTOR;
@@ -442,43 +454,63 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
 
         // --- 下段（入力テキスト）の構築 ---
         let mut lower_segments = Vec::new();
-        for seg_idx in 0..(status.segment as usize) {
-            let seg = &content_line.segments[seg_idx];
-            let (base_text, ruby_text) = match seg {
-                Segment::Plain { text } => (text.clone(), None),
-                Segment::Annotated { base, reading } => (base.clone(), Some(reading.clone())),
-            };
-            lower_segments.push(LowerTypingSegment::Completed {
-                base_text,
-                ruby_text,
-                is_correct: is_segment_correct(&correctness_line.segments[seg_idx]),
-            });
-        }
-        
-        if let Some(active_seg_content) = content_line.segments.get(status.segment as usize) {
-            let reading_text = match active_seg_content {
-                Segment::Plain { text } => text,
-                Segment::Annotated { reading, .. } => reading,
-            };
-            let mut active_elements = Vec::new();
-            
-            for (char_idx, character) in reading_text.chars().enumerate().take(status.char_ as usize) {
-                let is_correct = correctness_line.segments[status.segment as usize].chars[char_idx] != TypingCorrectnessChar::Incorrect;
-                active_elements.push(ActiveLowerElement::Typed { character, is_correct });
+        for word_idx in 0..(status.word as usize) {
+            let word = &content_line.words[word_idx];
+            let correctness_word = &correctness_line.words[word_idx];
+            for seg in &word.segments {
+                let (base_text, ruby_text) = match seg {
+                    Segment::Plain { text } => (text.clone(), None),
+                    Segment::Annotated { base, reading } => (base.clone(), Some(reading.clone())),
+                };
+                lower_segments.push(LowerTypingSegment::Completed {
+                    base_text,
+                    ruby_text,
+                    is_correct: is_word_correct(correctness_word),
+                });
             }
-            
-            if let Some(wrong_char) = status.last_wrong_keydown {
-                active_elements.push(ActiveLowerElement::Cursor);
-                active_elements.push(ActiveLowerElement::LastIncorrectInput(wrong_char));
-            } else {
-                if !status.unconfirmed.is_empty() {
-                    let unconfirmed_text: String = status.unconfirmed.iter().collect();
-                    active_elements.push(ActiveLowerElement::UnconfirmedInput(unconfirmed_text));
-                }
-                active_elements.push(ActiveLowerElement::Cursor);
+        }
+
+        if let Some(active_word_content) = content_line.words.get(status.word as usize) {
+            let active_correctness_word = &correctness_line.words[status.word as usize];
+            for seg_idx in 0..(status.segment as usize) {
+                 let seg = &active_word_content.segments[seg_idx];
+                 let (base_text, ruby_text) = match seg {
+                    Segment::Plain { text } => (text.clone(), None),
+                    Segment::Annotated { base, reading } => (base.clone(), Some(reading.clone())),
+                };
+                lower_segments.push(LowerTypingSegment::Completed {
+                    base_text,
+                    ruby_text,
+                    is_correct: is_segment_correct(&active_correctness_word.segments[seg_idx]),
+                });
             }
 
-            lower_segments.push(LowerTypingSegment::Active { elements: active_elements });
+            if let Some(active_seg_content) = active_word_content.segments.get(status.segment as usize) {
+                let reading_text = match active_seg_content {
+                    Segment::Plain { text } => text,
+                    Segment::Annotated { reading, .. } => reading,
+                };
+                let mut active_elements = Vec::new();
+                
+                let correctness_seg = &active_correctness_word.segments[status.segment as usize];
+                for (char_idx, character) in reading_text.chars().enumerate().take(status.char_ as usize) {
+                    let is_correct = correctness_seg.chars[char_idx] != TypingCorrectnessChar::Incorrect;
+                    active_elements.push(ActiveLowerElement::Typed { character, is_correct });
+                }
+                
+                if let Some(wrong_char) = status.last_wrong_keydown {
+                    active_elements.push(ActiveLowerElement::Cursor);
+                    active_elements.push(ActiveLowerElement::LastIncorrectInput(wrong_char));
+                } else {
+                    if !status.unconfirmed.is_empty() {
+                        let unconfirmed_text: String = status.unconfirmed.iter().collect();
+                        active_elements.push(ActiveLowerElement::UnconfirmedInput(unconfirmed_text));
+                    }
+                    active_elements.push(ActiveLowerElement::Cursor);
+                }
+
+                lower_segments.push(LowerTypingSegment::Active { elements: active_elements });
+            }
         }
         
         let lower_y = (height as f32 / 2.0) + base_pixel_font_size * LOWER_ROW_Y_OFFSET_FACTOR;

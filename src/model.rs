@@ -19,18 +19,23 @@ use core::fmt;
 
 use crate::layout_data;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Content {
     pub title: Line,
     pub lines: Vec<Line>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Line {
+    pub words: Vec<Word>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Word {
     pub segments: Vec<Segment>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Segment {
     Plain { text: String },
     Annotated { base: String, reading: String },
@@ -38,8 +43,10 @@ pub enum Segment {
 
 impl fmt::Display for Line {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for segment in &self.segments {
-            write!(f, "{}", segment)?;
+        for word in &self.words {
+            for segment in &word.segments {
+                write!(f, "{}", segment)?;
+            }
         }
         Ok(())
     }
@@ -78,6 +85,7 @@ pub struct ResultModel {
 #[derive(Debug, Clone)]
 pub struct TypingStatus {
     pub line: i32,
+    pub word: i32,
     pub segment: i32,
     pub char_: i32,
     pub unconfirmed: Vec<char>,
@@ -111,6 +119,11 @@ pub struct TypingCorrectnessContent {
 
 #[derive(Debug, Clone)]
 pub struct TypingCorrectnessLine {
+    pub words: Vec<TypingCorrectnessWord>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TypingCorrectnessWord {
     pub segments: Vec<TypingCorrectnessSegment>,
 }
 

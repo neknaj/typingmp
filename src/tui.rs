@@ -160,9 +160,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             if is_braille { render_font_size *= 2.0; }
                             let renderer = if is_braille { tui_renderer::render_text_to_braille_art } else { tui_renderer::render_text_to_art };
                             
-                            let full_line_segments = &app.typing_model.as_ref().unwrap().content.lines[app.typing_model.as_ref().unwrap().status.line as usize].segments;
+                            let full_line_words = &app.typing_model.as_ref().unwrap().content.lines[app.typing_model.as_ref().unwrap().status.line as usize].words;
 
-                            let (total_width_cells, total_width_pixels) = full_line_segments.iter().fold((0_u32, 0.0_f32), |(acc_cells, acc_pixels), seg| {
+                            let (total_width_cells, total_width_pixels) = full_line_words.iter().flat_map(|w| &w.segments).fold((0_u32, 0.0_f32), |(acc_cells, acc_pixels), seg| {
                                 let text = match seg {
                                     Segment::Plain { text } => text.as_str(),
                                     Segment::Annotated { base, .. } => base.as_str(),

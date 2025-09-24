@@ -95,10 +95,8 @@ pub struct App<'a> {
     pub fonts: Fonts<'a>,
     pub font_choice: FontChoice,
     pub fps: f64, // FPSを保持するフィールドを追加
-    // --- ▼▼▼ 変更箇所 ▼▼▼ ---
     #[cfg(target_arch = "wasm32")] // wasmでのみ利用
     pub should_reset_ime: bool, // IMEリセット要求フラグ
-    // --- ▲▲▲ 変更箇所 ▲▲▲ ---
 }
 
 impl<'a> App<'a> {
@@ -121,10 +119,8 @@ impl<'a> App<'a> {
             fonts,
             font_choice: FontChoice::YujiSyuku, // デフォルトフォント
             fps: 0.0, // FPSを初期化
-            // --- ▼▼▼ 変更箇所 ▼▼▼ ---
             #[cfg(target_arch = "wasm32")]
             should_reset_ime: false, // 初期値はfalse
-            // --- ▲▲▲ 変更箇所 ▲▲▲ ---
         }
     }
 
@@ -147,6 +143,7 @@ impl<'a> App<'a> {
             content,
             status: TypingStatus {
                 line: 0,
+                word: 0,
                 segment: 0,
                 char_: 0,
                 unconfirmed: Vec::new(),
@@ -197,13 +194,13 @@ impl<'a> App<'a> {
 
             if let Some(current_line_content) = model.content.lines.get(model.status.line as usize) {
                 // 1. Calculate the total width of the current line's BASE text for centering
-                let total_width = current_line_content.segments.iter().map(|seg| {
+                let total_width: f32 = current_line_content.words.iter().flat_map(|w| &w.segments).map(|seg| {
                     let text = match seg {
                         crate::model::Segment::Plain { text } => text.as_str(),
                         crate::model::Segment::Annotated { base, .. } => base.as_str(),
                     };
                     gui_renderer::measure_text(font, text, base_pixel_font_size).0 as f32
-                }).sum::<f32>();
+                }).sum();
 
                 // セッション開始時の最初のフレームで、スクロールの初期値を設定する
                 // これにより、テキストが画面の右側からスライドインする演出が生まれる
@@ -215,29 +212,44 @@ impl<'a> App<'a> {
 
                 // 2. Calculate the width up to the cursor
                 let mut cursor_x_offset = 0.0;
-                // Add width of completed segments (based on BASE text)
-                for i in 0..model.status.segment as usize {
-                    if let Some(seg) = current_line_content.segments.get(i) {
-                        let text = match seg {
-                            crate::model::Segment::Plain { text } => text.as_str(),
-                            crate::model::Segment::Annotated { base, .. } => base.as_str(),
-                        };
-                        cursor_x_offset += gui_renderer::measure_text(font, text, base_pixel_font_size).0 as f32;
+                // Add width of completed words (based on BASE text)
+                for i in 0..model.status.word as usize {
+                    if let Some(word) = current_line_content.words.get(i) {
+                        for seg in &word.segments {
+                             let text = match seg {
+                                crate::model::Segment::Plain { text } => text.as_str(),
+                                crate::model::Segment::Annotated { base, .. } => base.as_str(),
+                            };
+                            cursor_x_offset += gui_renderer::measure_text(font, text, base_pixel_font_size).0 as f32;
+                        }
                     }
                 }
+                
+                // Add width of completed segments in the current word
+                if let Some(current_word) = current_line_content.words.get(model.status.word as usize) {
+                    for i in 0..model.status.segment as usize {
+                        if let Some(seg) = current_word.segments.get(i) {
+                            let text = match seg {
+                                crate::model::Segment::Plain { text } => text.as_str(),
+                                crate::model::Segment::Annotated { base, .. } => base.as_str(),
+                            };
+                            cursor_x_offset += gui_renderer::measure_text(font, text, base_pixel_font_size).0 as f32;
+                        }
+                    }
 
-                // For the current segment, add the width of the typed READING text
-                if let Some(seg) = current_line_content.segments.get(model.status.segment as usize) {
-                    let reading_text = match seg {
-                        crate::model::Segment::Plain { text } => text,
-                        crate::model::Segment::Annotated { reading, .. } => reading,
-                    };
-                    // Get the substring of the reading text that has been typed so far.
-                    let typed_reading_part = reading_text.chars().take(model.status.char_ as usize).collect::<String>();
-                    // Measure the actual pixel width of the typed part.
-                    let typed_reading_width = gui_renderer::measure_text(font, &typed_reading_part, base_pixel_font_size).0 as f32;
-                    // Add this width to the cursor offset.
-                    cursor_x_offset += typed_reading_width;
+                    // For the current segment, add the width of the typed READING text
+                    if let Some(seg) = current_word.segments.get(model.status.segment as usize) {
+                        let reading_text = match seg {
+                            crate::model::Segment::Plain { text } => text,
+                            crate::model::Segment::Annotated { reading, .. } => reading,
+                        };
+                        // Get the substring of the reading text that has been typed so far.
+                        let typed_reading_part = reading_text.chars().take(model.status.char_ as usize).collect::<String>();
+                        // Measure the actual pixel width of the typed part.
+                        let typed_reading_width = gui_renderer::measure_text(font, &typed_reading_part, base_pixel_font_size).0 as f32;
+                        // Add this width to the cursor offset.
+                        cursor_x_offset += typed_reading_width;
+                    }
                 }
 
                 // 3. Calculate target scroll position so the cursor is centered
@@ -338,23 +350,21 @@ impl<'a> App<'a> {
                 match event {
                     AppEvent::Char { c, timestamp } => {
                         if let Some(model) = self.typing_model.take() {
-                            // --- ▼▼▼ 変更箇所 ▼▼▼ ---
                             // key_input呼び出し前の状態を保存
-                            let old_segment = model.status.segment;
+                            let old_word = model.status.word;
                             let old_line = model.status.line;
 
                             match typing::key_input(model, c, timestamp) {
                                 Model::Typing(new_model) => {
                                     #[cfg(target_arch = "wasm32")]
                                     {
-                                        // セグメントまたは行が完了したかをチェック
-                                        if new_model.status.line != old_line || new_model.status.segment != old_segment {
+                                        // 単語または行が完了したかをチェック
+                                        if new_model.status.line != old_line || new_model.status.word != old_word {
                                             self.should_reset_ime = true;
                                         }
                                     }
                                     self.typing_model = Some(new_model)
                                 },
-                                // --- ▲▲▲ 変更箇所 ▲▲▲ ---
                                 Model::Result(result_model) => {
                                     self.result_model = Some(result_model);
                                     self.state = AppState::Result;
