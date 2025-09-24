@@ -124,7 +124,6 @@ fn group_tokens_into_words(tokens: Vec<Token>) -> Vec<Word> {
         }
     };
 
-    let token_iter = tokens.iter().peekable();
     let mut last_token_was_connector = false;
 
     for (i, token) in tokens.iter().enumerate() {
@@ -178,24 +177,15 @@ fn group_tokens_into_words(tokens: Vec<Token>) -> Vec<Word> {
 // Main parser function called by the application
 pub fn parse_problem(input: &str) -> Content {
     let mut lines_iter = input.lines();
-    
+
     // Parse the title line
     let title_line_str = lines_iter.next().unwrap_or("");
     let title = if title_line_str.starts_with("#title") {
         let content = title_line_str.trim_start_matches("#title").trim();
-        // For the title, we treat the entire line as a single word.
+        // タイトル行も本文と同様にトークン化し、単語にグループ化する
         let tokens = tokenize_line(content);
-        let mut segments = Vec::new();
-        for token in tokens {
-             match token {
-                 Token::Segment(s) => segments.push(s),
-                 // Treat connectors and separators as plain text in the title.
-                 Token::Hyphen => segments.push(Segment::Plain { text: "-".to_string() }),
-                 Token::Separator => segments.push(Segment::Plain { text: "/".to_string() }),
-                 Token::Space => segments.push(Segment::Plain { text: " ".to_string() }),
-             }
-        }
-        Line { words: vec![Word { segments }] }
+        let words = group_tokens_into_words(tokens);
+        Line { words }
     } else {
         Line { words: Vec::new() }
     };
@@ -210,7 +200,7 @@ pub fn parse_problem(input: &str) -> Content {
         let words = group_tokens_into_words(tokens);
         lines.push(Line { words });
     }
-    
+
     Content { title, lines }
 }
 
@@ -271,7 +261,7 @@ mod tests {
         ];
         assert_eq!(parse_line_to_words(line), expected);
     }
-    
+
     #[test]
     fn test_space_as_word() {
         // スペースが独立した単語として扱われるケース
@@ -364,6 +354,104 @@ mod tests {
                 Segment::Plain { text: "え".to_string() },
             ]},
             Word { segments: vec![Segment::Plain { text: "なむ".to_string() }] },
+        ];
+        assert_eq!(parse_line_to_words(line), expected);
+    }
+
+    // --- Additional tests for edge cases ---
+
+    #[test]
+    fn test_multiple_spaces() {
+        // 複数の連続した空白が、それぞれ独立した単語として扱われることを確認
+        let line = "(上/うえ)  (下/した)";
+        let expected = vec![
+            Word { segments: vec![Segment::Annotated { base: "上".to_string(), reading: "うえ".to_string() }] },
+            Word { segments: vec![Segment::Plain { text: " ".to_string() }] },
+            Word { segments: vec![Segment::Plain { text: " ".to_string() }] },
+            Word { segments: vec![Segment::Annotated { base: "下".to_string(), reading: "した".to_string() }] },
+        ];
+        assert_eq!(parse_line_to_words(line), expected);
+    }
+
+    #[test]
+    fn test_leading_and_trailing_whitespace() {
+        // 行頭と行末の空白が正しく単語として認識されることを確認
+        let line = "  (開始/かいし)  ";
+        let expected = vec![
+            Word { segments: vec![Segment::Plain { text: " ".to_string() }] },
+            Word { segments: vec![Segment::Plain { text: " ".to_string() }] },
+            Word { segments: vec![Segment::Annotated { base: "開始".to_string(), reading: "かいし".to_string() }] },
+            Word { segments: vec![Segment::Plain { text: " ".to_string() }] },
+            Word { segments: vec![Segment::Plain { text: " ".to_string() }] },
+        ];
+        assert_eq!(parse_line_to_words(line), expected);
+    }
+
+    #[test]
+    fn test_consecutive_separators() {
+        // 区切り文字が連続しても、間に空の単語が生成されないことを確認
+        let line = "(一/いち)//(二/に)";
+        let expected = vec![
+            Word { segments: vec![Segment::Annotated { base: "一".to_string(), reading: "いち".to_string() }] },
+            Word { segments: vec![Segment::Annotated { base: "二".to_string(), reading: "に".to_string() }] },
+        ];
+        assert_eq!(parse_line_to_words(line), expected);
+    }
+
+    #[test]
+    fn test_malformed_annotated() {
+        // 閉じられていない括弧や、スラッシュがないなどの不正な形式でもパニックしないことを確認
+        let line = "(未完了/みかんりょう";
+        let expected = vec![
+            Word { segments: vec![Segment::Annotated { base: "未完了".to_string(), reading: "みかんりょう".to_string() }] },
+        ];
+        assert_eq!(parse_line_to_words(line), expected, "Unclosed parenthesis");
+
+        let line_no_slash = "(ベースのみ)";
+        let expected_no_slash = vec![
+            Word { segments: vec![Segment::Annotated { base: "ベースのみ".to_string(), reading: "".to_string() }] },
+        ];
+        assert_eq!(parse_line_to_words(line_no_slash), expected_no_slash, "No slash in annotated");
+
+        let line_empty = "()";
+        let expected_empty = vec![
+            Word { segments: vec![Segment::Annotated { base: "".to_string(), reading: "".to_string() }] },
+        ];
+        assert_eq!(parse_line_to_words(line_empty), expected_empty, "Empty annotated");
+    }
+
+    #[test]
+    fn test_title_line_parsing() {
+        // `#title` 行でも本文と同じルールで区切り文字や接続子が扱われることを確認
+        let full_problem = "#title (Rust/ラスト)で-(書/か)-かれた/パーサー\n(本文/ほんぶん)";
+        let content = parse_problem(full_problem);
+
+        let expected_title_words = vec![
+            Word { segments: vec![Segment::Annotated { base: "Rust".to_string(), reading: "ラスト".to_string() }] },
+            Word { segments: vec![
+                Segment::Plain { text: "で".to_string() },
+                Segment::Annotated { base: "書".to_string(), reading: "か".to_string() },
+                Segment::Plain { text: "かれた".to_string() },
+            ]},
+            Word { segments: vec![Segment::Plain { text: "パーサー".to_string() }] },
+        ];
+
+        assert_eq!(content.title.words, expected_title_words);
+
+        // 本文が正しくパースされていることも念のため確認
+        let expected_body_words = vec![
+            Word { segments: vec![Segment::Annotated { base: "本文".to_string(), reading: "ほんぶん".to_string() }] },
+        ];
+        assert_eq!(content.lines[0].words, expected_body_words);
+    }
+
+    #[test]
+    fn test_escape_backslash() {
+        // バックスラッシュ自体をエスケープするケース（例：Windowsのパス）
+        let line = "C:\\\\Users\\\\(Taro/たろう)";
+        let expected = vec![
+            Word { segments: vec![Segment::Plain { text: "C:\\Users\\".to_string() }] },
+            Word { segments: vec![Segment::Annotated { base: "Taro".to_string(), reading: "たろう".to_string() }] },
         ];
         assert_eq!(parse_line_to_words(line), expected);
     }
