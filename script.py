@@ -19,7 +19,7 @@ with open(output_filename, 'w', encoding='utf-8') as outfile:
         if os.path.isfile(filepath):
             print(f"処理中: {filepath}")
             # ファイル名を書き込む
-            outfile.write(f"{filepath}\n")
+            outfile.write(f"{filepath}\n---\n")
             
             # ファイルの内容を読み込んで書き込む
             try:
@@ -30,6 +30,6 @@ with open(output_filename, 'w', encoding='utf-8') as outfile:
                 outfile.write(f"\n--- エラー: ファイル '{filepath}' を読み込めませんでした: {e} ---\n")
 
             # 内容と区切り線の間に改行を入れ、区切り線を書き込む
-            outfile.write("\n---\n\n")
+            outfile.write("\n---\n")
 
 print(f"全てのファイルを '{output_filename}' にまとめました。")
