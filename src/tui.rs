@@ -336,6 +336,30 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
+                Renderable::ProgressBar { anchor, shift, width_ratio, height_ratio: _, progress, bg_color, fg_color } => {
+                    // TUIでは高さは常に1セル
+                    let bar_width_chars = (cols as f32 * width_ratio) as usize;
+
+                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, cols, rows);
+                    // anchor_posが左下を指すので、Y座標は1引く
+                    let start_x = anchor_pos.0;
+                    let start_y = (anchor_pos.1 - 1).max(0);
+
+                    if start_y < 0 || start_y >= rows as i32 { continue; }
+
+                    let bg_crossterm_color = u32_to_crossterm_color(bg_color);
+                    let fg_crossterm_color = u32_to_crossterm_color(fg_color);
+                    let filled_chars = (bar_width_chars as f32 * progress).round() as usize;
+
+                    for i in 0..bar_width_chars {
+                        let x = start_x + i as i32;
+                        if x >= 0 && x < cols as i32 {
+                            let idx = start_y as usize * cols + x as usize;
+                            let (char, color) = if i < filled_chars { ('█', fg_crossterm_color) } else { ('─', bg_crossterm_color) };
+                            current_buffer[idx] = Cell { char, fg_color: color };
+                        }
+                    }
+                }
             }
         }
 

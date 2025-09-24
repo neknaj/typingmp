@@ -217,6 +217,24 @@ pub fn run() -> Status {
                         }
                     }
                 }
+                Renderable::ProgressBar { anchor, shift, width_ratio, height_ratio, progress, bg_color, fg_color } => {
+                    let bar_width = (width as f32 * width_ratio) as u32;
+                    let bar_height = (height as f32 * height_ratio) as u32;
+
+                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
+                    // anchor_posが左下を指すので、描画開始Y座標を調整
+                    let start_x = anchor_pos.0 as usize;
+                    let start_y = (anchor_pos.1 - bar_height as i32).max(0) as usize;
+
+                    // 背景を描画
+                    draw_rect(&mut pixel_buffer, width, start_x, start_y, bar_width as usize, bar_height as usize, bg_color);
+
+                    // 前景（進捗）を描画
+                    let fg_width = (bar_width as f32 * progress) as usize;
+                    if fg_width > 0 {
+                        draw_rect(&mut pixel_buffer, width, start_x, start_y, fg_width, bar_height as usize, fg_color);
+                    }
+                }
             }
         }
 
@@ -232,6 +250,30 @@ pub fn run() -> Status {
     }
 
     Status::SUCCESS
+}
+
+fn draw_rect(
+    buffer: &mut [BltPixel],
+    width: usize,
+    rect_x: usize,
+    rect_y: usize,
+    rect_w: usize,
+    rect_h: usize,
+    color: u32,
+) {
+    let height = buffer.len() / width;
+    let pixel_color = BltPixel::new(
+        ((color >> 16) & 0xFF) as u8,
+        ((color >> 8) & 0xFF) as u8,
+        (color & 0xFF) as u8,
+    );
+
+    for y in rect_y..(rect_y + rect_h).min(height) {
+        for x in rect_x..(rect_x + rect_w).min(width) {
+            let index = y * width + x;
+            buffer[index] = pixel_color;
+        }
+    }
 }
 
 fn draw_text(

@@ -141,6 +141,28 @@ pub mod gui_renderer {
         });
     }
 
+    /// ピクセルバッファに単色の矩形を描画する
+    pub fn draw_rect(
+        buffer: &mut [u32],
+        width: usize,
+        rect_x: usize,
+        rect_y: usize,
+        rect_w: usize,
+        rect_h: usize,
+        color: u32,
+    ) {
+        let height = buffer.len() / width;
+
+        for y in rect_y..(rect_y + rect_h).min(height) {
+            let row_start = y * width;
+            let row_end = (rect_x + rect_w).min(width);
+            for x in rect_x..row_end {
+                let index = row_start + x;
+                buffer[index] = color;
+            }
+        }
+    }
+
     /// テキストの描画サイズ（幅と高さ）を計算する
     pub fn measure_text(font: &FontRef, text: &str, size: f32) -> (u32, u32, f32) {
         let scale = PxScale::from(size);

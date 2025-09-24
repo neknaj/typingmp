@@ -167,6 +167,15 @@ pub enum Renderable {
         font_size: FontSize, // 入力テキストのフォントサイズ
         target_line_total_width: u32,
     },
+    ProgressBar {
+        anchor: Anchor,
+        shift: Shift,
+        width_ratio: f32, // 画面幅に対する比率
+        height_ratio: f32, // 画面高さに対する比率
+        progress: f32, // 0.0 to 1.0
+        bg_color: u32,
+        fg_color: u32,
+    },
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -257,7 +266,7 @@ pub fn build_ui<'a>(app: &App<'a>, font: &FontRef<'a>, width: usize, height: usi
     render_list.push(Renderable::Text {
         text: app.instructions_text.clone(),
         anchor: Anchor::BottomRight,
-        shift: Shift { x: -0.01, y: -0.02 },
+        shift: Shift { x: -0.01, y: -0.03 },
         align: Align { horizontal: HorizontalAlign::Right, vertical: VerticalAlign::Bottom },
         font_size: FontSize::WindowHeight(0.04),
         color: 0xFF_CCCCCC,
@@ -584,30 +593,14 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
             0.0
         };
 
-        let bar_font_size = FontSize::WindowHeight(progress_bar_height_ratio);
-        // TUIとGUIで見た目を合わせるため、文字ベースで幅を計算する
-        let char_pixel_width = calculate_pixel_font_size(bar_font_size, width, height) * 0.6;
-        let total_chars_in_bar = if char_pixel_width > 0.0 { (width as f32 / char_pixel_width) as usize } else { 0 };
-
-        // 背景バー
-        render_list.push(Renderable::Text {
-            text: "─".repeat(total_chars_in_bar),
+        render_list.push(Renderable::ProgressBar {
             anchor: Anchor::BottomLeft,
-            shift: Shift { x: 0.0, y: 0.0 },
-            align: Align { horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Bottom },
-            font_size: bar_font_size,
-            color: 0xFF_555555,
-        });
-
-        // 進捗バー本体
-        let filled_chars = (total_chars_in_bar as f32 * detailed_progress_ratio) as usize;
-        render_list.push(Renderable::Text {
-            text: "█".repeat(filled_chars),
-            anchor: Anchor::BottomLeft,
-            shift: Shift { x: 0.0, y: 0.0 },
-            align: Align { horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Bottom },
-            font_size: bar_font_size,
-            color: CORRECT_COLOR,
+            shift: Shift { x: 0.0, y: -0.005 }, // 少しだけ底から浮かせる
+            width_ratio: 1.0,
+            height_ratio: progress_bar_height_ratio,
+            progress: detailed_progress_ratio,
+            bg_color: 0xFF_555555,
+            fg_color: CORRECT_COLOR,
         });
     }
 }
