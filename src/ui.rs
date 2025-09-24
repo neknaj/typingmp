@@ -348,7 +348,7 @@ fn build_problem_selection_ui(app: &App, render_list: &mut Vec<Renderable>, grad
     });
 
     let item_height: f32 = 0.06;
-    let list_y_start: f32 = 0.25;
+    let list_y_start: f32 = 0.4;
     let list_height: f32 = 0.6;
     let items_per_screen = (list_height / item_height).floor() as usize;
 
@@ -567,7 +567,7 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
 
 fn build_result_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient) {
     render_list.push(Renderable::Background { gradient });
-    render_list.push(Renderable::Text {
+    render_list.push(Renderable::BigText {
         text: "Result".to_string(),
         anchor: Anchor::Center,
         shift: Shift { x: 0.0, y: -0.3 },
