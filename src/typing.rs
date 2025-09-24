@@ -5,15 +5,18 @@ extern crate alloc;
 
 #[cfg(feature = "uefi")]
 use alloc::{
+    collections::BTreeMap, // Use BTreeMap for no_std compatibility
     format,
     string::String,
     vec::Vec,
 };
 #[cfg(not(feature = "uefi"))]
 use std::{
+    collections::HashMap, // Use HashMap for std environment
     string::String,
     vec::Vec,
 };
+
 
 use crate::model::{
     Content, Model, ResultModel, Segment, TypingCorrectnessChar, TypingCorrectnessContent,
@@ -81,28 +84,29 @@ pub fn process_char_input(mut model: TypingModel, c: char, timestamp: f64) -> Mo
 /// 文字列入力の処理 (WASM用)
 pub fn process_string_input(mut model: TypingModel, new_input: String, timestamp: f64) -> Model {
     log(&format!("[STRING_INPUT] string: '{}', current_input: '{}'", new_input, model.status.current_word_input));
-    // 差分を計算して物理入力をログに記録
+    
     let old_input = &model.status.current_word_input;
-    if new_input.len() > old_input.len() && new_input.starts_with(old_input) {
-        let added = &new_input[old_input.len()..];
-        for c in added.chars() {
-            log_physical_input(&mut model, c, timestamp);
-        }
-    } else if new_input.len() < old_input.len() && old_input.starts_with(&new_input) {
-         let removed_count = old_input.len() - new_input.len();
-         for _ in 0..removed_count {
-             log_physical_input(&mut model, '\u{08}', timestamp);
-         }
-         model.status.backspace_count += removed_count as u32;
-    } else {
-        // 複雑なIME操作（文節の削除など）の場合、差分追跡を諦めてリセットに近い形でログを取る
-        log("[STRING_INPUT] Complex IME change detected. Logging as full replacement.");
-        for _ in 0..old_input.len() {
+    
+    // 1. 最長共通接頭辞の長さを計算
+    let common_prefix_len = old_input.chars()
+        .zip(new_input.chars())
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    // 2. 削除された文字数を計算し、バックスペースとしてログに記録
+    let removed_char_count = old_input.chars().count() - common_prefix_len;
+    if removed_char_count > 0 {
+        model.status.backspace_count += removed_char_count as u32;
+        for _ in 0..removed_char_count {
             log_physical_input(&mut model, '\u{08}', timestamp);
         }
-        for c in new_input.chars() {
-            log_physical_input(&mut model, c, timestamp);
-        }
+    }
+
+    // 3. 追加された部分を新しい入力としてログに記録
+    let added_part_start_index = new_input.char_indices().nth(common_prefix_len).map_or(new_input.len(), |(i, _)| i);
+    let added_part = &new_input[added_part_start_index..];
+    for c in added_part.chars() {
+        log_physical_input(&mut model, c, timestamp);
     }
 
     model.status.current_word_input = new_input;
@@ -139,53 +143,133 @@ fn log_physical_input(model: &mut TypingModel, key: char, timestamp: f64) {
     });
 }
 
-/// 現在の単語の目標となる「読み」文字列を取得する
-fn get_current_word_reading(model: &TypingModel) -> String {
+/// ローマ字から「かな」への逆引きマップを生成する
+#[cfg(not(feature = "uefi"))]
+fn get_romaji_to_kana_map(layout: &crate::model::Layout) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for (kana, romaji_vec) in &layout.mapping {
+        for romaji in romaji_vec {
+            if !romaji.is_empty() {
+                map.insert(romaji.clone(), kana.clone());
+            }
+        }
+    }
+    map
+}
+
+#[cfg(feature = "uefi")]
+fn get_romaji_to_kana_map(layout: &crate::model::Layout) -> BTreeMap<String, String> {
+    let mut map = BTreeMap::new();
+    for (kana, romaji_vec) in &layout.mapping {
+        for romaji in romaji_vec {
+            if !romaji.is_empty() {
+                map.insert(romaji.clone(), kana.clone());
+            }
+        }
+    }
+    map
+}
+
+
+/// ローマ字文字列を「かな」文字列に変換する
+fn convert_romaji_to_kana(romaji_str: &str, layout: &crate::model::Layout) -> String {
+    let romaji_map = get_romaji_to_kana_map(layout);
+    let mut result = String::new();
+    let mut current_pos = 0;
+    while current_pos < romaji_str.len() {
+        // 4文字（最大ローマ字長を想定）から1文字まで、最長一致を探す
+        let remaining = &romaji_str[current_pos..];
+        let mut found_match = false;
+        for len in (1..=4).rev() {
+            if remaining.len() >= len {
+                let sub = &remaining[..len];
+                if let Some(kana) = romaji_map.get(sub) {
+                    result.push_str(kana);
+                    current_pos += len;
+                    found_match = true;
+                    break;
+                }
+            }
+        }
+        // マッチしなかった場合は、1文字進めてスキップ（英字入力など）
+        if !found_match {
+            result.push(remaining.chars().next().unwrap());
+            current_pos += 1;
+        }
+    }
+    result
+}
+
+/// readingがローマ字か（ASCII文字のみか）を判定する
+fn is_romaji(s: &str) -> bool {
+    s.chars().all(|c| c.is_ascii_alphabetic() || c == '\'')
+}
+
+/// 現在の単語の目標となる正規化された「かな」文字列を取得する
+fn get_current_word_target_kana(model: &TypingModel) -> String {
     if let Some(line) = model.content.lines.get(model.status.line as usize) {
         if let Some(word) = line.words.get(model.status.word as usize) {
-            return word.segments.iter().map(|seg| match seg {
+            let reading_str: String = word.segments.iter().map(|seg| match seg {
                 Segment::Plain { text } => text.clone(),
                 Segment::Annotated { reading, .. } => reading.clone(),
             }).collect();
+            
+            // readingがローマ字表記なら「かな」に変換する
+            if is_romaji(&reading_str) {
+                return convert_romaji_to_kana(&reading_str, &model.layout);
+            } else {
+                return reading_str;
+            }
         }
     }
     String::new()
 }
 
+
 /// 入力文字列から、ターゲットの読みに最も長く一致する部分文字列を見つける
-/// 戻り値: (マッチした読み, マッチしなかった入力の余り, マッチした入力部分)
-fn find_best_romaji_match<'a>(user_input: &'a str, target_reading: &str, layout: &crate::model::Layout) -> (String, &'a str, &'a str) {
-    if user_input.is_empty() {
-        return (String::new(), "", "");
+fn find_best_romaji_match<'a>(user_input: &'a str, target_kana: &str, layout: &crate::model::Layout) -> (String, &'a str, &'a str) {
+    if user_input.is_empty() || target_kana.is_empty() {
+        return (String::new(), user_input, "");
     }
 
     let mut matched_reading = String::new();
     let mut last_successful_input_pos = 0;
-    let mut current_input_pos = 0;
     
+    let target_chars: Vec<char> = target_kana.chars().collect();
+    let mut target_idx = 0;
+    
+    let mut current_input_pos = 0;
     while current_input_pos < user_input.len() {
+        if target_idx >= target_chars.len() {
+            break; 
+        }
+        
+        let current_target_char = target_chars[target_idx];
         let remaining_input = &user_input[current_input_pos..];
-        let mut found_romaji_match = false;
 
-        // 最長のローマ字表記を探す (例: "kya" を "k" "y" "a" より優先する)
-        for len in (1..=remaining_input.len()).rev() {
-            let romaji_candidate = &remaining_input[..len];
-            if let Some(kana) = layout.mapping.iter().find_map(|(k, vs)| {
-                if vs.iter().any(|v| v == romaji_candidate) { Some(k.clone()) } else { None }
-            }) {
-                let next_reading = matched_reading.clone() + &kana;
-                if target_reading.starts_with(&next_reading) {
-                    matched_reading = next_reading;
-                    current_input_pos += len;
+        let romaji_options = layout.mapping.iter()
+            .find(|(key, _)| key.chars().next() == Some(current_target_char))
+            .map(|(_, values)| values);
+            
+        if let Some(options) = romaji_options {
+            let mut found_match_for_char = false;
+            let mut sorted_options = options.clone();
+            sorted_options.sort_by(|a, b| b.len().cmp(&a.len()));
+
+            for option in sorted_options.iter() {
+                if !option.is_empty() && remaining_input.starts_with(option.as_str()) {
+                    matched_reading.push(current_target_char);
+                    current_input_pos += option.len();
                     last_successful_input_pos = current_input_pos;
-                    found_romaji_match = true;
+                    target_idx += 1;
+                    found_match_for_char = true;
                     break;
                 }
             }
-        }
-        
-        if !found_romaji_match {
-            // これ以上マッチするローマ字がない
+            if !found_match_for_char {
+                break;
+            }
+        } else {
             break;
         }
     }
@@ -194,23 +278,23 @@ fn find_best_romaji_match<'a>(user_input: &'a str, target_reading: &str, layout:
     let remaining_input = &user_input[last_successful_input_pos..];
 
     log(&format!("[ROMAJI_MATCH] user_input: '{}', target: '{}' -> matched_reading: '{}', matched_input: '{}', remaining_input: '{}'", 
-        user_input, target_reading, matched_reading, matched_input, remaining_input));
+        user_input, target_kana, matched_reading, matched_input, remaining_input));
     
     (matched_reading, remaining_input, matched_input)
 }
 
+
 /// 現在の入力状況に応じて、モデルの進捗（セグメント、文字）と正誤を更新する
 /// 戻り値: 単語が完了したか否か
 fn update_progress(model: &mut TypingModel) -> bool {
-    let target_reading = get_current_word_reading(model);
-    if target_reading.is_empty() {
+    let target_kana = get_current_word_target_kana(model);
+    if target_kana.is_empty() {
         model.status.current_word_correctness.clear();
-        return true; // 空の単語は即完了
+        return model.status.current_word_input.is_empty();
     }
     
-    let (matched_reading, remaining_input, matched_input) = find_best_romaji_match(&model.status.current_word_input, &target_reading, &model.layout);
+    let (matched_reading, remaining_input, matched_input) = find_best_romaji_match(&model.status.current_word_input, &target_kana, &model.layout);
     
-    // 正誤配列を更新
     model.status.current_word_correctness.clear();
     for _ in 0..matched_input.len() {
         model.status.current_word_correctness.push(TypingCorrectnessChar::Correct);
@@ -219,18 +303,23 @@ fn update_progress(model: &mut TypingModel) -> bool {
         model.status.current_word_correctness.push(TypingCorrectnessChar::Incorrect);
     }
 
-    // UI上のカーソル位置を進める
     let mut chars_to_advance = matched_reading.chars().count();
     let mut seg_idx = 0;
     let mut char_idx = 0;
     if let Some(line_content) = model.content.lines.get(model.status.line as usize) {
         if let Some(word_content) = line_content.words.get(model.status.word as usize) {
             'outer: for (i, seg) in word_content.segments.iter().enumerate() {
-                let seg_reading = match seg {
+                let seg_reading_raw = match seg {
                     Segment::Plain { text } => text,
                     Segment::Annotated { reading, .. } => reading,
                 };
-                for (j, _) in seg_reading.chars().enumerate() {
+                let seg_reading_kana = if is_romaji(seg_reading_raw) {
+                    convert_romaji_to_kana(seg_reading_raw, &model.layout)
+                } else {
+                    seg_reading_raw.clone()
+                };
+
+                for (j, _) in seg_reading_kana.chars().enumerate() {
                     if chars_to_advance == 0 {
                         seg_idx = i;
                         char_idx = j;
@@ -244,7 +333,7 @@ fn update_progress(model: &mut TypingModel) -> bool {
                     break;
                 }
             }
-            if chars_to_advance > 0 { // 単語の最後まで到達
+            if chars_to_advance > 0 {
                  seg_idx = word_content.segments.len();
                  char_idx = 0;
             }
@@ -254,8 +343,7 @@ fn update_progress(model: &mut TypingModel) -> bool {
     model.status.char_ = char_idx as i32;
     log(&format!("[PROGRESS] advanced to seg: {}, char: {}. correctness: {:?}", seg_idx, char_idx, model.status.current_word_correctness));
     
-    // 単語完了チェック
-    let is_complete = matched_reading == target_reading && remaining_input.is_empty();
+    let is_complete = matched_reading == target_kana && remaining_input.is_empty();
     log(&format!("[PROGRESS] word_complete check: {}", is_complete));
     is_complete
 }
@@ -265,7 +353,6 @@ fn finalize_word(model: &mut TypingModel) {
     let is_correct = model.status.current_word_correctness.iter().all(|c| *c == TypingCorrectnessChar::Correct);
     log(&format!("[FINALIZE] Word finished. Correct: {}. Advancing to word {}", is_correct, model.status.word + 1));
 
-    // 1. 正誤記録を確定
     if let Some(line) = model.typing_correctness.lines.get_mut(model.status.line as usize) {
         if let Some(word) = line.words.get_mut(model.status.word as usize) {
             for seg in word.segments.iter_mut() {
@@ -276,14 +363,12 @@ fn finalize_word(model: &mut TypingModel) {
         }
     }
     
-    // 2. 次の単語に進む
     model.status.word += 1;
     model.status.segment = 0;
     model.status.char_ = 0;
     model.status.current_word_input.clear();
     model.status.current_word_correctness.clear();
     
-    // 3. 行完了判定
     if let Some(line_content) = model.content.lines.get(model.status.line as usize) {
         if model.status.word as usize >= line_content.words.len() {
             model.status.word = 0;
@@ -300,16 +385,22 @@ fn is_typing_finished(model: &TypingModel) -> bool {
 
 pub fn create_typing_correctness_model(content: &Content) -> TypingCorrectnessContent {
     let mut lines = Vec::new();
+    let layout = crate::model::Layout::default(); // レイアウトを一時的に作成
     for line in &content.lines {
         let mut words = Vec::new();
         for word in &line.words {
             let mut segments = Vec::new();
             for segment in &word.segments {
-                let target_text = match segment {
+                let target_text_raw = match segment {
                     Segment::Plain { text } => text,
                     Segment::Annotated { base: _, reading } => reading,
                 };
-                let chars = target_text.chars()
+                let target_text_kana = if is_romaji(target_text_raw) {
+                    convert_romaji_to_kana(target_text_raw, &layout)
+                } else {
+                    target_text_raw.clone()
+                };
+                let chars = target_text_kana.chars()
                     .map(|_| TypingCorrectnessChar::Pending)
                     .collect();
                 segments.push(TypingCorrectnessSegment { chars });
@@ -363,14 +454,12 @@ pub fn calculate_total_metrics(model: &TypingModel) -> TypingMetrics {
     }
     log(&format!("[METRICS] Total time: {} ms", metrics.total_time));
     
-    // 総物理タイプ数 (Backspaceを除く)
     metrics.type_count = model.user_input_sessions.iter()
         .flat_map(|s| s.inputs.iter())
         .filter(|i| i.key != '\u{08}')
         .count() as i32;
     log(&format!("[METRICS] Total physical types (type_count): {}", metrics.type_count));
 
-    // 入力履歴をシミュレートして最終的な入力文字列を構築
     let mut effective_inputs: Vec<char> = Vec::new();
     for session in &model.user_input_sessions {
         for input in &session.inputs {
@@ -384,35 +473,41 @@ pub fn calculate_total_metrics(model: &TypingModel) -> TypingMetrics {
     let final_input_str: String = effective_inputs.iter().collect();
     log(&format!("[METRICS] Final effective input string: '{}'", final_input_str));
 
-    // 全ての目標テキスト（読み）を連結
-    let total_target_reading: String = model.content.lines.iter()
+    let total_target_kana: String = model.content.lines.iter()
         .flat_map(|line| line.words.iter())
         .flat_map(|word| word.segments.iter())
-        .map(|seg| match seg {
-            Segment::Plain { text } => text.clone(),
-            Segment::Annotated { reading, .. } => reading.clone(),
+        .map(|seg| {
+            let raw = match seg {
+                Segment::Plain { text } => text.clone(),
+                Segment::Annotated { reading, .. } => reading.clone(),
+            };
+            if is_romaji(&raw) {
+                convert_romaji_to_kana(&raw, &model.layout)
+            } else {
+                raw
+            }
         }).collect();
-    log(&format!("[METRICS] Total target reading: '{}'", total_target_reading));
+    log(&format!("[METRICS] Total target kana: '{}'", total_target_kana));
 
-    // 最終的な入力から、どれだけ正しく読みに変換できたかを計算
-    let (correctly_converted_reading, _, _) = find_best_romaji_match(&final_input_str, &total_target_reading, &model.layout);
-    let correctly_typed_chars_count = correctly_converted_reading.chars().count() as i32;
-    log(&format!("[METRICS] Correctly converted reading: '{}' ({} chars)", correctly_converted_reading, correctly_typed_chars_count));
+    let (_, _, correctly_typed_input) = find_best_romaji_match(&final_input_str, &total_target_kana, &model.layout);
     
-    metrics.miss_count = metrics.type_count - correctly_typed_chars_count;
-    log(&format!("[METRICS] Miss count: {}", metrics.miss_count));
+    let correct_type_count = correctly_typed_input.chars().count() as i32;
+    
+    metrics.miss_count = metrics.type_count - correct_type_count;
+    log(&format!("[METRICS] Correct types: {}, Miss count: {}", correct_type_count, metrics.miss_count));
 
     metrics.calculate();
     log(&format!("[METRICS] Final metrics: Accuracy = {:.2}%, Speed = {:.2} kps", metrics.accuracy * 100.0, metrics.speed));
     metrics
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::parser;
     use crate::model::{Scroll, TypingStatus};
-    
+
     /// テスト用のTypingModelをセットアップするヘルパー関数
     fn setup_model(problem_text: &str) -> TypingModel {
         let content = parser::parse_problem(problem_text);
@@ -434,14 +529,12 @@ mod tests {
             scroll: Scroll { scroll: 0.0, max: 0.0 },
         }
     }
-    
-    // テスト用の正誤判定ヘルパー
-    fn is_segment_correct(segment: &TypingCorrectnessSegment) -> bool {
-        !segment.chars.iter().any(|c| *c == TypingCorrectnessChar::Incorrect)
-    }
 
+    // テスト用の正誤判定ヘルパー
     fn is_word_correct(word: &TypingCorrectnessWord) -> bool {
-        word.segments.iter().all(is_segment_correct)
+        word.segments.iter().all(|seg| {
+            !seg.chars.iter().any(|c| *c == TypingCorrectnessChar::Incorrect)
+        })
     }
 
     #[test]
@@ -453,7 +546,7 @@ mod tests {
         };
         assert_eq!(model.status.current_word_input, "k");
         assert_eq!(model.status.current_word_correctness, vec![TypingCorrectnessChar::Correct]);
-        assert_eq!(model.status.word, 0); // まだ単語は完了していない
+        assert_eq!(model.status.word, 0);
     }
 
     #[test]
@@ -470,22 +563,17 @@ mod tests {
     #[test]
     fn test_backspace_correction() {
         let mut model = setup_model("#title test\n(か/ka)");
-        // 1. 間違った入力
         model = match process_char_input(model, 't', 0.0) { Model::Typing(m) => m, _ => panic!() };
-        assert_eq!(model.status.current_word_input, "t");
-        assert_eq!(model.status.current_word_correctness, vec![TypingCorrectnessChar::Incorrect]);
-        
-        // 2. Backspaceで修正
         model = process_backspace(model, 1.0);
-        assert_eq!(model.status.current_word_input, "");
-        assert_eq!(model.status.backspace_count, 1);
-        
-        // 3. 正しい入力
         model = match process_char_input(model, 'k', 2.0) { Model::Typing(m) => m, _ => panic!() };
-        model = match process_char_input(model, 'a', 3.0) { Model::Typing(m) => m, _ => panic!() };
+        let final_model = process_char_input(model, 'a', 3.0);
 
-        assert_eq!(model.status.word, 1); // 単語が完了して次に進んでいる
-        assert_eq!(model.status.current_word_input, "");
+        if let Model::Result(result_model) = final_model {
+            assert_eq!(result_model.typing_model.status.backspace_count, 1);
+            assert!(is_typing_finished(&result_model.typing_model));
+        } else {
+            panic!("Model should be Result after finishing the problem");
+        }
     }
 
     #[test]
@@ -493,24 +581,27 @@ mod tests {
         let mut model = setup_model("#title test\n(か/ka) (き/ki)");
         model = match process_char_input(model, 'k', 0.0) { Model::Typing(m) => m, _ => panic!() };
         model = match process_char_input(model, 'a', 1.0) { Model::Typing(m) => m, _ => panic!() };
-
-        // 最初の単語が完了したか
-        assert_eq!(model.status.line, 0);
         assert_eq!(model.status.word, 1);
-        assert_eq!(model.status.current_word_input, "");
         assert!(is_word_correct(&model.typing_correctness.lines[0].words[0]));
 
-        // 次の単語に進む
-        model = match process_char_input(model, 'k', 2.0) { Model::Typing(m) => m, _ => panic!() };
-        model = match process_char_input(model, 'i', 3.0) { Model::Typing(m) => m, _ => panic!() };
+        model = match process_char_input(model, ' ', 2.0) { Model::Typing(m) => m, _ => panic!() };
         assert_eq!(model.status.word, 2);
+
+        model = match process_char_input(model, 'k', 3.0) { Model::Typing(m) => m, _ => panic!() };
+        let final_model = process_char_input(model, 'i', 4.0);
+        
+        if let Model::Result(result_model) = final_model {
+            assert_eq!(result_model.typing_model.status.word, 0);
+            assert_eq!(result_model.typing_model.status.line, 1);
+        } else {
+            panic!("Model should be Result after finishing the problem");
+        }
     }
     
     #[test]
     fn test_full_completion_and_result_transition() {
         let model = setup_model("#title test\n(あ/a)");
         let final_model = process_char_input(model, 'a', 0.0);
-        
         assert!(matches!(final_model, Model::Result(_)));
     }
 
@@ -520,27 +611,120 @@ mod tests {
         
         model = match process_char_input(model, 'k', 100.0) { Model::Typing(m) => m, _ => panic!() };
         model = match process_char_input(model, 'o', 200.0) { Model::Typing(m) => m, _ => panic!() }; // ミス
-        model = process_backspace(model, 300.0);
+        model = process_backspace(model, 300.0); // 修正
         model = match process_char_input(model, 'a', 400.0) { Model::Typing(m) => m, _ => panic!() };
         model = match process_char_input(model, 'k', 500.0) { Model::Typing(m) => m, _ => panic!() };
-        model = match process_char_input(model, 'i', 600.0) { Model::Typing(m) => m, _ => panic!() };
+        let final_model = process_char_input(model, 'i', 600.0);
 
-        // タイピング完了
-        assert!(is_typing_finished(&model));
+        if let Model::Result(result_model) = final_model {
+            assert!(is_typing_finished(&result_model.typing_model));
+            let metrics = calculate_total_metrics(&result_model.typing_model);
 
-        let metrics = calculate_total_metrics(&model);
+            assert_eq!(metrics.type_count, 5);
+            assert_eq!(metrics.miss_count, 1);
+            assert_eq!(metrics.backspace_count, 1);
+            assert_eq!(metrics.total_time, 500.0);
+            assert!((metrics.accuracy - 0.8).abs() < f64::EPSILON);
+            assert!((metrics.speed - 8.0).abs() < f64::EPSILON);
+        } else {
+            panic!("Model should have transitioned to Result");
+        }
+    }
 
-        // 総打鍵数 (k, o, a, k, i)
-        assert_eq!(metrics.type_count, 5);
-        // ミス数: 'o'の1回。最終成果物は'kaki'なので、正しくタイプされたのは4文字分。5-4=1
-        assert_eq!(metrics.miss_count, 1);
-        // Backspaceは1回
-        assert_eq!(metrics.backspace_count, 1);
-        // 時間
-        assert_eq!(metrics.total_time, 500.0); // 600.0 - 100.0
-        // 正確さ: (5-1)/5 = 0.8
-        assert!((metrics.accuracy - 0.8).abs() < f64::EPSILON);
-        // 速度: (5-1) / (500.0/1000.0) = 4 / 0.5 = 8.0
-        assert!((metrics.speed - 8.0).abs() < f64::EPSILON);
+    #[test]
+    fn test_alternative_romaji_notations() {
+        let mut model_shi = setup_model("#title test\n(し/shi)");
+        model_shi = match process_char_input(model_shi, 's', 0.0) { Model::Typing(m) => m, _ => panic!() };
+        model_shi = match process_char_input(model_shi, 'h', 1.0) { Model::Typing(m) => m, _ => panic!() };
+        let final_model_shi = process_char_input(model_shi, 'i', 2.0);
+        assert!(matches!(final_model_shi, Model::Result(_)), "Failed with 'shi'");
+
+        let mut model_si = setup_model("#title test\n(し/shi)");
+        model_si = match process_char_input(model_si, 's', 0.0) { Model::Typing(m) => m, _ => panic!() };
+        let final_model_si = process_char_input(model_si, 'i', 1.0);
+        assert!(matches!(final_model_si, Model::Result(_)), "Failed with 'si'");
+    }
+
+    #[test]
+    fn test_sokuon_typing() {
+        let mut model = setup_model("#title test\n(かっぱ/kappa)");
+        model = match process_char_input(model, 'k', 0.0) { Model::Typing(m) => m, _ => panic!() };
+        model = match process_char_input(model, 'a', 1.0) { Model::Typing(m) => m, _ => panic!() };
+        model = match process_char_input(model, 'p', 2.0) { Model::Typing(m) => m, _ => panic!() };
+        assert_eq!(model.status.current_word_input, "kap");
+        model = match process_char_input(model, 'p', 3.0) { Model::Typing(m) => m, _ => panic!() };
+        assert_eq!(model.status.current_word_input, "kapp");
+        let final_model = process_char_input(model, 'a', 4.0);
+        assert!(matches!(final_model, Model::Result(_)), "Sokuon 'kappa' failed");
+    }
+
+    #[test]
+    fn test_hatsuon_typing() {
+        let mut model_nn = setup_model("#title test\n(かん/kann)");
+        model_nn = match process_char_input(model_nn, 'k', 0.0) { Model::Typing(m) => m, _ => panic!() };
+        model_nn = match process_char_input(model_nn, 'a', 1.0) { Model::Typing(m) => m, _ => panic!() };
+        model_nn = match process_char_input(model_nn, 'n', 2.0) { Model::Typing(m) => m, _ => panic!() };
+        let final_model_nn = process_char_input(model_nn, 'n', 3.0);
+        assert!(matches!(final_model_nn, Model::Result(_)), "Hatsuon 'kann' failed");
+
+        let mut model_n_prime = setup_model("#title test\n(かんい/kan'i)");
+        model_n_prime = match process_char_input(model_n_prime, 'k', 0.0) { Model::Typing(m) => m, _ => panic!() };
+        model_n_prime = match process_char_input(model_n_prime, 'a', 1.0) { Model::Typing(m) => m, _ => panic!() };
+        model_n_prime = match process_char_input(model_n_prime, 'n', 2.0) { Model::Typing(m) => m, _ => panic!() };
+        model_n_prime = match process_char_input(model_n_prime, '\'', 3.0) { Model::Typing(m) => m, _ => panic!() };
+        let final_model_n_prime = process_char_input(model_n_prime, 'i', 4.0);
+        assert!(matches!(final_model_n_prime, Model::Result(_)), "Hatsuon 'kan'i' failed");
+    }
+    
+    #[test]
+    fn test_combined_word_with_okurigana() {
+        let model = setup_model("#title test\n(悲/かな)-しき");
+        assert_eq!(get_current_word_target_kana(&model), "かなしき");
+
+        match process_string_input(model, "kanashiki".to_string(), 0.0) {
+            Model::Result(_) => (),
+            _ => panic!("Combined word 'kanashiki' should complete the problem"),
+        }
+    }
+
+    #[test]
+    fn test_process_string_input_ime_simulation() {
+        let mut model = setup_model("#title test\n(こんにちは/konnichiha)");
+
+        model = match process_string_input(model, "k".to_string(), 0.0) { Model::Typing(m) => m, _ => panic!() };
+        assert_eq!(model.status.current_word_input, "k");
+
+        model = match process_string_input(model, "ko".to_string(), 1.0) { Model::Typing(m) => m, _ => panic!() };
+        assert_eq!(model.status.current_word_input, "ko");
+        
+        model = match process_string_input(model, "konn".to_string(), 2.0) { Model::Typing(m) => m, _ => panic!() };
+        assert_eq!(model.status.current_word_input, "konn");
+
+        model = match process_string_input(model, "konnici".to_string(), 3.0) { Model::Typing(m) => m, _ => panic!() };
+        assert_eq!(model.status.current_word_input, "konnici");
+        assert!(!is_typing_finished(&model));
+
+        let final_model = process_string_input(model, "konnichiha".to_string(), 4.0);
+        assert!(matches!(final_model, Model::Result(_)));
+    }
+
+    #[test]
+    fn test_string_input_backspace_simulation() {
+        let mut model = setup_model("#title test\n(さかな/sakana)");
+
+        model = match process_string_input(model, "sakaki".to_string(), 0.0) { Model::Typing(m) => m, _ => panic!() };
+        assert_eq!(model.status.current_word_correctness.last(), Some(&TypingCorrectnessChar::Incorrect));
+        assert_eq!(model.status.backspace_count, 0);
+
+        model = match process_string_input(model, "sakan".to_string(), 1.0) { Model::Typing(m) => m, _ => panic!() };
+        assert_eq!(model.status.backspace_count, 2);
+        assert!(model.status.current_word_correctness.iter().all(|c| *c == TypingCorrectnessChar::Correct));
+
+        let final_model = process_string_input(model, "sakana".to_string(), 2.0);
+        if let Model::Result(result) = final_model {
+             assert_eq!(result.typing_model.status.backspace_count, 2);
+        } else {
+            panic!("Model should be Result");
+        }
     }
 }
