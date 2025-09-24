@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <title>Neknaj Typing Multi-Platform wasm edition</title>
+    <meta property="og:title" content="Neknaj Typing Multi-Platform wasm edition">
+    <meta property="og:description" content="クロスプラットフォーム対応のタイピング練習アプリケーションです。">
+    <meta property="og:type" content="website">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <style>
+        /* CSSに変更はありません */
+        html {
+            height: 100%;
+        }
+        body {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+
+            background-color: #101010;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        #canvas-wrapper {
+            flex-grow: 1;
+            flex-shrink: 1;
+            width: 100%;
+            min-height: 0;
+            display: flex;
+        }
+
+        canvas {
+            width: 100%;
+            margin: auto 0;
+            max-height: 100%;
+        }
+
+        input {
+            position: absolute;
+            top: -100px;
+            left: -100px;
+            opacity: 0;
+            width: fit-content;
+            height: 100px;
+        }
+
+        #controls-container {
+            display: none;
+            flex-shrink: 0;
+            width: 100%;
+            padding: 10px;
+            box-sizing: border-box;
+            background-color: #1a1a1a;
+            justify-content: space-around;
+            align-items: center;
+            gap: 5px;
+        }
+
+        #controls-container button {
+            flex-grow: 1;
+            padding: 15px 5px;
+            font-size: 1.5em;
+            background-color: #444;
+            color: #eee;
+            border: 1px solid #666;
+            border-radius: 8px;
+            touch-action: manipulation;
+        }
+
+        @media (orientation: portrait) {
+            #controls-container {
+                display: flex;
+            }
+        }
+
+        .description {
+            opacity: 0;
+        }
+
+        #link-container {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            font-family: sans-serif;
+            font-size: 12px;
+            color: #aaa;
+        }
+        #link-container a {
+            color: #6277a5;
+            /* text-decoration: none; */
+        }
+        #link-container a:hover {
+            color: #fff;
+        }
+        #link-container p {
+            margin: 5px 0 0 0;
+            padding: 0;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="canvas-wrapper">
+        <!-- CanvasはRustコードによってここに追加される -->
+    </div>
+
+    <p class="description">
+        クロスプラットフォーム対応のタイピング練習アプリケーションです。
+    </p>
+
+    <div id="controls-container">
+        <button id="key-up">▲</button>
+        <button id="key-down">▼</button>
+        <button id="key-enter">Enter</button>
+        <button id="key-backspace">BS</button>
+        <button id="key-esc">Esc</button>
+    </div>
+
+    <div id="link-container">
+        <a href="https://github.com/neknaj/typingmp" target="_blank" rel="noopener noreferrer">Source Code on GitHub</a>
+        <p>(Desktop versions also available)</p>
+    </div>
+
+</body>
+
+</html>
+<script type="module">
+    import init, { trigger_event } from './rust_multibackend_app.js';
+
+    async function run() {
+        await init();
+
+        const copyToClipboardOnce = async () => {
+            try {
+                await navigator.clipboard.writeText('Neknaj Typing MP wasm edition');
+                console.log('Copied to clipboard on user interaction.');
+            } catch (err) {
+                console.error('Failed to copy to clipboard: ', err);
+            }
+        };
+        document.body.addEventListener('pointerdown', copyToClipboardOnce, { once: true });
+
+        const adjustHeight = () => {
+            if (window.visualViewport) {
+                document.body.style.height = `${window.visualViewport.height}px`;
+            }
+        };
+
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', adjustHeight);
+            adjustHeight();
+        }
+
+        // ▼▼▼ [修正箇所] ここから ▼▼▼
+        // ボタンのイベントを'click'から'mousedown'に変更し、
+        // event.preventDefault()を追加してフォーカス移動を防ぐ
+
+        document.getElementById('key-up').addEventListener('mousedown', (event) => {
+            event.preventDefault(); // この行がフォーカス移動を防ぎ、キーボード表示を維持する
+            trigger_event('Up');
+        });
+
+        document.getElementById('key-down').addEventListener('mousedown', (event) => {
+            event.preventDefault();
+            trigger_event('Down');
+        });
+
+        document.getElementById('key-enter').addEventListener('mousedown', (event) => {
+            event.preventDefault();
+            trigger_event('Enter');
+        });
+
+        document.getElementById('key-backspace').addEventListener('mousedown', (event) => {
+            event.preventDefault();
+            trigger_event('Backspace');
+        });
+
+        document.getElementById('key-esc').addEventListener('mousedown', (event) => {
+            event.preventDefault();
+            trigger_event('Escape');
+        });
+        // ▲▲▲ [修正箇所] ここまで ▲▲▲
+    }
+
+    run();
+</script>
