@@ -135,7 +135,6 @@ pub fn start() -> Result<(), JsValue> {
     {
         let app_clone = app.clone();
         let closure = Closure::<dyn FnMut(_)>::new(move |event: KeyboardEvent| {
-            // 生のKeyboardEventの内容をログに出力
             debug_log(&format!(
                 "[KeyDown wasm.rs] key: '{}', code: '{}', composing: {}",
                 event.key(),
@@ -178,7 +177,6 @@ pub fn start() -> Result<(), JsValue> {
         let app_clone = app.clone();
         let input_clone = input_element.clone();
         let closure = Closure::<dyn FnMut(_)>::new(move |event: InputEvent| {
-            // 生のInputEventの内容をログに出力
             debug_log(&format!(
                 "[InputEvent wasm.rs] type: '{}', data: '{:?}', composing: {}, value: '{}'",
                 event.input_type(),
@@ -189,15 +187,8 @@ pub fn start() -> Result<(), JsValue> {
 
             event.prevent_default();
 
-            // input要素の全内容(value)ではなく、イベントで追加された文字(data)のみを処理する
-            if let Some(data) = event.data() {
-                if !data.is_empty() {
-                    let mut app = app_clone.borrow_mut();
-                    for c in data.chars() {
-                        app.on_event(AppEvent::Char { c, timestamp: crate::timestamp::now() });
-                    }
-                }
-            }
+            let current_value = input_clone.value();
+            app_clone.borrow_mut().on_event(AppEvent::InputString(current_value));
         });
         input_element.add_event_listener_with_callback("input", closure.as_ref().unchecked_ref())?;
         closure.forget();
@@ -340,6 +331,7 @@ pub fn start() -> Result<(), JsValue> {
         // --- IMEリセット処理（可変借用） ---
         let mut app_borrow_mut = app.borrow_mut();
         if app_borrow_mut.should_reset_ime {
+            ime_input_element.set_value("");
             let _ = ime_input_element.blur();
             let _ = ime_input_element.focus();
             app_borrow_mut.should_reset_ime = false;

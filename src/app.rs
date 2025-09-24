@@ -69,6 +69,7 @@ pub enum AppEvent {
     Start,
     ChangeScene,
     Char { c: char, timestamp: f64 },
+    InputString(String), // WASMからの文字列入力
     Backspace,
     Up,
     Down,
@@ -146,10 +147,11 @@ impl<'a> App<'a> {
                 word: 0,
                 segment: 0,
                 char_: 0,
-                unconfirmed: Vec::new(),
-                last_wrong_keydown: None,
+                current_word_input: String::new(),
+                current_word_correctness: Vec::new(),
+                backspace_count: 0,
             },
-            user_input: Vec::new(),
+            user_input_sessions: Vec::new(),
             typing_correctness,
             layout: Default::default(),
             scroll: Scroll {
@@ -205,7 +207,7 @@ impl<'a> App<'a> {
                 // セッション開始時の最初のフレームで、スクロールの初期値を設定する
                 // これにより、テキストが画面の右側からスライドインする演出が生まれる
                 // user_inputが空かつscrollが0.0の場合をセッション開始直後と判断
-                if model.user_input.is_empty() && model.scroll.scroll == 0.0 {
+                if model.user_input_sessions.is_empty() && model.scroll.scroll == 0.0 {
                     // テキストブロックの左端が画面の右端に来るようにスクロール値を計算
                     model.scroll.scroll = (-(width as f32 / 2.0) - (total_width / 2.0)) as f64;
                 }
@@ -350,20 +352,16 @@ impl<'a> App<'a> {
                 match event {
                     AppEvent::Char { c, timestamp } => {
                         if let Some(model) = self.typing_model.take() {
-                            // key_input呼び出し前の状態を保存
-                            let old_word = model.status.word;
-                            let old_line = model.status.line;
-
-                            match typing::key_input(model, c, timestamp) {
+                            let old_word_count = model.status.word;
+                            match typing::process_char_input(model, c, timestamp) {
                                 Model::Typing(new_model) => {
                                     #[cfg(target_arch = "wasm32")]
                                     {
-                                        // 単語または行が完了したかをチェック
-                                        if new_model.status.line != old_line || new_model.status.word != old_word {
+                                        if new_model.status.word != old_word_count {
                                             self.should_reset_ime = true;
                                         }
                                     }
-                                    self.typing_model = Some(new_model)
+                                    self.typing_model = Some(new_model);
                                 },
                                 Model::Result(result_model) => {
                                     self.result_model = Some(result_model);
@@ -371,6 +369,32 @@ impl<'a> App<'a> {
                                     self.on_event(AppEvent::ChangeScene);
                                 }
                             }
+                        }
+                    }
+                    AppEvent::InputString(s) => {
+                        if let Some(model) = self.typing_model.take() {
+                            let old_word_count = model.status.word;
+                            match typing::process_string_input(model, s, crate::timestamp::now()) {
+                                Model::Typing(new_model) => {
+                                    #[cfg(target_arch = "wasm32")]
+                                    {
+                                        if new_model.status.word != old_word_count {
+                                            self.should_reset_ime = true;
+                                        }
+                                    }
+                                    self.typing_model = Some(new_model);
+                                },
+                                Model::Result(result_model) => {
+                                    self.result_model = Some(result_model);
+                                    self.state = AppState::Result;
+                                    self.on_event(AppEvent::ChangeScene);
+                                }
+                            }
+                        }
+                    }
+                    AppEvent::Backspace => {
+                        if let Some(model) = self.typing_model.take() {
+                            self.typing_model = Some(typing::process_backspace(model, crate::timestamp::now()));
                         }
                     }
                     AppEvent::Escape => {
@@ -386,9 +410,10 @@ impl<'a> App<'a> {
                 if let Some(result) = &self.result_model {
                     let metrics = typing::calculate_total_metrics(&result.typing_model);
                     self.status_text = format!(
-                        "Complete! Speed: {:.2} kpm, Accuracy: {:.2}%",
+                        "Complete! Speed: {:.2} kpm, Accuracy: {:.2}%, Backspaces: {}",
                         metrics.speed * 60.0,
-                        metrics.accuracy * 100.0
+                        metrics.accuracy * 100.0,
+                        metrics.backspace_count
                     );
                 }
                 match event {

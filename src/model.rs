@@ -71,7 +71,7 @@ pub enum Model {
 pub struct TypingModel {
     pub content: Content,
     pub status: TypingStatus,
-    pub user_input: Vec<TypingSession>,
+    pub user_input_sessions: Vec<TypingSession>,
     pub typing_correctness: TypingCorrectnessContent,
     pub layout: Layout,
     pub scroll: Scroll,
@@ -80,6 +80,7 @@ pub struct TypingModel {
 #[derive(Debug, Clone)]
 pub struct ResultModel {
     pub typing_model: TypingModel,
+    pub total_backspaces: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -88,8 +89,12 @@ pub struct TypingStatus {
     pub word: i32,
     pub segment: i32,
     pub char_: i32,
-    pub unconfirmed: Vec<char>,
-    pub last_wrong_keydown: Option<char>,
+    /// 現在の単語の入力文字列 (ローマ字 or かな)
+    pub current_word_input: String,
+    /// current_word_inputの各文字の正誤
+    pub current_word_correctness: Vec<TypingCorrectnessChar>,
+    /// セッション中の総Backspace回数
+    pub backspace_count: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -100,9 +105,8 @@ pub struct TypingSession {
 
 #[derive(Debug, Clone)]
 pub struct TypingInput {
-    pub key: char,
+    pub key: char, // '\u{08}' はBackspaceを表す
     pub timestamp: f64,
-    pub is_correct: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -139,6 +143,7 @@ pub struct TypingMetrics {
     pub total_time: f64,
     pub accuracy: f64,
     pub speed: f64, // Chars per second
+    pub backspace_count: u32,
 }
 
 #[derive(Debug, Clone)]

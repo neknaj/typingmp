@@ -5,7 +5,6 @@ extern crate alloc;
 
 #[cfg(feature = "uefi")]
 use alloc::{
-    format,
     string::{String, ToString},
     vec::Vec,
 };
@@ -42,192 +41,245 @@ fn log(_message: &str) {
     }
 }
 
-pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
-    log(&format!("\n--- key_input: '{}' --- typing.rs", input));
-    log(&format!(
-        "  [State Before] line: {}, word: {}, seg: {}, char: {}, unconfirmed: {:?}",
-        model.status.line, model.status.word, model.status.segment, model.status.char_, model.status.unconfirmed
-    ));
+/// Backspaceキーが押されたときの処理 (全プラットフォーム共通)
+pub fn process_backspace(mut model: TypingModel, timestamp: f64) -> TypingModel {
+    if !model.status.current_word_input.is_empty() {
+        model.status.current_word_input.pop();
+        model.status.backspace_count += 1;
+        log_physical_input(&mut model, '\u{08}', timestamp); // '\u{08}' は Backspace
+    }
+    update_progress(&mut model);
+    model
+}
 
-    let current_time = timestamp;
-    let current_line_idx = model.status.line as usize;
+/// 1文字入力の処理 (GUI/TUI/UEFI用)
+pub fn process_char_input(mut model: TypingModel, c: char, timestamp: f64) -> Model {
+    model.status.current_word_input.push(c);
+    log_physical_input(&mut model, c, timestamp);
+    
+    // ライブ判定と進捗更新
+    let word_completed = update_progress(&mut model);
+    
+    if word_completed {
+        finalize_word(&mut model);
+        if is_typing_finished(&model) {
+            let backspace_count = model.status.backspace_count;
+            return Model::Result(ResultModel { 
+                typing_model: model, 
+                total_backspaces: backspace_count
+            });
+        }
+    }
+    Model::Typing(model)
+}
 
-    if model.content.lines.len() <= current_line_idx {
-        log("  [Result] Typing already finished. No action.");
-        return Model::Typing(model);
+/// 文字列入力の処理 (WASM用)
+pub fn process_string_input(mut model: TypingModel, new_input: String, timestamp: f64) -> Model {
+    // 差分を計算して物理入力をログに記録
+    let old_input = &model.status.current_word_input;
+    if new_input.len() > old_input.len() && new_input.starts_with(old_input) {
+        let added = &new_input[old_input.len()..];
+        for c in added.chars() {
+            log_physical_input(&mut model, c, timestamp);
+        }
+    } else if new_input.len() < old_input.len() && old_input.starts_with(&new_input) {
+         let removed_count = old_input.len() - new_input.len();
+         for _ in 0..removed_count {
+             log_physical_input(&mut model, '\u{08}', timestamp);
+         }
+         model.status.backspace_count += removed_count as u32;
+    } else {
+        // 複雑なIME操作（文節の削除など）の場合、差分追跡を諦めてリセットに近い形でログを取る
+        for _ in 0..old_input.len() {
+            log_physical_input(&mut model, '\u{08}', timestamp);
+        }
+        for c in new_input.chars() {
+            log_physical_input(&mut model, c, timestamp);
+        }
     }
 
-    if model
-        .user_input
-        .is_empty()
-        || model
-            .user_input
-            .last()
-            .and_then(|s| s.inputs.last())
-            .map_or(true, |i| (current_time - i.timestamp) > 1000.0)
-    {
-        model.user_input.push(TypingSession {
+    model.status.current_word_input = new_input;
+    
+    // ライブ判定と進捗更新
+    let word_completed = update_progress(&mut model);
+    
+    if word_completed {
+        finalize_word(&mut model);
+        if is_typing_finished(&model) {
+            let backspace_count = model.status.backspace_count;
+            return Model::Result(ResultModel { 
+                typing_model: model, 
+                total_backspaces: backspace_count 
+            });
+        }
+    }
+    
+    Model::Typing(model)
+}
+
+/// 物理的なキー入力をセッションログに記録する
+fn log_physical_input(model: &mut TypingModel, key: char, timestamp: f64) {
+    if model.user_input_sessions.is_empty() || model.user_input_sessions.last().unwrap().line != model.status.line {
+        model.user_input_sessions.push(TypingSession {
             line: model.status.line,
             inputs: Vec::new(),
         });
     }
+    model.user_input_sessions.last_mut().unwrap().inputs.push(TypingInput {
+        key,
+        timestamp,
+    });
+}
 
-    let mut is_correct = false;
-    let mut advance_chars = 0;
-    let mut is_romaji_in_progress = false;
+/// 現在の単語の目標となる「読み」文字列を取得する
+fn get_current_word_reading(model: &TypingModel) -> String {
+    if let Some(line) = model.content.lines.get(model.status.line as usize) {
+        if let Some(word) = line.words.get(model.status.word as usize) {
+            return word.segments.iter().map(|seg| match seg {
+                Segment::Plain { text } => text.clone(),
+                Segment::Annotated { reading, .. } => reading.clone(),
+            }).collect();
+        }
+    }
+    String::new()
+}
 
-    let line_content = &model.content.lines[current_line_idx];
-    let word_content = &line_content.words[model.status.word as usize];
+/// 入力文字列から、ターゲットの読みに最も長く一致する部分文字列を見つける
+/// 戻り値: (マッチした読み, マッチしなかった入力の余り, マッチした入力部分)
+fn find_best_romaji_match<'a>(user_input: &'a str, target_reading: &str, layout: &crate::model::Layout) -> (String, &'a str, &'a str) {
+    if user_input.is_empty() {
+        return (String::new(), "", "");
+    }
 
-    // 現在の単語内で、まだタイプされていない全てのセグメントの「読み」を連結してターゲット文字列を生成
-    let target_reading: String = word_content.segments[model.status.segment as usize..]
-        .iter()
-        .map(|seg| match seg {
-            Segment::Plain { text } => text.clone(),
-            Segment::Annotated { reading, .. } => reading.clone(),
-        })
-        .collect();
+    let mut matched_reading = String::new();
+    let mut last_successful_input_pos = 0;
+    let mut current_input_pos = 0;
     
-    // 現在の文字位置から始まる部分文字列を取得
-    let target_slice = target_reading.chars().skip(model.status.char_ as usize).collect::<String>();
+    while current_input_pos < user_input.len() {
+        let remaining_input = &user_input[current_input_pos..];
+        let mut found_romaji_match = false;
 
-    fn normalize_char(c: char) -> char {
-        let lower = c.to_lowercase().next().unwrap_or(c);
-        if lower >= 'ァ' && lower <= 'ヶ' {
-            core::char::from_u32(lower as u32 - 0x60).unwrap_or(lower)
-        } else {
-            lower
-        }
-    }
-
-    // 1. フリック入力などによる直接の文字一致を優先
-    if let Some(target_char) = target_slice.chars().next() {
-        if normalize_char(input) == normalize_char(target_char) {
-            is_correct = true;
-            advance_chars = 1;
-            model.status.unconfirmed.clear();
-        }
-    }
-
-    // 2. 直接一致しない場合、ローマ字入力として処理を試みる
-    if !is_correct {
-        let mut expect = Vec::new();
-        for (key, values) in model.layout.mapping.iter() {
-            if target_slice.starts_with(key) {
-                for v in values {
-                    if v.starts_with(&model.status.unconfirmed.iter().collect::<String>()) {
-                        expect.push((key.clone(), (*v).to_string()));
-                    }
-                }
-            }
-        }
-
-        if !expect.is_empty() {
-            let mut current_input_str = model.status.unconfirmed.iter().collect::<String>();
-            current_input_str.push(input);
-
-            for (key, val_str) in expect {
-                let lower_val_str = val_str.to_lowercase();
-                let lower_current_input_str = current_input_str.to_lowercase();
-
-                if lower_val_str == lower_current_input_str {
-                    is_correct = true;
-                    model.status.unconfirmed.clear();
-                    advance_chars = key.chars().count();
-                    break;
-                } else if lower_val_str.starts_with(&lower_current_input_str) {
-                    is_correct = true;
-                    is_romaji_in_progress = true;
-                    model.status.unconfirmed.push(input);
+        // 最長のローマ字表記を探す (例: "kya" を "k" "y" "a" より優先する)
+        for len in (1..=remaining_input.len()).rev() {
+            let romaji_candidate = &remaining_input[..len];
+            if let Some(kana) = layout.mapping.iter().find_map(|(k, vs)| {
+                if vs.iter().any(|v| v == romaji_candidate) { Some(k.clone()) } else { None }
+            }) {
+                let next_reading = matched_reading.clone() + &kana;
+                if target_reading.starts_with(&next_reading) {
+                    matched_reading = next_reading;
+                    current_input_pos += len;
+                    last_successful_input_pos = current_input_pos;
+                    found_romaji_match = true;
                     break;
                 }
             }
         }
+        
+        if !found_romaji_match {
+            // これ以上マッチするローマ字がない
+            break;
+        }
+    }
+    
+    let matched_input = &user_input[..last_successful_input_pos];
+    let remaining_input = &user_input[last_successful_input_pos..];
+    
+    (matched_reading, remaining_input, matched_input)
+}
+
+/// 現在の入力状況に応じて、モデルの進捗（セグメント、文字）と正誤を更新する
+/// 戻り値: 単語が完了したか否か
+fn update_progress(model: &mut TypingModel) -> bool {
+    let target_reading = get_current_word_reading(model);
+    if target_reading.is_empty() {
+        model.status.current_word_correctness.clear();
+        return true; // 空の単語は即完了
+    }
+    
+    let (matched_reading, remaining_input, matched_input) = find_best_romaji_match(&model.status.current_word_input, &target_reading, &model.layout);
+    
+    // 正誤配列を更新
+    model.status.current_word_correctness.clear();
+    for _ in 0..matched_input.len() {
+        model.status.current_word_correctness.push(TypingCorrectnessChar::Correct);
+    }
+    for _ in 0..remaining_input.len() {
+        model.status.current_word_correctness.push(TypingCorrectnessChar::Incorrect);
     }
 
-    // 3. 結果に基づいてモデルの状態を更新
-    if is_correct {
-        model.status.last_wrong_keydown = None;
-        if !is_romaji_in_progress {
-            let mut remaining_advance = advance_chars;
-            let mut current_seg_idx = model.status.segment as usize;
-            let mut current_char_idx = model.status.char_ as usize;
-
-            while remaining_advance > 0 && current_seg_idx < word_content.segments.len() {
-                let correctness_segment = &mut model.typing_correctness.lines[current_line_idx].words[model.status.word as usize].segments[current_seg_idx];
-                let current_seg_len = correctness_segment.chars.len();
-
-                let chars_to_advance_in_seg = (current_seg_len - current_char_idx).min(remaining_advance);
-
-                // 正誤情報を更新
-                for i in 0..chars_to_advance_in_seg {
-                    if correctness_segment.chars[current_char_idx + i] != TypingCorrectnessChar::Incorrect {
-                        correctness_segment.chars[current_char_idx + i] = TypingCorrectnessChar::Correct;
+    // UI上のカーソル位置を進める
+    let mut chars_to_advance = matched_reading.chars().count();
+    let mut seg_idx = 0;
+    let mut char_idx = 0;
+    if let Some(line_content) = model.content.lines.get(model.status.line as usize) {
+        if let Some(word_content) = line_content.words.get(model.status.word as usize) {
+            'outer: for (i, seg) in word_content.segments.iter().enumerate() {
+                let seg_reading = match seg {
+                    Segment::Plain { text } => text,
+                    Segment::Annotated { reading, .. } => reading,
+                };
+                for (j, _) in seg_reading.chars().enumerate() {
+                    if chars_to_advance == 0 {
+                        seg_idx = i;
+                        char_idx = j;
+                        break 'outer;
                     }
+                    chars_to_advance -= 1;
                 }
-
-                remaining_advance -= chars_to_advance_in_seg;
-                current_char_idx += chars_to_advance_in_seg;
-
-                if current_char_idx >= current_seg_len {
-                    current_seg_idx += 1;
-                    current_char_idx = 0;
+                if chars_to_advance == 0 {
+                    seg_idx = i + 1;
+                    char_idx = 0;
+                    break;
                 }
             }
-            model.status.segment = current_seg_idx as i32;
-            model.status.char_ = current_char_idx as i32;
-        }
-    } else {
-        model.status.last_wrong_keydown = Some(input);
-        model.status.unconfirmed.clear();
-        let correctness_segment = &mut model.typing_correctness.lines[current_line_idx].words[model.status.word as usize].segments[model.status.segment as usize];
-        if let Some(c) = correctness_segment.chars.get_mut(model.status.char_ as usize) {
-            *c = TypingCorrectnessChar::Incorrect;
+            if chars_to_advance > 0 { // 単語の最後まで到達
+                 seg_idx = word_content.segments.len();
+                 char_idx = 0;
+            }
         }
     }
+    model.status.segment = seg_idx as i32;
+    model.status.char_ = char_idx as i32;
+    
+    // 単語完了チェック
+    matched_reading == target_reading && remaining_input.is_empty()
+}
 
-    model
-        .user_input
-        .last_mut()
-        .unwrap()
-        .inputs
-        .push(TypingInput {
-            key: input,
-            timestamp,
-            is_correct,
-        });
+/// 単語の入力を完了させ、状態を更新する
+fn finalize_word(model: &mut TypingModel) {
+    let is_correct = model.status.current_word_correctness.iter().all(|c| *c == TypingCorrectnessChar::Correct);
 
-    // 4. セグメント、単語、行、全体の完了チェック
-    let mut is_finished = false;
-    if model.status.segment as usize >= word_content.segments.len() {
-        model.status.segment = 0;
-        model.status.char_ = 0;
-        model.status.word += 1;
+    // 1. 正誤記録を確定
+    if let Some(line) = model.typing_correctness.lines.get_mut(model.status.line as usize) {
+        if let Some(word) = line.words.get_mut(model.status.word as usize) {
+            for seg in word.segments.iter_mut() {
+                for c in seg.chars.iter_mut() {
+                    *c = if is_correct { TypingCorrectnessChar::Correct } else { TypingCorrectnessChar::Incorrect };
+                }
+            }
+        }
+    }
+    
+    // 2. 次の単語に進む
+    model.status.word += 1;
+    model.status.segment = 0;
+    model.status.char_ = 0;
+    model.status.current_word_input.clear();
+    model.status.current_word_correctness.clear();
+    
+    // 3. 行完了判定
+    if let Some(line_content) = model.content.lines.get(model.status.line as usize) {
         if model.status.word as usize >= line_content.words.len() {
             model.status.word = 0;
             model.status.line += 1;
-            if model.status.line as usize >= model.content.lines.len() {
-                is_finished = true;
-            }
         }
     }
+}
 
-    log(&format!(
-        "  [Result] is_correct: {}, is_finished: {}",
-        is_correct, is_finished
-    ));
-    log(&format!(
-        "  [State After] line: {}, word: {}, seg: {}, char: {}, unconfirmed: {:?}",
-        model.status.line, model.status.word, model.status.segment, model.status.char_, model.status.unconfirmed
-    ));
-
-    if is_finished {
-        Model::Result(ResultModel {
-            typing_model: model,
-        })
-    } else {
-        Model::Typing(model)
-    }
+/// タイピングが全て完了したかチェック
+fn is_typing_finished(model: &TypingModel) -> bool {
+    model.status.line as usize >= model.content.lines.len()
 }
 
 pub fn create_typing_correctness_model(content: &Content) -> TypingCorrectnessContent {
@@ -261,55 +313,70 @@ impl TypingMetrics {
             total_time: 0.0,
             accuracy: 0.0,
             speed: 0.0,
+            backspace_count: 0,
         }
     }
 
     fn calculate(&mut self) {
-        if self.type_count + self.miss_count > 0 {
-            self.accuracy = self.type_count as f64 / (self.type_count + self.miss_count) as f64;
+        let correctly_typed = self.type_count - self.miss_count;
+        if self.type_count > 0 {
+            self.accuracy = correctly_typed as f64 / self.type_count as f64;
+            self.accuracy = self.accuracy.max(0.0);
         }
         if self.total_time > 0.0 {
-            self.speed = (self.type_count as f64) / (self.total_time / 1000.0);
+            self.speed = (correctly_typed as f64) / (self.total_time / 1000.0);
         }
     }
 }
 
 pub fn calculate_total_metrics(model: &TypingModel) -> TypingMetrics {
     let mut metrics = TypingMetrics::new();
-    let mut total_type_count = 0;
-    let mut total_miss_count = 0;
+    metrics.backspace_count = model.status.backspace_count;
     
-    let mut first_input_time = f64::MAX;
-    let mut last_input_time = f64::MIN;
-
-    for session in &model.user_input {
-        if session.inputs.is_empty() { continue; }
-
-        if let Some(first) = session.inputs.first() {
-            if first.timestamp < first_input_time {
-                first_input_time = first.timestamp;
-            }
-        }
-        if let Some(last) = session.inputs.last() {
-            if last.timestamp > last_input_time {
-                last_input_time = last.timestamp;
-            }
-        }
-
-        for input in &session.inputs {
-            if input.is_correct {
-                total_type_count += 1;
-            } else {
-                total_miss_count +=1;
-            }
-        }
+    if model.user_input_sessions.is_empty() {
+        return metrics;
     }
-    
-    metrics.type_count = total_type_count;
-    metrics.miss_count = total_miss_count;
+
+    let first_input_time = model.user_input_sessions.iter().flat_map(|s| s.inputs.first()).map(|i| i.timestamp).fold(f64::MAX, f64::min);
+    let last_input_time = model.user_input_sessions.iter().flat_map(|s| s.inputs.last()).map(|i| i.timestamp).fold(f64::MIN, f64::max);
+
     if last_input_time > first_input_time {
         metrics.total_time = last_input_time - first_input_time;
     }
+    
+    // 総物理タイプ数 (Backspaceを除く)
+    metrics.type_count = model.user_input_sessions.iter()
+        .flat_map(|s| s.inputs.iter())
+        .filter(|i| i.key != '\u{08}')
+        .count() as i32;
+
+    // 入力履歴をシミュレートして最終的な入力文字列を構築
+    let mut effective_inputs: Vec<char> = Vec::new();
+    for session in &model.user_input_sessions {
+        for input in &session.inputs {
+            if input.key == '\u{08}' {
+                effective_inputs.pop();
+            } else {
+                effective_inputs.push(input.key);
+            }
+        }
+    }
+    let final_input_str: String = effective_inputs.iter().collect();
+
+    // 全ての目標テキスト（読み）を連結
+    let total_target_reading: String = model.content.lines.iter()
+        .flat_map(|line| line.words.iter())
+        .flat_map(|word| word.segments.iter())
+        .map(|seg| match seg {
+            Segment::Plain { text } => text.clone(),
+            Segment::Annotated { reading, .. } => reading.clone(),
+        }).collect();
+
+    // 最終的な入力から、どれだけ正しく読みに変換できたかを計算
+    let (correctly_converted_reading, _, _) = find_best_romaji_match(&final_input_str, &total_target_reading, &model.layout);
+    let correctly_typed_chars_count = correctly_converted_reading.chars().count() as i32;
+    
+    metrics.miss_count = metrics.type_count - correctly_typed_chars_count;
 
     metrics.calculate();
     metrics

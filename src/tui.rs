@@ -538,18 +538,3 @@ fn handle_input(app: &mut App) -> std::io::Result<()> {
     }
     Ok(())
 }
-
-/// シンプルモード用にテキストを描画するヘルパー関数
-#[cfg(not(feature = "uefi"))]
-fn draw_simple_typing_text(
-    buffer: &mut [Cell],
-    text: &str,
-    anchor: Anchor,
-    shift: Shift,
-    align: Align,
-    width: usize,
-    height: usize,
-    color: Color,
-) {
-    draw_plain_text(buffer, text, anchor, shift, align, width, height, color);
-}

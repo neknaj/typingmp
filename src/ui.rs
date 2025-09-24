@@ -419,20 +419,16 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
         // --- 上段（目標テキスト）の構築 ---
         let mut upper_segments = Vec::new();
         for (word_idx, word) in content_line.words.iter().enumerate() {
-            for (seg_idx, seg) in word.segments.iter().enumerate() {
-                // セグメントの状態（色）を、単語単位の状態で決定する
+            for (_seg_idx, seg) in word.segments.iter().enumerate() {
                 let state = if (word_idx as i32) < status.word {
-                    // 完了した単語は、その単語全体の正誤に基づいてハイライト
                     if is_word_correct(&correctness_line.words[word_idx]) {
                         UpperSegmentState::Correct
                     } else {
                         UpperSegmentState::Incorrect
                     }
                 } else if (word_idx as i32) == status.word {
-                    // 現在入力中の単語は、すべてのセグメントをアクティブとしてハイライト
                     UpperSegmentState::Active
                 } else {
-                    // これから入力する単語はペンディング
                     UpperSegmentState::Pending
                 };
 
@@ -456,6 +452,7 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
 
         // --- 下段（入力テキスト）の構築 ---
         let mut lower_segments = Vec::new();
+        // 完了済みの単語を描画
         for word_idx in 0..(status.word as usize) {
             let word = &content_line.words[word_idx];
             let correctness_word = &correctness_line.words[word_idx];
@@ -471,50 +468,17 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
                 });
             }
         }
-
-        if let Some(active_word_content) = content_line.words.get(status.word as usize) {
-            let active_correctness_word = &correctness_line.words[status.word as usize];
-            for seg_idx in 0..(status.segment as usize) {
-                 let seg = &active_word_content.segments[seg_idx];
-                 let (base_text, ruby_text) = match seg {
-                    Segment::Plain { text } => (text.clone(), None),
-                    Segment::Annotated { base, reading } => (base.clone(), Some(reading.clone())),
-                };
-                lower_segments.push(LowerTypingSegment::Completed {
-                    base_text,
-                    ruby_text,
-                    is_correct: is_segment_correct(&active_correctness_word.segments[seg_idx]),
-                });
-            }
-
-            if let Some(active_seg_content) = active_word_content.segments.get(status.segment as usize) {
-                let reading_text = match active_seg_content {
-                    Segment::Plain { text } => text,
-                    Segment::Annotated { reading, .. } => reading,
-                };
-                let mut active_elements = Vec::new();
-                
-                let correctness_seg = &active_correctness_word.segments[status.segment as usize];
-                for (char_idx, character) in reading_text.chars().enumerate().take(status.char_ as usize) {
-                    let is_correct = correctness_seg.chars[char_idx] != TypingCorrectnessChar::Incorrect;
-                    active_elements.push(ActiveLowerElement::Typed { character, is_correct });
-                }
-                
-                if let Some(wrong_char) = status.last_wrong_keydown {
-                    active_elements.push(ActiveLowerElement::Cursor);
-                    active_elements.push(ActiveLowerElement::LastIncorrectInput(wrong_char));
-                } else {
-                    if !status.unconfirmed.is_empty() {
-                        let unconfirmed_text: String = status.unconfirmed.iter().collect();
-                        active_elements.push(ActiveLowerElement::UnconfirmedInput(unconfirmed_text));
-                    }
-                    active_elements.push(ActiveLowerElement::Cursor);
-                }
-
-                lower_segments.push(LowerTypingSegment::Active { elements: active_elements });
-            }
-        }
         
+        // 現在入力中の単語を描画
+        let mut active_elements = Vec::new();
+        for (i, c) in status.current_word_input.chars().enumerate() {
+            let is_correct = status.current_word_correctness.get(i)
+                .map_or(false, |corr| *corr == TypingCorrectnessChar::Correct);
+            active_elements.push(ActiveLowerElement::Typed { character: c, is_correct });
+        }
+        active_elements.push(ActiveLowerElement::Cursor);
+        lower_segments.push(LowerTypingSegment::Active { elements: active_elements });
+
         let lower_y = (height as f32 / 2.0) + base_pixel_font_size * LOWER_ROW_Y_OFFSET_FACTOR;
         render_list.push(Renderable::TypingLower {
             segments: lower_segments,
@@ -543,20 +507,21 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
         }
         
         // --- ステータスパネル ---
-        let metrics = typing::calculate_total_metrics(model);
-        let time = metrics.total_time / 1000.0;
+        let temp_metrics = typing::calculate_total_metrics(model);
+        let time = temp_metrics.total_time / 1000.0;
         let status_items = vec![
-            format!("Speed: {:.2} KPS", metrics.speed),
-            format!("Accuracy: {:.1}%", metrics.accuracy * 100.0),
-            format!("Misses: {}", metrics.miss_count),
+            format!("Speed: {:.2} KPS", temp_metrics.speed),
+            format!("Accuracy: {:.1}%", temp_metrics.accuracy * 100.0),
+            format!("Misses: {}", temp_metrics.miss_count),
             format!("Time: {:02.0}:{:05.2}", (time / 60.0).floor(), time % 60.0),
+            format!("Backspaces: {}", status.backspace_count),
         ];
 
         for (i, item) in status_items.iter().enumerate() {
             render_list.push(Renderable::Text {
                 text: item.clone(),
                 anchor: Anchor::BottomLeft,
-                shift: Shift { x: 0.02, y: -0.16 + (i as f32 * 0.04)},
+                shift: Shift { x: 0.02, y: -0.20 + (i as f32 * 0.04)},
                 align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Bottom },
                 font_size: FontSize::WindowHeight(0.04),
                 color: 0xFF_DDDDDD,
@@ -581,6 +546,7 @@ fn build_result_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
         let result_texts = vec![
             format!("Typed Chars: {}", metrics.type_count),
             format!("Misses: {}", metrics.miss_count),
+            format!("Backspaces: {}", result.total_backspaces),
             format!("Time: {:.2}s", metrics.total_time / 1000.0),
             format!("Accuracy: {:.2}%", metrics.accuracy * 100.0),
             format!("Speed: {:.2} chars/sec", metrics.speed),

@@ -23,10 +23,10 @@ pub fn run() -> Status {
     let (width, height) = mode_info.resolution();
 
     // 両方のフォントを読み込む
-    let yuji_font_data: &[u8] = include_bytes!("../fonts/YujiSyuku-Regular.ttf");
+    let yuji_font_data: &'static [u8] = include_bytes!("../fonts/YujiSyuku-Regular.ttf");
     let yuji_font = FontRef::try_from_slice(yuji_font_data).expect("Failed to load Yuji Syuku font");
 
-    let noto_font_data: &[u8] = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
+    let noto_font_data: &'static [u8] = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
     let noto_font = FontRef::try_from_slice(noto_font_data).expect("Failed to load Noto Serif JP font");
 
     // Fonts構造体を初期化
@@ -67,9 +67,9 @@ pub fn run() -> Status {
             match key {
                 Key::Printable(c) => {
                     let ch: char = c.into();
-                    if ch == '\u{0008}' {
+                    if ch == '\u{0008}' { // Backspace
                         app.on_event(AppEvent::Backspace);
-                    } else if ch == '\r' {
+                    } else if ch == '\r' { // Enter
                         app.on_event(AppEvent::Enter);
                     } else {
                         app.on_event(AppEvent::Char {

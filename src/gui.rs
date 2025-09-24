@@ -9,9 +9,14 @@ use crate::ui::{self, ActiveLowerElement, LowerTypingSegment, Renderable, UpperS
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
 use ab_glyph::FontRef;
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
-use minifb::{Key, KeyRepeat, Window, WindowOptions};
+use minifb::{Key, KeyRepeat, Window, WindowOptions, InputCallback};
 #[cfg(not(feature = "uefi"))]
 use std::time::Instant;
+#[cfg(not(feature = "uefi"))]
+use std::cell::RefCell;
+#[cfg(not(feature = "uefi"))]
+use std::rc::Rc;
+
 
 // ... (Windows固有の処理は変更なし)
 #[cfg(all(target_os = "windows", not(feature = "uefi")))]
@@ -35,14 +40,32 @@ fn rgb_to_colorref(r: u8, g: u8, b: u8) -> u32 {
     ((b as u32) << 16) | ((g as u32) << 8) | (r as u32)
 }
 
+
+#[cfg(not(feature = "uefi"))]
+struct AppInputHandler {
+    app: Rc<RefCell<App<'static>>>,
+}
+
+#[cfg(not(feature = "uefi"))]
+impl InputCallback for AppInputHandler {
+    fn add_char(&mut self, c: u32) {
+        if let Some(character) = std::char::from_u32(c) {
+             self.app.borrow_mut().on_event(AppEvent::Char {
+                c: character,
+                timestamp: crate::timestamp::now(),
+            });
+        }
+    }
+}
+
 /// GUIアプリケーションのメイン関数
 #[cfg(not(feature = "uefi"))]
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     // フォントの読み込み
-    let yuji_font_data = include_bytes!("../fonts/YujiSyuku-Regular.ttf");
+    let yuji_font_data: &'static [u8] = include_bytes!("../fonts/YujiSyuku-Regular.ttf");
     let yuji_font = FontRef::try_from_slice(yuji_font_data).map_err(|_| "Failed to load Yuji Syuku font")?;
     
-    let noto_font_data = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
+    let noto_font_data: &'static [u8] = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
     let noto_font = FontRef::try_from_slice(noto_font_data).map_err(|_| "Failed to load Noto Serif JP font")?;
 
     let fonts = Fonts {
@@ -60,12 +83,15 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     window.set_target_fps(60);
 
-    let mut app = App::new(fonts); // Appにフォントを渡す
-    app.on_event(AppEvent::Start);
+    let app = Rc::new(RefCell::new(App::new(fonts)));
+    app.borrow_mut().on_event(AppEvent::Start);
+
+    let input_handler = AppInputHandler { app: app.clone() };
+    window.set_input_callback(Box::new(input_handler));
 
     let mut last_frame_time = Instant::now();
 
-    while window.is_open() && !app.should_quit {
+    while window.is_open() && !app.borrow().should_quit {
         let (new_width, new_height) = window.get_size();
         if new_width != width || new_height != height {
             width = new_width;
@@ -76,13 +102,17 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         let delta_time = now_time.duration_since(last_frame_time).as_millis() as f64;
         last_frame_time = now_time;
 
-        handle_input(&mut window, &mut app);
+        handle_input(&mut window, &mut app.borrow_mut());
 
-        app.update(width, height, delta_time);
+        app.borrow_mut().update(width, height, delta_time);
 
         let mut pixel_buffer = vec![0u32; width * height];
-        let current_font = app.get_current_font(); // 現在のフォントを取得
-        let render_list = ui::build_ui(&app, current_font, width, height);
+        
+        // 描画処理は不変借用で行う
+        let app_borrow = app.borrow();
+        let current_font = app_borrow.get_current_font();
+        let render_list = ui::build_ui(&app_borrow, current_font, width, height);
+
 
         for item in render_list {
             match item {
@@ -178,76 +208,26 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(not(feature = "uefi"))]
 fn handle_input(window: &mut Window, app: &mut App) {
-    if window.is_key_pressed(Key::Escape, KeyRepeat::No) {
-        app.on_event(AppEvent::Escape);
-    }
-    if window.is_key_pressed(Key::Tab, KeyRepeat::No) {
-        app.on_event(AppEvent::CycleTuiMode);
-    }
+    // 繰り返しを伴うキーイベント
     for key in window.get_keys_pressed(KeyRepeat::Yes) {
         match key {
+            Key::Backspace => app.on_event(AppEvent::Backspace),
+            _ => {},
+        }
+    }
+    // 繰り返しを伴わないキーイベント
+    for key in window.get_keys_pressed(KeyRepeat::No) {
+        match key {
+            Key::Escape => app.on_event(AppEvent::Escape),
+            Key::Tab => app.on_event(AppEvent::CycleTuiMode),
             Key::Up => app.on_event(AppEvent::Up),
             Key::Down => app.on_event(AppEvent::Down),
-            Key::Backspace => app.on_event(AppEvent::Backspace),
             Key::Enter => app.on_event(AppEvent::Enter),
-            _ => {
-                if let Some(char_key) = key_to_char(key, window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift)) {
-                    app.on_event(AppEvent::Char { c: char_key, timestamp: crate::timestamp::now() });
-                }
-            }
+            _ => {}
         }
     }
 }
 
-#[cfg(not(feature = "uefi"))]
-fn key_to_char(key: Key, is_shift: bool) -> Option<char> {
-    match (key, is_shift) {
-        (Key::A, false) => Some('a'), (Key::A, true) => Some('A'),
-        (Key::B, false) => Some('b'), (Key::B, true) => Some('B'),
-        (Key::C, false) => Some('c'), (Key::C, true) => Some('C'),
-        (Key::D, false) => Some('d'), (Key::D, true) => Some('D'),
-        (Key::E, false) => Some('e'), (Key::E, true) => Some('E'),
-        (Key::F, false) => Some('f'), (Key::F, true) => Some('F'),
-        (Key::G, false) => Some('g'), (Key::G, true) => Some('G'),
-        (Key::H, false) => Some('h'), (Key::H, true) => Some('H'),
-        (Key::I, false) => Some('i'), (Key::I, true) => Some('I'),
-        (Key::J, false) => Some('j'), (Key::J, true) => Some('J'),
-        (Key::K, false) => Some('k'), (Key::K, true) => Some('K'),
-        (Key::L, false) => Some('l'), (Key::L, true) => Some('L'),
-        (Key::M, false) => Some('m'), (Key::M, true) => Some('M'),
-        (Key::N, false) => Some('n'), (Key::N, true) => Some('N'),
-        (Key::O, false) => Some('o'), (Key::O, true) => Some('O'),
-        (Key::P, false) => Some('p'), (Key::P, true) => Some('P'),
-        (Key::Q, false) => Some('q'), (Key::Q, true) => Some('Q'),
-        (Key::R, false) => Some('r'), (Key::R, true) => Some('R'),
-        (Key::S, false) => Some('s'), (Key::S, true) => Some('S'),
-        (Key::T, false) => Some('t'), (Key::T, true) => Some('T'),
-        (Key::U, false) => Some('u'), (Key::U, true) => Some('U'),
-        (Key::V, false) => Some('v'), (Key::V, true) => Some('V'),
-        (Key::W, false) => Some('w'), (Key::W, true) => Some('W'),
-        (Key::X, false) => Some('x'), (Key::X, true) => Some('X'),
-        (Key::Y, false) => Some('y'), (Key::Y, true) => Some('Y'),
-        (Key::Z, false) => Some('z'), (Key::Z, true) => Some('Z'),
-        (Key::Key0, false) => Some('0'), (Key::Key0, true) => None,
-        (Key::Key1, false) => Some('1'), (Key::Key1, true) => Some('!'),
-        (Key::Key2, false) => Some('2'), (Key::Key2, true) => Some('"'),
-        (Key::Key3, false) => Some('3'), (Key::Key3, true) => Some('#'),
-        (Key::Key4, false) => Some('4'), (Key::Key4, true) => Some('$'),
-        (Key::Key5, false) => Some('5'), (Key::Key5, true) => Some('%'),
-        (Key::Key6, false) => Some('6'), (Key::Key6, true) => Some('&'),
-        (Key::Key7, false) => Some('7'), (Key::Key7, true) => Some('\''),
-        (Key::Key8, false) => Some('8'), (Key::Key8, true) => Some('('),
-        (Key::Key9, false) => Some('9'), (Key::Key9, true) => Some(')'),
-        (Key::Space, _) => Some(' '),
-        (Key::Comma, false) => Some(','), (Key::Comma, true) => Some('<'),
-        (Key::Period, false) => Some('.'), (Key::Period, true) => Some('>'),
-        (Key::Slash, false) => Some('/'), (Key::Slash, true) => Some('?'),
-        (Key::Semicolon, false) => Some(';'), (Key::Semicolon, true) => Some(':'),
-        (Key::Equal, false) => Some('='), (Key::Equal, true) => Some('+'),
-        (Key::Minus, false) => Some('-'), (Key::Minus, true) => Some('_'),
-        _ => None,
-    }
-}
 
 #[cfg(feature = "uefi")]
 pub fn run() -> Result<(), Box<dyn core::error::Error>> {
