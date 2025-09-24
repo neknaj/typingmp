@@ -420,17 +420,19 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
         let mut upper_segments = Vec::new();
         for (word_idx, word) in content_line.words.iter().enumerate() {
             for (seg_idx, seg) in word.segments.iter().enumerate() {
-                 let state = if (word_idx as i32) < status.word {
-                    if is_word_correct(&correctness_line.words[word_idx]) { UpperSegmentState::Correct } else { UpperSegmentState::Incorrect }
-                } else if (word_idx as i32) == status.word {
-                    if (seg_idx as i32) < status.segment {
-                         if is_segment_correct(&correctness_line.words[word_idx].segments[seg_idx]) { UpperSegmentState::Correct } else { UpperSegmentState::Incorrect }
-                    } else if (seg_idx as i32) == status.segment {
-                        UpperSegmentState::Active
+                // セグメントの状態（色）を、単語単位の状態で決定する
+                let state = if (word_idx as i32) < status.word {
+                    // 完了した単語は、その単語全体の正誤に基づいてハイライト
+                    if is_word_correct(&correctness_line.words[word_idx]) {
+                        UpperSegmentState::Correct
                     } else {
-                        UpperSegmentState::Pending
+                        UpperSegmentState::Incorrect
                     }
+                } else if (word_idx as i32) == status.word {
+                    // 現在入力中の単語は、すべてのセグメントをアクティブとしてハイライト
+                    UpperSegmentState::Active
                 } else {
+                    // これから入力する単語はペンディング
                     UpperSegmentState::Pending
                 };
 
