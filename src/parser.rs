@@ -234,23 +234,25 @@ mod tests {
 
     #[test]
     fn test_simple_separation() {
-        let line = "(私/わたし)が(彼/かれ)を";
+        // annotatedとplain、annotated同士がハイフンなしで区切られる最も基本的なケース
+        let line = "(秋/あき)の(田/た)の";
         let expected = vec![
-            Word { segments: vec![Segment::Annotated { base: "私".to_string(), reading: "わたし".to_string() }] },
-            Word { segments: vec![Segment::Plain { text: "が".to_string() }] },
-            Word { segments: vec![Segment::Annotated { base: "彼".to_string(), reading: "かれ".to_string() }] },
-            Word { segments: vec![Segment::Plain { text: "を".to_string() }] },
+            Word { segments: vec![Segment::Annotated { base: "秋".to_string(), reading: "あき".to_string() }] },
+            Word { segments: vec![Segment::Plain { text: "の".to_string() }] },
+            Word { segments: vec![Segment::Annotated { base: "田".to_string(), reading: "た".to_string() }] },
+            Word { segments: vec![Segment::Plain { text: "の".to_string() }] },
         ];
         assert_eq!(parse_line_to_words(line), expected);
     }
 
     #[test]
     fn test_okurigana_connection() {
-        let line = "(走/はし)-る";
+        // annotatedとplainがハイフンで連結され、1つの単語になるケース（送り仮名）
+        let line = "(悲/かな)-しき";
         let expected = vec![
             Word { segments: vec![
-                Segment::Annotated { base: "走".to_string(), reading: "はし".to_string() },
-                Segment::Plain { text: "る".to_string() },
+                Segment::Annotated { base: "悲".to_string(), reading: "かな".to_string() },
+                Segment::Plain { text: "しき".to_string() },
             ] },
         ];
         assert_eq!(parse_line_to_words(line), expected);
@@ -258,12 +260,13 @@ mod tests {
 
     #[test]
     fn test_multiple_connections() {
-        let line = "plain-(annotated/a)-plain";
+        // 複数のセグメント（plain, annotated, plain）がハイフンで連結されるケース
+        let line = "ふみ-(分/わ)-け"; // 5番「奥山に紅葉踏み分け」より
         let expected = vec![
             Word { segments: vec![
-                Segment::Plain { text: "plain".to_string() },
-                Segment::Annotated { base: "annotated".to_string(), reading: "a".to_string() },
-                Segment::Plain { text: "plain".to_string() },
+                Segment::Plain { text: "ふみ".to_string() },
+                Segment::Annotated { base: "分".to_string(), reading: "わ".to_string() },
+                Segment::Plain { text: "け".to_string() },
             ] },
         ];
         assert_eq!(parse_line_to_words(line), expected);
@@ -271,93 +274,96 @@ mod tests {
     
     #[test]
     fn test_space_as_word() {
-        let line = "plain1 plain2";
+        // スペースが独立した単語として扱われるケース
+        let line = "(春/はる) (夏/なつ)";
         let expected = vec![
-            Word { segments: vec![Segment::Plain { text: "plain1".to_string() }] },
+            Word { segments: vec![Segment::Annotated { base: "春".to_string(), reading: "はる".to_string() }] },
             Word { segments: vec![Segment::Plain { text: " ".to_string() }] },
-            Word { segments: vec![Segment::Plain { text: "plain2".to_string() }] },
+            Word { segments: vec![Segment::Annotated { base: "夏".to_string(), reading: "なつ".to_string() }] },
         ];
         assert_eq!(parse_line_to_words(line), expected);
     }
 
     #[test]
     fn test_separator_as_delimiter() {
-        let line = "plain1/plain2";
+        // スラッシュ `/` が単語の区切り文字として機能するケース
+        let line = "とま/を/あらみ"; // 1番「庵の苫をあらみ」より
         let expected = vec![
-            Word { segments: vec![Segment::Plain { text: "plain1".to_string() }] },
-            Word { segments: vec![Segment::Plain { text: "plain2".to_string() }] },
+            Word { segments: vec![Segment::Plain { text: "とま".to_string() }] },
+            Word { segments: vec![Segment::Plain { text: "を".to_string() }] },
+            Word { segments: vec![Segment::Plain { text: "あらみ".to_string() }] },
         ];
         assert_eq!(parse_line_to_words(line), expected);
     }
 
     #[test]
     fn test_escape_parentheses() {
-        let line = "\\(plain\\)";
+        // バックスラッシュで括弧をエスケープし、ただの文字として扱うケース
+        let line = "\\(ここまで\\)";
         let expected = vec![
-            Word { segments: vec![Segment::Plain { text: "(plain)".to_string() }] },
+            Word { segments: vec![Segment::Plain { text: "(ここまで)".to_string() }] },
         ];
         assert_eq!(parse_line_to_words(line), expected);
     }
 
     #[test]
     fn test_escape_hyphen() {
-        // エスケープされたハイフンは接続子ではなく、前のセグメントの一部になる
-        // その後の `(annotated)` は接続子がないため、新しい単語になる
-        let line = "plain\\-(annotated/a)";
+        // バックスラッシュでハイフンをエスケープし、連結子ではなく文字として扱うケース
+        // 「コピー機」のように、エスケープされたハイフンは前のセグメントの一部になる
+        let line = "コピー\\-(機/き)";
         let expected = vec![
-            Word { segments: vec![Segment::Plain { text: "plain-".to_string() }] },
-            Word { segments: vec![Segment::Annotated { base: "annotated".to_string(), reading: "a".to_string() }] },
+            Word { segments: vec![Segment::Plain { text: "コピー-".to_string() }] },
+            Word { segments: vec![Segment::Annotated { base: "機".to_string(), reading: "き".to_string() }] },
         ];
         assert_eq!(parse_line_to_words(line), expected);
     }
 
     #[test]
     fn test_escape_inside_annotated() {
-        let line = "(base\\/part/read\\)ing)";
+        // annotated内部の特殊文字（スラッシュ）をエスケープするケース
+        let line = "(A\\/B/えーぶんのびー)";
         let expected = vec![
-            Word { segments: vec![Segment::Annotated { base: "base/part".to_string(), reading: "read)ing".to_string() }] },
+            Word { segments: vec![Segment::Annotated { base: "A/B".to_string(), reading: "えーぶんのびー".to_string() }] },
         ];
         assert_eq!(parse_line_to_words(line), expected);
     }
 
     #[test]
     fn test_unconnected_hyphen() {
-        // 前後にセグメントがないハイフンは、それ自体が単語になる
-        let line = "word1/-/(word2/w2)";
+        // 前後が区切り文字で、連結の対象にならないハイフンが、それ自体で単語になるケース
+        let line = "(東京/とうきょう)/-/(大阪/おおさか)";
         let expected = vec![
-            Word { segments: vec![Segment::Plain { text: "word1".to_string() }] },
+            Word { segments: vec![Segment::Annotated { base: "東京".to_string(), reading: "とうきょう".to_string() }] },
             Word { segments: vec![Segment::Plain { text: "-".to_string() }] },
-            Word { segments: vec![Segment::Annotated { base: "word2".to_string(), reading: "w2".to_string() }] },
+            Word { segments: vec![Segment::Annotated { base: "大阪".to_string(), reading: "おおさか".to_string() }] },
         ];
         assert_eq!(parse_line_to_words(line), expected);
     }
 
     #[test]
     fn test_trailing_hyphen() {
-        // 末尾のハイフンは、前のセグメントに接続する相手がいないため、
-        // 直前の単語に追加されるのではなく、独立した単語になる
-        let line = "(word/w)-";
+        // 行末など、後ろに連結する相手がいないハイフンが、独立した単語になるケース
+        let line = "(長/なが)-";
         let expected = vec![
-             Word { segments: vec![Segment::Annotated { base: "word".to_string(), reading: "w".to_string() }] },
-             Word { segments: vec![Segment::Plain { text: "-".to_string() }] },
+                Word { segments: vec![Segment::Annotated { base: "長".to_string(), reading: "なが".to_string() }] },
+                Word { segments: vec![Segment::Plain { text: "-".to_string() }] },
         ];
         assert_eq!(parse_line_to_words(line), expected);
     }
 
     #[test]
     fn test_user_provided_complex_example() {
-        let line = "(私/わたし)が(走/はし)-り-(出/だ)-す/と/、";
+        // 複数の連結と区切りが混在する、百人一首からの実践的なケース
+        // 「思ひ絶え」を1単語として扱うため、すべてのセグメント間をハイフンで連結する
+        let line = "(思/おも)-ひ-(絶/た)-え/なむ"; // 70番「思ひ絶えなむ」より
         let expected = vec![
-            Word { segments: vec![Segment::Annotated { base: "私".to_string(), reading: "わたし".to_string() }] },
-            Word { segments: vec![Segment::Plain { text: "が".to_string() }] },
             Word { segments: vec![
-                Segment::Annotated { base: "走".to_string(), reading: "はし".to_string() },
-                Segment::Plain { text: "り".to_string() },
-                Segment::Annotated { base: "出".to_string(), reading: "だ".to_string() },
-                Segment::Plain { text: "す".to_string() },
+                Segment::Annotated { base: "思".to_string(), reading: "おも".to_string() },
+                Segment::Plain { text: "ひ".to_string() },
+                Segment::Annotated { base: "絶".to_string(), reading: "た".to_string() },
+                Segment::Plain { text: "え".to_string() },
             ]},
-            Word { segments: vec![Segment::Plain { text: "と".to_string() }] },
-            Word { segments: vec![Segment::Plain { text: "、".to_string() }] },
+            Word { segments: vec![Segment::Plain { text: "なむ".to_string() }] },
         ];
         assert_eq!(parse_line_to_words(line), expected);
     }
