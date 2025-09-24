@@ -22,7 +22,7 @@ use std::string::{String, ToString};
 
 use crate::app::{App, AppState, FontChoice};
 use crate::model::{Segment, TypingCorrectnessChar, TypingCorrectnessSegment, TypingCorrectnessWord};
-use crate::renderer::gui_renderer;
+use crate::renderer::{calculate_pixel_font_size, gui_renderer};
 use crate::typing; // For calculate_total_metrics
 use ab_glyph::FontRef; // FontRefを渡すために必要
 
@@ -399,6 +399,19 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
     render_list.push(Renderable::Background { gradient });
 
     if let Some(model) = &app.typing_model {
+        // --- レイアウト調整値 ---
+        let v_offset = 0.08; // UI全体を下にずらす割合
+
+        // --- 問題タイトル表示 ---
+        render_list.push(Renderable::BigText {
+            text: model.content.title.to_string(),
+            anchor: Anchor::TopCenter,
+            shift: Shift { x: 0.0, y: 0.01 },
+            align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
+            font_size: FontSize::WindowHeight(0.12),
+            color: ACTIVE_COLOR,
+        });
+
         let line_idx = model.status.line as usize;
         let content_line = if let Some(line) = model.content.lines.get(line_idx) { line } else { return; };
         let correctness_line = if let Some(line) = model.typing_correctness.lines.get(line_idx) { line } else { return; };
@@ -406,7 +419,7 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
         let scroll_offset = model.scroll.scroll as f32;
         
         let base_font_size = FontSize::WindowHeight(BASE_FONT_SIZE_RATIO);
-        let base_pixel_font_size = crate::renderer::calculate_pixel_font_size(base_font_size, width, height);
+        let base_pixel_font_size = calculate_pixel_font_size(base_font_size, width, height);
         
         let target_line_total_width = content_line.words.iter().flat_map(|w| &w.segments).map(|seg| {
             let text = match seg {
@@ -420,19 +433,15 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
         let mut upper_segments = Vec::new();
         for (word_idx, word) in content_line.words.iter().enumerate() {
             for (seg_idx, seg) in word.segments.iter().enumerate() {
-                // セグメントの状態（色）を、単語単位の状態で決定する
                 let state = if (word_idx as i32) < status.word {
-                    // 完了した単語は、その単語全体の正誤に基づいてハイライト
                     if is_word_correct(&correctness_line.words[word_idx]) {
                         UpperSegmentState::Correct
                     } else {
                         UpperSegmentState::Incorrect
                     }
                 } else if (word_idx as i32) == status.word {
-                    // 現在入力中の単語は、すべてのセグメントをアクティブとしてハイライト
                     UpperSegmentState::Active
                 } else {
-                    // これから入力する単語はペンディング
                     UpperSegmentState::Pending
                 };
 
@@ -445,12 +454,12 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
             }
         }
         
-        let upper_y = (height as f32 / 2.0) - base_pixel_font_size * UPPER_ROW_Y_OFFSET_FACTOR;
+        let upper_y_shift_from_center = -(base_pixel_font_size * UPPER_ROW_Y_OFFSET_FACTOR) / height as f32 + 0.17;
         render_list.push(Renderable::TypingUpper {
             segments: upper_segments,
-            anchor: Anchor::TopCenter,
-            shift: Shift { x: -scroll_offset / width as f32, y: upper_y / height as f32 },
-            align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
+            anchor: Anchor::Center,
+            shift: Shift { x: -scroll_offset / width as f32, y: upper_y_shift_from_center },
+            align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
             font_size: base_font_size,
         });
 
@@ -515,11 +524,11 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
             }
         }
         
-        let lower_y = (height as f32 / 2.0) + base_pixel_font_size * LOWER_ROW_Y_OFFSET_FACTOR;
+        let lower_y_shift_from_center = (base_pixel_font_size * LOWER_ROW_Y_OFFSET_FACTOR) / height as f32 + 0.01;
         render_list.push(Renderable::TypingLower {
             segments: lower_segments,
-            anchor: Anchor::TopCenter,
-            shift: Shift { x: -scroll_offset / width as f32, y: lower_y / height as f32 },
+            anchor: Anchor::Center,
+            shift: Shift { x: -scroll_offset / width as f32, y: lower_y_shift_from_center },
             align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
             font_size: base_font_size,
             target_line_total_width,
@@ -534,9 +543,9 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
                 render_list.push(Renderable::Text {
                     text: model.content.lines[line_idx_context].to_string(),
                     anchor: Anchor::Center,
-                    shift: Shift { x: 0.0, y: offset as f32 * 0.45 },
+                    shift: Shift { x: 0.0, y: (offset as f32 * 0.37) + 0.05 },
                     align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
-                    font_size: FontSize::WindowHeight(0.05),
+                    font_size: FontSize::WindowHeight(0.08),
                     color: 0xFF_444444,
                 });
             }
@@ -546,22 +555,60 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
         let metrics = typing::calculate_total_metrics(model);
         let time = metrics.total_time / 1000.0;
         let status_items = vec![
+            format!("Progress: {} / {}", model.status.line as usize + 1, line_count),
             format!("Speed: {:.2} KPS", metrics.speed),
             format!("Accuracy: {:.1}%", metrics.accuracy * 100.0),
             format!("Misses: {}", metrics.miss_count),
             format!("Time: {:02.0}:{:05.2}", (time / 60.0).floor(), time % 60.0),
         ];
+        
+        let progress_bar_height_ratio = 0.02;
+        let status_item_height_ratio = 0.04;
 
         for (i, item) in status_items.iter().enumerate() {
             render_list.push(Renderable::Text {
                 text: item.clone(),
                 anchor: Anchor::BottomLeft,
-                shift: Shift { x: 0.02, y: -0.16 + (i as f32 * 0.04)},
+                shift: Shift { x: 0.02, y: -0.02 - progress_bar_height_ratio - ((status_items.len() - 1 - i) as f32 * status_item_height_ratio)},
                 align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Bottom },
-                font_size: FontSize::WindowHeight(0.04),
+                font_size: FontSize::WindowHeight(status_item_height_ratio),
                 color: 0xFF_DDDDDD,
             });
         }
+
+        // --- 進捗バー ---
+        let char_progress_in_line = model.status.word as f32 / content_line.words.len().max(1) as f32;
+        let detailed_progress_ratio = if line_count > 0 {
+            (model.status.line as f32 + char_progress_in_line) / (line_count as f32)
+        } else {
+            0.0
+        };
+
+        let bar_font_size = FontSize::WindowHeight(progress_bar_height_ratio);
+        // TUIとGUIで見た目を合わせるため、文字ベースで幅を計算する
+        let char_pixel_width = calculate_pixel_font_size(bar_font_size, width, height) * 0.6;
+        let total_chars_in_bar = if char_pixel_width > 0.0 { (width as f32 / char_pixel_width) as usize } else { 0 };
+
+        // 背景バー
+        render_list.push(Renderable::Text {
+            text: "─".repeat(total_chars_in_bar),
+            anchor: Anchor::BottomLeft,
+            shift: Shift { x: 0.0, y: 0.0 },
+            align: Align { horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Bottom },
+            font_size: bar_font_size,
+            color: 0xFF_555555,
+        });
+
+        // 進捗バー本体
+        let filled_chars = (total_chars_in_bar as f32 * detailed_progress_ratio) as usize;
+        render_list.push(Renderable::Text {
+            text: "█".repeat(filled_chars),
+            anchor: Anchor::BottomLeft,
+            shift: Shift { x: 0.0, y: 0.0 },
+            align: Align { horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Bottom },
+            font_size: bar_font_size,
+            color: CORRECT_COLOR,
+        });
     }
 }
 
