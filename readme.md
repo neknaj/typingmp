@@ -1,8 +1,3 @@
-はい、承知いたしました。
-提供された`readme.md`に、先ほど作成した「問題ファイルの作り方」セクションを追加し、ビルド手順などをより分かりやすく更新します。
-
----
-
 # Neknaj Typing MP: A Multi-Platform Typing Game in Rust
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
