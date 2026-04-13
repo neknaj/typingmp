@@ -15,13 +15,15 @@ cargo run --release --features gui
 # Terminal (TUI) — press Tab to cycle rendering modes
 cargo run --release --features tui
 
-# WebAssembly
+# WebAssembly（ビルド後は必ずローカルサーバー経由でテスト）
 wasm-pack build --target web --release -- --features wasm
-python3 -m http.server  # then open index.html
+node serve.js          # http://localhost:8080 をブラウザで開く
+# ※ file:// では WASM・FileReader・localStorage が正常に動作しないため直接開かないこと
 
 # WASM with debug logging
 WEBSOCKET_ADDRESS="ws://localhost:8081" wasm-pack build --target web --dev -- --features wasm
 node logger_server.js  # WebSocket debug receiver
+node serve.js          # 別ターミナルで起動
 
 # UEFI (bare-metal via QEMU, run from PowerShell)
 ./run_uefi.ps1
