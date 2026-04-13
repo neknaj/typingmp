@@ -82,14 +82,20 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     // 現在の単語内で、まだタイプされていない全てのセグメントの「読み」を連結してターゲット文字列を生成
     let target_reading: String = word_content.segments[model.status.segment as usize..]
         .iter()
-        .map(|seg| match seg {
-            Segment::Plain { text } => text.clone(),
-            Segment::Annotated { reading, .. } => reading.clone(),
-        })
+        .map(|seg| segment_target_reading(seg))
         .collect();
     
     // 現在の文字位置から始まる部分文字列を取得
     let target_slice = target_reading.chars().skip(model.status.char_ as usize).collect::<String>();
+
+    // セグメントのタイプ対象文字列を返すヘルパー（Anno は inner を再帰的に連結）
+    fn segment_target_reading(seg: &Segment) -> String {
+        match seg {
+            Segment::Plain { text } => text.clone(),
+            Segment::Annotated { reading, .. } => reading.clone(),
+            Segment::Anno { inner, .. } => inner.iter().map(|s| segment_target_reading(s)).collect(),
+        }
+    }
 
     fn normalize_char(c: char) -> char {
         let lower = c.to_lowercase().next().unwrap_or(c);
@@ -230,6 +236,15 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     }
 }
 
+// セグメントのタイプ対象文字列を返す（Anno は inner を再帰的に連結）
+fn segment_target_reading_static(seg: &Segment) -> String {
+    match seg {
+        Segment::Plain { text } => text.clone(),
+        Segment::Annotated { reading, .. } => reading.clone(),
+        Segment::Anno { inner, .. } => inner.iter().map(|s| segment_target_reading_static(s)).collect(),
+    }
+}
+
 pub fn create_typing_correctness_model(content: &Content) -> TypingCorrectnessContent {
     let mut lines = Vec::new();
     for line in &content.lines {
@@ -237,10 +252,7 @@ pub fn create_typing_correctness_model(content: &Content) -> TypingCorrectnessCo
         for word in &line.words {
             let mut segments = Vec::new();
             for segment in &word.segments {
-                let target_text = match segment {
-                    Segment::Plain { text } => text,
-                    Segment::Annotated { base: _, reading } => reading,
-                };
+                let target_text = segment_target_reading_static(segment);
                 let chars = target_text.chars()
                     .map(|_| TypingCorrectnessChar::Pending)
                     .collect();

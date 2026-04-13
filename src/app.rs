@@ -17,7 +17,25 @@ use std::{
     vec::Vec,
 };
 
-use crate::model::{Model, ResultModel, Scroll, TypingModel, TypingStatus};
+use crate::model::{Model, ResultModel, Scroll, Segment, TypingModel, TypingStatus};
+
+// セグメントの base テキストを返す（Anno は inner を連結）
+fn seg_base_text_owned(seg: &Segment) -> String {
+    match seg {
+        Segment::Plain { text } => text.clone(),
+        Segment::Annotated { base, .. } => base.clone(),
+        Segment::Anno { inner, .. } => inner.iter().map(|s| seg_base_text_owned(s)).collect(),
+    }
+}
+
+// セグメントの reading テキストを返す（Anno は inner を連結）
+fn seg_reading_text_owned(seg: &Segment) -> String {
+    match seg {
+        Segment::Plain { text } => text.clone(),
+        Segment::Annotated { reading, .. } => reading.clone(),
+        Segment::Anno { inner, .. } => inner.iter().map(|s| seg_reading_text_owned(s)).collect(),
+    }
+}
 use crate::parser;
 use crate::typing;
 use crate::ui; // typing_rendererの代わりにuiをインポート
@@ -195,11 +213,8 @@ impl<'a> App<'a> {
             if let Some(current_line_content) = model.content.lines.get(model.status.line as usize) {
                 // 1. Calculate the total width of the current line's BASE text for centering
                 let total_width: f32 = current_line_content.words.iter().flat_map(|w| &w.segments).map(|seg| {
-                    let text = match seg {
-                        crate::model::Segment::Plain { text } => text.as_str(),
-                        crate::model::Segment::Annotated { base, .. } => base.as_str(),
-                    };
-                    gui_renderer::measure_text(font, text, base_pixel_font_size).0 as f32
+                    let text = seg_base_text_owned(seg);
+                    gui_renderer::measure_text(font, &text, base_pixel_font_size).0 as f32
                 }).sum();
 
                 // セッション開始時の最初のフレームで、スクロールの初期値を設定する
@@ -216,11 +231,8 @@ impl<'a> App<'a> {
                 for i in 0..model.status.word as usize {
                     if let Some(word) = current_line_content.words.get(i) {
                         for seg in &word.segments {
-                             let text = match seg {
-                                crate::model::Segment::Plain { text } => text.as_str(),
-                                crate::model::Segment::Annotated { base, .. } => base.as_str(),
-                            };
-                            cursor_x_offset += gui_renderer::measure_text(font, text, base_pixel_font_size).0 as f32;
+                            let text = seg_base_text_owned(seg);
+                            cursor_x_offset += gui_renderer::measure_text(font, &text, base_pixel_font_size).0 as f32;
                         }
                     }
                 }
@@ -229,20 +241,14 @@ impl<'a> App<'a> {
                 if let Some(current_word) = current_line_content.words.get(model.status.word as usize) {
                     for i in 0..model.status.segment as usize {
                         if let Some(seg) = current_word.segments.get(i) {
-                            let text = match seg {
-                                crate::model::Segment::Plain { text } => text.as_str(),
-                                crate::model::Segment::Annotated { base, .. } => base.as_str(),
-                            };
-                            cursor_x_offset += gui_renderer::measure_text(font, text, base_pixel_font_size).0 as f32;
+                            let text = seg_base_text_owned(seg);
+                            cursor_x_offset += gui_renderer::measure_text(font, &text, base_pixel_font_size).0 as f32;
                         }
                     }
 
                     // For the current segment, add the width of the typed READING text
                     if let Some(seg) = current_word.segments.get(model.status.segment as usize) {
-                        let reading_text = match seg {
-                            crate::model::Segment::Plain { text } => text,
-                            crate::model::Segment::Annotated { reading, .. } => reading,
-                        };
+                        let reading_text = seg_reading_text_owned(seg);
                         // Get the substring of the reading text that has been typed so far.
                         let typed_reading_part = reading_text.chars().take(model.status.char_ as usize).collect::<String>();
                         // Measure the actual pixel width of the typed part.

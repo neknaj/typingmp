@@ -102,6 +102,8 @@ pub enum UpperSegmentState {
 pub struct UpperTypingSegment {
     pub base_text: String,
     pub ruby_text: Option<String>,
+    /// anno記法の注釈テキスト（ベーステキストの下に表示）
+    pub anno_text: Option<String>,
     pub state: UpperSegmentState,
 }
 
@@ -396,6 +398,38 @@ fn build_problem_selection_ui(app: &App, render_list: &mut Vec<Renderable>, grad
     }
 }
 
+// Segment の base テキストを文字列として返す（Anno は inner の base を連結）
+fn segment_base_text(seg: &Segment) -> String {
+    match seg {
+        Segment::Plain { text } => text.clone(),
+        Segment::Annotated { base, .. } => base.clone(),
+        Segment::Anno { inner, .. } => inner.iter().map(|s| segment_base_text(s)).collect(),
+    }
+}
+
+// Segment の reading テキストを文字列として返す（Anno は inner の reading を連結）
+fn segment_reading_text(seg: &Segment) -> String {
+    match seg {
+        Segment::Plain { text } => text.clone(),
+        Segment::Annotated { reading, .. } => reading.clone(),
+        Segment::Anno { inner, .. } => inner.iter().map(|s| segment_reading_text(s)).collect(),
+    }
+}
+
+// 表示用の (base_text, ruby_text, anno_text) を返す
+fn segment_display_parts(seg: &Segment) -> (String, Option<String>, Option<String>) {
+    match seg {
+        Segment::Plain { text } => (text.clone(), None, None),
+        Segment::Annotated { base, reading } => (base.clone(), Some(reading.clone()), None),
+        Segment::Anno { inner, annotation } => {
+            let base = inner.iter().map(|s| segment_base_text(s)).collect::<String>();
+            let reading = inner.iter().map(|s| segment_reading_text(s)).collect::<String>();
+            let ruby = if reading.is_empty() { None } else { Some(reading) };
+            (base, ruby, Some(annotation.clone()))
+        }
+    }
+}
+
 fn is_word_correct(word: &TypingCorrectnessWord) -> bool {
     word.segments.iter().all(is_segment_correct)
 }
@@ -431,11 +465,8 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
         let base_pixel_font_size = calculate_pixel_font_size(base_font_size, width, height);
         
         let target_line_total_width = content_line.words.iter().flat_map(|w| &w.segments).map(|seg| {
-            let text = match seg {
-                Segment::Plain { text } => text.as_str(),
-                Segment::Annotated { base, .. } => base.as_str(),
-            };
-            gui_renderer::measure_text(font, text, base_pixel_font_size).0
+            let text = segment_base_text(seg);
+            gui_renderer::measure_text(font, &text, base_pixel_font_size).0
         }).sum::<u32>();
 
         // --- 上段（目標テキスト）の構築 ---
@@ -454,12 +485,8 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
                     UpperSegmentState::Pending
                 };
 
-                let (base_text, ruby_text) = match seg {
-                    Segment::Plain { text } => (text.clone(), None),
-                    Segment::Annotated { base, reading } => (base.clone(), Some(reading.clone())),
-                };
-                
-                upper_segments.push(UpperTypingSegment { base_text, ruby_text, state });
+                let (base_text, ruby_text, anno_text) = segment_display_parts(seg);
+                upper_segments.push(UpperTypingSegment { base_text, ruby_text, anno_text, state });
             }
         }
         
@@ -478,10 +505,7 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
             let word = &content_line.words[word_idx];
             let correctness_word = &correctness_line.words[word_idx];
             for seg in &word.segments {
-                let (base_text, ruby_text) = match seg {
-                    Segment::Plain { text } => (text.clone(), None),
-                    Segment::Annotated { base, reading } => (base.clone(), Some(reading.clone())),
-                };
+                let (base_text, ruby_text, _) = segment_display_parts(seg);
                 lower_segments.push(LowerTypingSegment::Completed {
                     base_text,
                     ruby_text,
@@ -493,11 +517,8 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
         if let Some(active_word_content) = content_line.words.get(status.word as usize) {
             let active_correctness_word = &correctness_line.words[status.word as usize];
             for seg_idx in 0..(status.segment as usize) {
-                 let seg = &active_word_content.segments[seg_idx];
-                 let (base_text, ruby_text) = match seg {
-                    Segment::Plain { text } => (text.clone(), None),
-                    Segment::Annotated { base, reading } => (base.clone(), Some(reading.clone())),
-                };
+                let seg = &active_word_content.segments[seg_idx];
+                let (base_text, ruby_text, _) = segment_display_parts(seg);
                 lower_segments.push(LowerTypingSegment::Completed {
                     base_text,
                     ruby_text,
@@ -506,10 +527,7 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
             }
 
             if let Some(active_seg_content) = active_word_content.segments.get(status.segment as usize) {
-                let reading_text = match active_seg_content {
-                    Segment::Plain { text } => text,
-                    Segment::Annotated { reading, .. } => reading,
-                };
+                let reading_text = segment_reading_text(active_seg_content);
                 let mut active_elements = Vec::new();
                 
                 let correctness_seg = &active_correctness_word.segments[status.segment as usize];

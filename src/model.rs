@@ -37,8 +37,13 @@ pub struct Word {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Segment {
+    /// プレーンテキスト（読みなし）
     Plain { text: String },
+    /// ルビ付きテキスト（[base/reading] 記法）
     Annotated { base: String, reading: String },
+    /// アノテーション付きテキスト（{inner/annotation} 記法）
+    /// inner が入力対象、annotation は表示専用
+    Anno { inner: Vec<Segment>, annotation: String },
 }
 
 impl fmt::Display for Line {
@@ -57,6 +62,12 @@ impl fmt::Display for Segment {
         match self {
             Segment::Plain { text } => write!(f, "{}", text),
             Segment::Annotated { base, .. } => write!(f, "{}", base),
+            Segment::Anno { inner, .. } => {
+                for seg in inner {
+                    write!(f, "{}", seg)?;
+                }
+                Ok(())
+            }
         }
     }
 }
