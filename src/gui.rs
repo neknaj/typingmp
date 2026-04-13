@@ -12,6 +12,8 @@ use ab_glyph::FontRef;
 use minifb::{Key, KeyRepeat, Window, WindowOptions};
 #[cfg(not(feature = "uefi"))]
 use std::time::Instant;
+#[cfg(feature = "gui")]
+use rfd::FileDialog;
 
 #[cfg(all(target_os = "windows", not(feature = "uefi")))]
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -109,6 +111,24 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         last_frame_time = now_time;
 
         handle_input(&mut window, &mut app);
+
+        // ファイルオープンダイアログ処理（ブロッキング、modal なので二重起動なし）
+        #[cfg(feature = "gui")]
+        if app.should_open_file_dialog {
+            app.should_open_file_dialog = false; // ダイアログを開く前にリセット
+            if let Some(path) = FileDialog::new()
+                .add_filter("ntq問題ファイル", &["ntq"])
+                .pick_file()
+            {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    let name = path.file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("unknown.ntq")
+                        .to_string();
+                    app.add_custom_problem(name, content, 0);
+                }
+            }
+        }
 
         app.update(width, height, delta_time);
 

@@ -367,12 +367,16 @@ fn build_problem_selection_ui(app: &App, render_list: &mut Vec<Renderable>, grad
     if app.selected_problem_item >= items_per_screen {
         start_index = app.selected_problem_item - items_per_screen + 1;
     }
-    let end_index = (start_index + items_per_screen).min(app.problem_list.len());
+    let end_index = (start_index + items_per_screen).min(app.problem_count());
 
     for i in start_index..end_index {
-        let item = app.problem_list[i];
+        let item = app.problem_name_at(i);
+        let is_open_file = app.is_open_file_entry(i);
         let (text, color) = if i == app.selected_problem_item {
-            (format!("> {}", item), 0xFF_FFFF00)
+            let prefix = if is_open_file { "> " } else { "> " };
+            (format!("{}{}", prefix, item), 0xFF_FFFF00)
+        } else if is_open_file {
+            (format!("  {}", item), 0xFF_888888)
         } else {
             (format!("  {}", item), 0xFF_FFFFFF)
         };
@@ -392,7 +396,7 @@ fn build_problem_selection_ui(app: &App, render_list: &mut Vec<Renderable>, grad
         render_list.push(Renderable::Text { text: "▲".to_string(), anchor: Anchor::TopCenter, shift: Shift { x: 0.0, y: list_y_start - item_height },
             align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center }, font_size: FontSize::WindowHeight(0.04), color: 0xFF_AAAAAA });
     }
-    if end_index < app.problem_list.len() {
+    if end_index < app.problem_count() {
         render_list.push(Renderable::Text { text: "▼".to_string(), anchor: Anchor::TopCenter, shift: Shift { x: 0.0, y: list_y_start + list_height },
             align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center }, font_size: FontSize::WindowHeight(0.04), color: 0xFF_AAAAAA });
     }

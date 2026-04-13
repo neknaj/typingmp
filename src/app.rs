@@ -19,6 +19,13 @@ use std::{
 
 use crate::model::{Model, ResultModel, Scroll, Segment, TypingModel, TypingStatus};
 
+/// ユーザーがアップロード/オープンしたカスタム問題ファイル
+pub struct CustomProblem {
+    pub name: String,
+    pub content: String,
+    pub timestamp_ms: u64,
+}
+
 // セグメントの base テキストを返す（Anno は inner を連結）
 fn seg_base_text_owned(seg: &Segment) -> String {
     match seg {
@@ -102,13 +109,15 @@ pub struct App<'a> {
     pub selected_main_menu_item: usize,
     pub selected_problem_item: usize,
     pub selected_settings_item: usize,
-    pub problem_list: &'static [&'static str],
+    pub custom_problems: Vec<CustomProblem>,
     pub typing_model: Option<TypingModel>,
     pub result_model: Option<ResultModel>,
     pub status_text: String,
     pub instructions_text: String,
     pub tui_display_mode: TuiDisplayMode,
     pub should_quit: bool,
+    /// ファイルダイアログを開く要求フラグ（gui/wasm のみ）
+    pub should_open_file_dialog: bool,
     // フォント管理用のフィールド
     pub fonts: Fonts<'a>,
     pub font_choice: FontChoice,
@@ -127,18 +136,59 @@ impl<'a> App<'a> {
             selected_main_menu_item: 0,
             selected_problem_item: 0,
             selected_settings_item: 0,
-            problem_list: PROBLEM_FILES_NAMES,
+            custom_problems: Vec::new(),
             typing_model: None,
             result_model: None,
             status_text: String::new(),
             instructions_text: String::new(),
             tui_display_mode: TuiDisplayMode::Braille,
             should_quit: false,
+            should_open_file_dialog: false,
             fonts,
             font_choice: FontChoice::YujiSyuku, // デフォルトフォント
             fps: 0.0, // FPSを初期化
             #[cfg(target_arch = "wasm32")]
             should_reset_ime: false, // 初期値はfalse
+        }
+    }
+
+    /// 組み込み問題 + カスタム問題 + (gui/wasm では「Open File」エントリ1件) の合計数
+    pub fn problem_count(&self) -> usize {
+        let base = PROBLEM_FILES_NAMES.len() + self.custom_problems.len();
+        #[cfg(any(feature = "gui", target_arch = "wasm32"))]
+        { base + 1 }
+        #[cfg(not(any(feature = "gui", target_arch = "wasm32")))]
+        { base }
+    }
+
+    /// インデックスに対応する表示名を返す
+    pub fn problem_name_at(&self, idx: usize) -> &str {
+        let builtin_count = PROBLEM_FILES_NAMES.len();
+        if idx < builtin_count {
+            PROBLEM_FILES_NAMES[idx]
+        } else if idx < builtin_count + self.custom_problems.len() {
+            &self.custom_problems[idx - builtin_count].name
+        } else {
+            "[ Open File... ]"
+        }
+    }
+
+    /// そのインデックスが「Open File」エントリかどうか
+    pub fn is_open_file_entry(&self, idx: usize) -> bool {
+        #[cfg(any(feature = "gui", target_arch = "wasm32"))]
+        { idx == PROBLEM_FILES_NAMES.len() + self.custom_problems.len() }
+        #[cfg(not(any(feature = "gui", target_arch = "wasm32")))]
+        { let _ = idx; false }
+    }
+
+    /// カスタム問題を追加し、そのインデックスを選択状態にする
+    pub fn add_custom_problem(&mut self, name: String, content: String, timestamp_ms: u64) {
+        self.custom_problems.push(CustomProblem { name, content, timestamp_ms });
+        // 追加された問題のインデックスを選択
+        self.selected_problem_item = PROBLEM_FILES_NAMES.len() + self.custom_problems.len() - 1;
+        if self.state != AppState::ProblemSelection {
+            self.state = AppState::ProblemSelection;
+            self.on_event(AppEvent::ChangeScene);
         }
     }
 
@@ -153,7 +203,14 @@ impl<'a> App<'a> {
     /// 新しいタイピングセッションを開始する
     fn start_typing_session(&mut self, problem_index: usize) {
         // 選択されたインデックスに基づいて問題文を読み込む
-        let problem_text = get_problem_content(problem_index);
+        let builtin_count = PROBLEM_FILES_NAMES.len();
+        let problem_text_owned: String;
+        let problem_text: &str = if problem_index < builtin_count {
+            get_problem_content(problem_index)
+        } else {
+            problem_text_owned = self.custom_problems[problem_index - builtin_count].content.clone();
+            &problem_text_owned
+        };
         let content = parser::parse_problem(problem_text);
         let typing_correctness = typing::create_typing_correctness_model(&content);
 
@@ -342,8 +399,19 @@ impl<'a> App<'a> {
                 self.status_text = "Select a problem to type.".to_string();
                 match event {
                     AppEvent::Up => if self.selected_problem_item > 0 { self.selected_problem_item -= 1; },
-                    AppEvent::Down => if self.selected_problem_item < self.problem_list.len() - 1 { self.selected_problem_item += 1; },
-                    AppEvent::Enter => self.start_typing_session(self.selected_problem_item),
+                    AppEvent::Down => {
+                        if self.problem_count() > 0 && self.selected_problem_item < self.problem_count() - 1 {
+                            self.selected_problem_item += 1;
+                        }
+                    },
+                    AppEvent::Enter => {
+                        let idx = self.selected_problem_item;
+                        if self.is_open_file_entry(idx) {
+                            self.should_open_file_dialog = true;
+                        } else {
+                            self.start_typing_session(idx);
+                        }
+                    },
                     AppEvent::Escape => {
                         self.state = AppState::MainMenu;
                         self.on_event(AppEvent::ChangeScene);

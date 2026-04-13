@@ -133,7 +133,7 @@
 
 </html>
 <script type="module">
-    import init, { trigger_event } from './pkg/rust_multibackend_app.js';
+    import init, { trigger_event, take_file_open_request } from './pkg/rust_multibackend_app.js';
 
     async function run() {
         await init();
@@ -176,6 +176,10 @@
         document.getElementById('key-enter').addEventListener('mousedown', (event) => {
             event.preventDefault();
             trigger_event('Enter');
+            // ファイルダイアログ要求フラグを確認し、ユーザージェスチャのコールスタック内で click() を呼ぶ
+            if (take_file_open_request()) {
+                document.getElementById('problem-file-input').click();
+            }
         });
 
         document.getElementById('key-backspace').addEventListener('mousedown', (event) => {

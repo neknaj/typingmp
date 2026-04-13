@@ -1,6 +1,6 @@
 // src/wasm.rs
 
-use crate::app::{App, AppEvent, Fonts};
+use crate::app::{App, AppEvent, CustomProblem, Fonts};
 use crate::renderer::{calculate_pixel_font_size, gui_renderer};
 use crate::ui::{self, ActiveLowerElement, LowerTypingSegment, Renderable, UpperSegmentState};
 use ab_glyph::FontRef;
@@ -10,6 +10,64 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::Clamped;
 use wasm_bindgen::JsCast;
 use web_sys::{CanvasRenderingContext2d, HtmlInputElement, ImageData, InputEvent, KeyboardEvent};
+
+const LS_KEY: &str = "typingmp_custom_problems";
+
+/// localStorage からカスタム問題リストを読み込む
+fn load_custom_problems() -> Vec<CustomProblem> {
+    let window = match web_sys::window() { Some(w) => w, None => return Vec::new() };
+    let storage = match window.local_storage() {
+        Ok(Some(s)) => s,
+        _ => return Vec::new(),
+    };
+    let json = match storage.get_item(LS_KEY) {
+        Ok(Some(s)) => s,
+        _ => return Vec::new(),
+    };
+    // JSON パース: [{name, content, timestamp}, ...]
+    let parsed = match js_sys::JSON::parse(&json) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    let arr = match parsed.dyn_into::<js_sys::Array>() {
+        Ok(a) => a,
+        Err(_) => return Vec::new(),
+    };
+    let mut result = Vec::new();
+    for i in 0..arr.length() {
+        let item = arr.get(i);
+        let name = js_sys::Reflect::get(&item, &JsValue::from_str("name"))
+            .ok().and_then(|v| v.as_string()).unwrap_or_default();
+        let content = js_sys::Reflect::get(&item, &JsValue::from_str("content"))
+            .ok().and_then(|v| v.as_string()).unwrap_or_default();
+        let timestamp_ms = js_sys::Reflect::get(&item, &JsValue::from_str("timestamp"))
+            .ok().and_then(|v| v.as_f64()).unwrap_or(0.0) as u64;
+        if !name.is_empty() && !content.is_empty() {
+            result.push(CustomProblem { name, content, timestamp_ms });
+        }
+    }
+    result
+}
+
+/// カスタム問題リストを localStorage に保存する
+fn save_custom_problems(problems: &[CustomProblem]) {
+    let window = match web_sys::window() { Some(w) => w, None => return };
+    let storage = match window.local_storage() {
+        Ok(Some(s)) => s,
+        _ => return,
+    };
+    let arr = js_sys::Array::new();
+    for p in problems {
+        let obj = js_sys::Object::new();
+        let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("name"), &JsValue::from_str(&p.name));
+        let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("content"), &JsValue::from_str(&p.content));
+        let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("timestamp"), &JsValue::from_f64(p.timestamp_ms as f64));
+        arr.push(&obj);
+    }
+    if let Ok(json) = js_sys::JSON::stringify(&arr) {
+        let _ = storage.set_item(LS_KEY, &String::from(json));
+    }
+}
 
 thread_local! {
     static APP_INSTANCE: RefCell<Option<Rc<RefCell<App<'static>>>>> = RefCell::new(None);
@@ -23,6 +81,23 @@ fn debug_log(message: &str) {
 #[cfg(not(debug_assertions))]
 fn debug_log(_message: &str) {
     // リリースビルドでは何もしない
+}
+
+/// ファイルダイアログ要求フラグを取り出す。
+/// JS 側がユーザージェスチャのコールスタック内でこれを呼び、
+/// true なら file input を click() する。
+#[wasm_bindgen]
+pub fn take_file_open_request() -> bool {
+    APP_INSTANCE.with(|instance| {
+        if let Some(app_rc) = instance.borrow().as_ref() {
+            let mut app = app_rc.borrow_mut();
+            if app.should_open_file_dialog {
+                app.should_open_file_dialog = false;
+                return true;
+            }
+        }
+        false
+    })
 }
 
 #[wasm_bindgen]
@@ -72,6 +147,16 @@ pub fn start() -> Result<(), JsValue> {
     }
     body.append_child(&input_element)?;
 
+    // .ntq ファイルアップロード用の非表示ファイル入力要素
+    let file_input = document
+        .create_element("input")?
+        .dyn_into::<HtmlInputElement>()?;
+    file_input.set_type("file");
+    file_input.set_id("problem-file-input");
+    file_input.set_attribute("accept", ".ntq")?;
+    file_input.style().set_property("display", "none")?;
+    body.append_child(&file_input)?;
+
     let wrapper = document
         .get_element_by_id("canvas-wrapper")
         .ok_or_else(|| JsValue::from_str("Missing #canvas-wrapper element"))?;
@@ -96,6 +181,13 @@ pub fn start() -> Result<(), JsValue> {
     };
 
     let app = Rc::new(RefCell::new(App::new(fonts)));
+    // localStorage からカスタム問題を復元
+    {
+        let mut app_mut = app.borrow_mut();
+        for p in load_custom_problems() {
+            app_mut.custom_problems.push(p);
+        }
+    }
     app.borrow_mut().on_event(AppEvent::Start);
 
     APP_INSTANCE.with(|instance| {
@@ -104,6 +196,58 @@ pub fn start() -> Result<(), JsValue> {
 
     let size = Rc::new(RefCell::new((0, 0)));
     let last_time = Rc::new(RefCell::new(0.0));
+
+    // ファイル選択時の処理: FileReader で読み込み → App に追加 → localStorage 保存
+    {
+        let app_clone = app.clone();
+        let file_input_clone = file_input.clone();
+        let closure = Closure::<dyn FnMut(_)>::new(move |_event: web_sys::Event| {
+            let files = match file_input_clone.files() {
+                Some(f) => f,
+                None => return,
+            };
+            let file = match files.get(0) {
+                Some(f) => f,
+                None => return,
+            };
+            let file_name = file.name();
+            let reader = match web_sys::FileReader::new() {
+                Ok(r) => r,
+                Err(_) => return,
+            };
+            // FileReader の onload コールバック
+            {
+                let app_inner = app_clone.clone();
+                let file_input_inner = file_input_clone.clone();
+                let reader_clone = reader.clone();
+                let name_clone = file_name.clone();
+                let onload = Closure::<dyn FnMut(_)>::new(move |_event: web_sys::ProgressEvent| {
+                    let result = match reader_clone.result() {
+                        Ok(v) => v,
+                        Err(_) => return,
+                    };
+                    let content = match result.as_string() {
+                        Some(s) => s,
+                        None => return,
+                    };
+                    let timestamp = crate::timestamp::now() as u64;
+                    {
+                        let mut app_mut = app_inner.borrow_mut();
+                        app_mut.add_custom_problem(name_clone.clone(), content, timestamp);
+                        // localStorage に保存
+                        save_custom_problems(&app_mut.custom_problems);
+                    }
+                    // 同一ファイルを再度選択できるようにリセット
+                    file_input_inner.set_value("");
+                });
+                reader.set_onload(Some(onload.as_ref().unchecked_ref()));
+                onload.forget();
+            }
+            let _ = reader.read_as_text(&file);
+        });
+        file_input.add_event_listener_with_callback("change", closure.as_ref().unchecked_ref())?;
+        closure.forget();
+    }
 
     // canvasクリックでinput要素にフォーカスを当てるリスナー
     {
@@ -134,6 +278,7 @@ pub fn start() -> Result<(), JsValue> {
     // キー入力イベント（特殊キー用）
     {
         let app_clone = app.clone();
+        let file_input_clone = file_input.clone();
         let closure = Closure::<dyn FnMut(_)>::new(move |event: KeyboardEvent| {
             // 生のKeyboardEventの内容をログに出力
             debug_log(&format!(
@@ -143,28 +288,31 @@ pub fn start() -> Result<(), JsValue> {
                 event.is_composing()
             ));
 
-            let mut app = app_clone.borrow_mut();
-            
             match event.key().as_str() {
                 "ArrowUp" => {
                     event.prevent_default();
-                    app.on_event(AppEvent::Up)
+                    app_clone.borrow_mut().on_event(AppEvent::Up)
                 },
                 "ArrowDown" => {
                     event.prevent_default();
-                    app.on_event(AppEvent::Down)
+                    app_clone.borrow_mut().on_event(AppEvent::Down)
                 },
                 "Backspace" => {
                     event.prevent_default();
-                    app.on_event(AppEvent::Backspace)
+                    app_clone.borrow_mut().on_event(AppEvent::Backspace)
                 },
                 "Enter" => {
                     event.prevent_default();
-                    app.on_event(AppEvent::Enter)
+                    app_clone.borrow_mut().on_event(AppEvent::Enter);
+                    // ファイルダイアログ要求フラグを確認し、ユーザージェスチャのコールスタック内で click() を呼ぶ
+                    if app_clone.borrow().should_open_file_dialog {
+                        app_clone.borrow_mut().should_open_file_dialog = false;
+                        let _ = file_input_clone.click();
+                    }
                 },
                 "Escape" => {
                     event.prevent_default();
-                    app.on_event(AppEvent::Escape)
+                    app_clone.borrow_mut().on_event(AppEvent::Escape)
                 },
                 _ => {}
             }
