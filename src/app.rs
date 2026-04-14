@@ -246,7 +246,8 @@ impl<'a> App<'a> {
     pub fn update(&mut self, width: usize, height: usize, delta_time: f64) {
         // FPSを計算して保存
         if delta_time > 0.0 {
-            self.fps = 1000.0 / delta_time;
+            let new_fps = 1000.0 / delta_time;
+            self.fps = if self.fps == 0.0 { new_fps } else { self.fps * 0.9 + new_fps * 0.1 };
         }
 
         if self.state != AppState::Typing {
@@ -445,6 +446,12 @@ impl<'a> App<'a> {
                                     self.on_event(AppEvent::ChangeScene);
                                 }
                             }
+                        }
+                    }
+                    AppEvent::Backspace => {
+                        if let Some(model) = self.typing_model.as_mut() {
+                            model.status.unconfirmed.pop();
+                            model.status.last_wrong_keydown = None;
                         }
                     }
                     AppEvent::Escape => {

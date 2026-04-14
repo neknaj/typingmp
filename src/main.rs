@@ -19,8 +19,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return rust_multibackend_app::tui::run();
     }
 
+    // "mobile" featureが有効な場合にコンパイルされるブロック（デスクトップ上でのSlint UI テスト）
+    #[cfg(feature = "mobile")]
+    {
+        println!("Starting Mobile (Slint) version...");
+        return rust_multibackend_app::mobile::run();
+    }
+
     // デスクトップ用featureが一つも有効でない場合にコンパイルされるブロック
-    #[cfg(not(any(feature = "gui", feature = "tui")))]
+    #[cfg(not(any(feature = "gui", feature = "tui", feature = "mobile")))]
     {
         println!("No desktop backend feature enabled. Please run with --features gui or --features tui");
         return Ok(());

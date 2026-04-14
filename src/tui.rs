@@ -221,11 +221,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                             let (total_width_cells, total_width_pixels) = full_line_words.iter().flat_map(|w| &w.segments).fold((0_u32, 0.0_f32), |(acc_cells, acc_pixels), seg| {
                                 let text = match seg {
-                                    Segment::Plain { text } => text.as_str(),
-                                    Segment::Annotated { base, .. } => base.as_str(),
+                                    Segment::Plain { text } => text.clone(),
+                                    Segment::Annotated { base, .. } => base.clone(),
+                                    Segment::Anno { inner, .. } => inner.iter().map(|s| match s {
+                                        Segment::Plain { text } => text.as_str(),
+                                        Segment::Annotated { base, .. } => base.as_str(),
+                                        Segment::Anno { .. } => "",
+                                    }).collect(),
                                 };
-                                let cells = renderer(current_font, text, render_font_size).1 as u32;
-                                let pixels = gui_renderer::measure_text(current_font, text, font_size_px).0 as f32;
+                                let cells = renderer(current_font, &text, render_font_size).1 as u32;
+                                let pixels = gui_renderer::measure_text(current_font, &text, font_size_px).0 as f32;
                                 (acc_cells + cells, acc_pixels + pixels)
                             });
 
@@ -301,8 +306,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             let full_line_words = &app.typing_model.as_ref().unwrap().content.lines[app.typing_model.as_ref().unwrap().status.line as usize].words;
                             let total_width_chars = full_line_words.iter().flat_map(|w| &w.segments).map(|seg| {
                                 let text = match seg {
-                                    Segment::Plain { text } => text.as_str(),
-                                    Segment::Annotated { base, .. } => base.as_str(),
+                                    Segment::Plain { text } => text.clone(),
+                                    Segment::Annotated { base, .. } => base.clone(),
+                                    Segment::Anno { inner, .. } => inner.iter().map(|s| match s {
+                                        Segment::Plain { text } => text.as_str(),
+                                        Segment::Annotated { base, .. } => base.as_str(),
+                                        Segment::Anno { .. } => "",
+                                    }).collect(),
                                 };
                                 text.chars().count()
                             }).sum::<usize>();

@@ -484,7 +484,21 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
                         UpperSegmentState::Incorrect
                     }
                 } else if (word_idx as i32) == status.word {
-                    UpperSegmentState::Active
+                    if (seg_idx as i32) < status.segment {
+                        // このワード内の完了済みセグメント
+                        if correctness_line.words.get(word_idx)
+                            .and_then(|w| w.segments.get(seg_idx))
+                            .map_or(false, is_segment_correct)
+                        {
+                            UpperSegmentState::Correct
+                        } else {
+                            UpperSegmentState::Incorrect
+                        }
+                    } else if (seg_idx as i32) == status.segment {
+                        UpperSegmentState::Active
+                    } else {
+                        UpperSegmentState::Pending
+                    }
                 } else {
                     UpperSegmentState::Pending
                 };
@@ -541,7 +555,6 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
                 }
                 
                 if let Some(wrong_char) = status.last_wrong_keydown {
-                    active_elements.push(ActiveLowerElement::Cursor);
                     active_elements.push(ActiveLowerElement::LastIncorrectInput(wrong_char));
                 } else {
                     if !status.unconfirmed.is_empty() {

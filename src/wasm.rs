@@ -83,6 +83,31 @@ fn debug_log(_message: &str) {
     // リリースビルドでは何もしない
 }
 
+/// フリックキーボードなどから直接文字を送信する。
+/// JS 側で確定した文字（例: "あ"）を Rust の入力ロジックに渡す。
+#[wasm_bindgen]
+pub fn send_char(c: String) {
+    let timestamp = crate::timestamp::now();
+    APP_INSTANCE.with(|instance| {
+        if let Some(app_rc) = instance.borrow().as_ref() {
+            let mut app = app_rc.borrow_mut();
+            for ch in c.chars() {
+                app.on_event(AppEvent::Char { c: ch, timestamp });
+            }
+        }
+    });
+}
+
+/// タイピング中かどうかを返す。JS 側でキーボード表示制御に使用する。
+#[wasm_bindgen]
+pub fn is_typing_active() -> bool {
+    APP_INSTANCE.with(|instance| {
+        instance.borrow().as_ref().map_or(false, |app_rc| {
+            app_rc.borrow().state == crate::app::AppState::Typing
+        })
+    })
+}
+
 /// ファイルダイアログ要求フラグを取り出す。
 /// JS 側がユーザージェスチャのコールスタック内でこれを呼び、
 /// true なら file input を click() する。
@@ -257,6 +282,63 @@ pub fn start() -> Result<(), JsValue> {
         });
         canvas.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())?;
         closure.forget();
+    }
+
+    // タッチ/ポインターイベント: タップ→Enter、スワイプ上下→Up/Down
+    {
+        use web_sys::PointerEvent;
+        let touch_start: Rc<RefCell<Option<(f64, f64)>>> = Rc::new(RefCell::new(None));
+
+        // pointerdown: 起点座標を保存し input にフォーカス
+        {
+            let touch_start_clone = touch_start.clone();
+            let input_clone = input_element.clone();
+            let closure = Closure::<dyn FnMut(_)>::new(move |e: PointerEvent| {
+                *touch_start_clone.borrow_mut() = Some((e.client_x() as f64, e.client_y() as f64));
+                let _ = input_clone.focus();
+            });
+            canvas.add_event_listener_with_callback("pointerdown", closure.as_ref().unchecked_ref())?;
+            closure.forget();
+        }
+
+        // pointerup: ジェスチャー判定
+        {
+            let touch_start_clone = touch_start.clone();
+            let app_clone = app.clone();
+            let file_input_clone = file_input.clone();
+            const TAP_MAX_DIST: f64 = 12.0;   // タップ判定の最大移動量 (px)
+            const SWIPE_MIN_DIST: f64 = 40.0; // スワイプ判定の最小移動量 (px)
+            let closure = Closure::<dyn FnMut(_)>::new(move |e: PointerEvent| {
+                let start = match touch_start_clone.borrow_mut().take() {
+                    Some(s) => s,
+                    None => return,
+                };
+                let dx = e.client_x() as f64 - start.0;
+                let dy = e.client_y() as f64 - start.1;
+                let dist = (dx * dx + dy * dy).sqrt();
+
+                if dist < TAP_MAX_DIST {
+                    // タップ → Enter
+                    app_clone.borrow_mut().on_event(AppEvent::Enter);
+                    if app_clone.borrow().should_open_file_dialog {
+                        app_clone.borrow_mut().should_open_file_dialog = false;
+                        let _ = file_input_clone.click();
+                    }
+                } else if dist >= SWIPE_MIN_DIST {
+                    if dy.abs() > dx.abs() {
+                        // 縦スワイプ
+                        if dy < 0.0 {
+                            app_clone.borrow_mut().on_event(AppEvent::Up);
+                        } else {
+                            app_clone.borrow_mut().on_event(AppEvent::Down);
+                        }
+                    }
+                    // 横スワイプは typing 中の scroll は既存の慣性スクロールが担うため無視
+                }
+            });
+            canvas.add_event_listener_with_callback("pointerup", closure.as_ref().unchecked_ref())?;
+            closure.forget();
+        }
     }
 
     // ウィンドウリサイズ時の処理

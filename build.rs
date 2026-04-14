@@ -4,6 +4,11 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 fn main() {
+    // Slint UI コンパイル（mobile feature 有効時のみ）
+    if std::env::var("CARGO_FEATURE_MOBILE").is_ok() {
+        slint_build::compile("ui/mobile.slint").expect("Slint compile error");
+    }
+
     let out_dir = env::var_os("OUT_DIR").unwrap();
     let dest_path = Path::new(&out_dir).join("problem_files.rs");
     let mut f = fs::File::create(&dest_path).unwrap();

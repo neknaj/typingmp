@@ -43,3 +43,7 @@ pub mod wasm_debug_logger;
 // "uefi" featureが有効な時だけコンパイルされるUEFIバックエンドモジュール
 #[cfg(feature = "uefi")]
 pub mod uefi;
+
+// "mobile" featureが有効な時だけコンパイルされるSlintモバイルバックエンドモジュール
+#[cfg(feature = "mobile")]
+pub mod mobile;

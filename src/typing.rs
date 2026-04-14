@@ -77,6 +77,9 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     let mut is_romaji_in_progress = false;
 
     let line_content = &model.content.lines[current_line_idx];
+    if line_content.words.len() <= model.status.word as usize {
+        return Model::Typing(model);
+    }
     let word_content = &line_content.words[model.status.word as usize];
 
     // 現在の単語内で、まだタイプされていない全てのセグメントの「読み」を連結してターゲット文字列を生成
@@ -160,7 +163,10 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
             let mut current_char_idx = model.status.char_ as usize;
 
             while remaining_advance > 0 && current_seg_idx < word_content.segments.len() {
-                let correctness_segment = &mut model.typing_correctness.lines[current_line_idx].words[model.status.word as usize].segments[current_seg_idx];
+                let Some(correctness_word) = model.typing_correctness.lines
+                    .get_mut(current_line_idx)
+                    .and_then(|l| l.words.get_mut(model.status.word as usize)) else { break; };
+                let Some(correctness_segment) = correctness_word.segments.get_mut(current_seg_idx) else { break; };
                 let current_seg_len = correctness_segment.chars.len();
 
                 let chars_to_advance_in_seg = (current_seg_len - current_char_idx).min(remaining_advance);
@@ -186,7 +192,12 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     } else {
         model.status.last_wrong_keydown = Some(input);
         model.status.unconfirmed.clear();
-        let correctness_segment = &mut model.typing_correctness.lines[current_line_idx].words[model.status.word as usize].segments[model.status.segment as usize];
+        let Some(correctness_segment) = model.typing_correctness.lines
+            .get_mut(current_line_idx)
+            .and_then(|l| l.words.get_mut(model.status.word as usize))
+            .and_then(|w| w.segments.get_mut(model.status.segment as usize)) else {
+            return Model::Typing(model);
+        };
         if let Some(c) = correctness_segment.chars.get_mut(model.status.char_ as usize) {
             *c = TypingCorrectnessChar::Incorrect;
         }

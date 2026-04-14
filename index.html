@@ -9,7 +9,6 @@
     <meta property="og:type" content="website">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
-        /* CSSに変更はありません */
         html {
             height: 100%;
         }
@@ -94,7 +93,6 @@
         }
         #link-container a {
             color: #6277a5;
-            /* text-decoration: none; */
         }
         #link-container a:hover {
             color: #fff;
@@ -102,6 +100,67 @@
         #link-container p {
             margin: 5px 0 0 0;
             padding: 0;
+        }
+
+        /* フリックキーボード */
+        #flick-keyboard {
+            display: none; /* JS で表示制御 */
+            flex-shrink: 0;
+            width: 100%;
+            background-color: #1a1a1a;
+            padding: 4px;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .flick-row {
+            display: flex;
+            width: 100%;
+            gap: 3px;
+            margin-bottom: 3px;
+        }
+
+        .flick-key {
+            flex: 1;
+            position: relative;
+            aspect-ratio: 1 / 1.1;
+            background-color: #333;
+            border: 1px solid #555;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: clamp(12px, 3.5vw, 20px);
+            color: #eee;
+            touch-action: none;
+            cursor: pointer;
+            transition: background-color 0.05s;
+        }
+
+        .flick-key.pressing {
+            background-color: #556;
+        }
+
+        /* フリック方向プレビュー */
+        .flick-preview {
+            position: absolute;
+            font-size: 0.65em;
+            color: #aaa;
+            pointer-events: none;
+        }
+        .flick-preview.top    { top: 2px;    left: 50%; transform: translateX(-50%); }
+        .flick-preview.right  { right: 3px;  top: 50%;  transform: translateY(-50%); }
+        .flick-preview.bottom { bottom: 2px; left: 50%; transform: translateX(-50%); }
+        .flick-preview.left   { left: 3px;   top: 50%;  transform: translateY(-50%); }
+
+        .flick-key-label {
+            font-weight: bold;
+        }
+
+        /* 特殊キー（BS、Enterなど）は列を広げる */
+        .flick-key.wide {
+            flex: 1.5;
         }
     </style>
 </head>
@@ -116,12 +175,100 @@
         クロスプラットフォーム対応のタイピング練習アプリケーションです。
     </p>
 
+    <!-- 通常コントロールボタン（縦向き時） -->
     <div id="controls-container">
         <button id="key-up">▲</button>
         <button id="key-down">▼</button>
         <button id="key-enter">Enter</button>
         <button id="key-backspace">BS</button>
         <button id="key-esc">Esc</button>
+    </div>
+
+    <!-- フリックキーボード（タッチデバイスのタイピング中） -->
+    <div id="flick-keyboard">
+        <!-- Row 1: あかさたな -->
+        <div class="flick-row">
+            <div class="flick-key" data-row="a"  data-center="あ" data-up="う" data-right="い" data-down="お" data-left="え">
+                <span class="flick-preview top">う</span>
+                <span class="flick-preview right">い</span>
+                <span class="flick-preview bottom">お</span>
+                <span class="flick-preview left">え</span>
+                <span class="flick-key-label">あ</span>
+            </div>
+            <div class="flick-key" data-row="ka" data-center="か" data-up="く" data-right="き" data-down="こ" data-left="け">
+                <span class="flick-preview top">く</span>
+                <span class="flick-preview right">き</span>
+                <span class="flick-preview bottom">こ</span>
+                <span class="flick-preview left">け</span>
+                <span class="flick-key-label">か</span>
+            </div>
+            <div class="flick-key" data-row="sa" data-center="さ" data-up="す" data-right="し" data-down="そ" data-left="せ">
+                <span class="flick-preview top">す</span>
+                <span class="flick-preview right">し</span>
+                <span class="flick-preview bottom">そ</span>
+                <span class="flick-preview left">せ</span>
+                <span class="flick-key-label">さ</span>
+            </div>
+            <div class="flick-key" data-row="ta" data-center="た" data-up="つ" data-right="ち" data-down="と" data-left="て">
+                <span class="flick-preview top">つ</span>
+                <span class="flick-preview right">ち</span>
+                <span class="flick-preview bottom">と</span>
+                <span class="flick-preview left">て</span>
+                <span class="flick-key-label">た</span>
+            </div>
+            <div class="flick-key" data-row="na" data-center="な" data-up="ぬ" data-right="に" data-down="の" data-left="ね">
+                <span class="flick-preview top">ぬ</span>
+                <span class="flick-preview right">に</span>
+                <span class="flick-preview bottom">の</span>
+                <span class="flick-preview left">ね</span>
+                <span class="flick-key-label">な</span>
+            </div>
+        </div>
+        <!-- Row 2: はまやらわ -->
+        <div class="flick-row">
+            <div class="flick-key" data-row="ha" data-center="は" data-up="ふ" data-right="ひ" data-down="ほ" data-left="へ">
+                <span class="flick-preview top">ふ</span>
+                <span class="flick-preview right">ひ</span>
+                <span class="flick-preview bottom">ほ</span>
+                <span class="flick-preview left">へ</span>
+                <span class="flick-key-label">は</span>
+            </div>
+            <div class="flick-key" data-row="ma" data-center="ま" data-up="む" data-right="み" data-down="も" data-left="め">
+                <span class="flick-preview top">む</span>
+                <span class="flick-preview right">み</span>
+                <span class="flick-preview bottom">も</span>
+                <span class="flick-preview left">め</span>
+                <span class="flick-key-label">ま</span>
+            </div>
+            <div class="flick-key" data-row="ya" data-center="や" data-up="ゆ" data-right="（" data-down="よ" data-left="）">
+                <span class="flick-preview top">ゆ</span>
+                <span class="flick-preview right">（</span>
+                <span class="flick-preview bottom">よ</span>
+                <span class="flick-preview left">）</span>
+                <span class="flick-key-label">や</span>
+            </div>
+            <div class="flick-key" data-row="ra" data-center="ら" data-up="る" data-right="り" data-down="ろ" data-left="れ">
+                <span class="flick-preview top">る</span>
+                <span class="flick-preview right">り</span>
+                <span class="flick-preview bottom">ろ</span>
+                <span class="flick-preview left">れ</span>
+                <span class="flick-key-label">ら</span>
+            </div>
+            <div class="flick-key" data-row="wa" data-center="わ" data-up="を" data-right="ゐ" data-down="ん" data-left="ゑ">
+                <span class="flick-preview top">を</span>
+                <span class="flick-preview right">ゐ</span>
+                <span class="flick-preview bottom">ん</span>
+                <span class="flick-preview left">ゑ</span>
+                <span class="flick-key-label">わ</span>
+            </div>
+        </div>
+        <!-- Row 3: 特殊キー -->
+        <div class="flick-row">
+            <div class="flick-key wide" id="flick-bs"    style="font-size:0.85em;">BS</div>
+            <div class="flick-key wide" id="flick-space" >　</div>
+            <div class="flick-key wide" id="flick-enter" style="background:#335;">Enter</div>
+            <div class="flick-key wide" id="flick-esc"   style="font-size:0.75em;">Esc</div>
+        </div>
     </div>
 
     <div id="link-container">
@@ -133,7 +280,7 @@
 
 </html>
 <script type="module">
-    import init, { trigger_event, take_file_open_request } from './pkg/rust_multibackend_app.js';
+    import init, { trigger_event, take_file_open_request, send_char, is_typing_active } from './pkg/rust_multibackend_app.js';
 
     async function run() {
         await init();
@@ -141,10 +288,7 @@
         const copyToClipboardOnce = async () => {
             try {
                 await navigator.clipboard.writeText('Neknaj Typing MP wasm edition');
-                console.log('Copied to clipboard on user interaction.');
-            } catch (err) {
-                console.error('Failed to copy to clipboard: ', err);
-            }
+            } catch (err) {}
         };
         document.body.addEventListener('pointerdown', copyToClipboardOnce, { once: true });
 
@@ -153,45 +297,101 @@
                 document.body.style.height = `${window.visualViewport.height}px`;
             }
         };
-
         if (window.visualViewport) {
             window.visualViewport.addEventListener('resize', adjustHeight);
             adjustHeight();
         }
 
-        // ▼▼▼ [修正箇所] ここから ▼▼▼
-        // ボタンのイベントを'click'から'mousedown'に変更し、
-        // event.preventDefault()を追加してフォーカス移動を防ぐ
-
-        document.getElementById('key-up').addEventListener('mousedown', (event) => {
-            event.preventDefault(); // この行がフォーカス移動を防ぎ、キーボード表示を維持する
-            trigger_event('Up');
-        });
-
-        document.getElementById('key-down').addEventListener('mousedown', (event) => {
-            event.preventDefault();
-            trigger_event('Down');
-        });
-
-        document.getElementById('key-enter').addEventListener('mousedown', (event) => {
-            event.preventDefault();
+        // --- ナビゲーションボタン ---
+        document.getElementById('key-up').addEventListener('mousedown', (e) => { e.preventDefault(); trigger_event('Up'); });
+        document.getElementById('key-down').addEventListener('mousedown', (e) => { e.preventDefault(); trigger_event('Down'); });
+        document.getElementById('key-enter').addEventListener('mousedown', (e) => {
+            e.preventDefault();
             trigger_event('Enter');
-            // ファイルダイアログ要求フラグを確認し、ユーザージェスチャのコールスタック内で click() を呼ぶ
             if (take_file_open_request()) {
                 document.getElementById('problem-file-input').click();
             }
         });
+        document.getElementById('key-backspace').addEventListener('mousedown', (e) => { e.preventDefault(); trigger_event('Backspace'); });
+        document.getElementById('key-esc').addEventListener('mousedown', (e) => { e.preventDefault(); trigger_event('Escape'); });
 
-        document.getElementById('key-backspace').addEventListener('mousedown', (event) => {
-            event.preventDefault();
+        // --- フリックキーボード表示制御 ---
+        const flickKeyboard = document.getElementById('flick-keyboard');
+        const isTouchDevice = navigator.maxTouchPoints > 0;
+
+        // アニメーションフレームごとにタイピング中かどうかで表示切替
+        const updateKeyboardVisibility = () => {
+            if (isTouchDevice) {
+                const typing = is_typing_active();
+                flickKeyboard.style.display = typing ? 'block' : 'none';
+            }
+            requestAnimationFrame(updateKeyboardVisibility);
+        };
+        requestAnimationFrame(updateKeyboardVisibility);
+
+        // --- フリックキーボードのジェスチャー検出 ---
+        const FLICK_THRESHOLD = 20; // px
+
+        const flickKeys = document.querySelectorAll('.flick-key[data-center]');
+        flickKeys.forEach(key => {
+            let startX = 0, startY = 0;
+
+            key.addEventListener('pointerdown', (e) => {
+                e.preventDefault();
+                startX = e.clientX;
+                startY = e.clientY;
+                key.classList.add('pressing');
+                key.setPointerCapture(e.pointerId);
+            });
+
+            key.addEventListener('pointerup', (e) => {
+                e.preventDefault();
+                key.classList.remove('pressing');
+
+                const dx = e.clientX - startX;
+                const dy = e.clientY - startY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                let char;
+                if (dist < FLICK_THRESHOLD) {
+                    // タップ → センター文字
+                    char = key.dataset.center;
+                } else if (Math.abs(dy) > Math.abs(dx)) {
+                    // 縦フリック
+                    char = dy < 0 ? key.dataset.up : key.dataset.down;
+                } else {
+                    // 横フリック
+                    char = dx > 0 ? key.dataset.right : key.dataset.left;
+                }
+
+                if (char) send_char(char);
+            });
+
+            key.addEventListener('pointercancel', () => {
+                key.classList.remove('pressing');
+            });
+        });
+
+        // 特殊キー
+        document.getElementById('flick-bs').addEventListener('pointerdown', (e) => {
+            e.preventDefault();
             trigger_event('Backspace');
         });
-
-        document.getElementById('key-esc').addEventListener('mousedown', (event) => {
-            event.preventDefault();
+        document.getElementById('flick-space').addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            send_char(' ');
+        });
+        document.getElementById('flick-enter').addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            trigger_event('Enter');
+            if (take_file_open_request()) {
+                document.getElementById('problem-file-input').click();
+            }
+        });
+        document.getElementById('flick-esc').addEventListener('pointerdown', (e) => {
+            e.preventDefault();
             trigger_event('Escape');
         });
-        // ▲▲▲ [修正箇所] ここまで ▲▲▲
     }
 
     run();

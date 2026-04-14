@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Neknaj Typing MP** is a Japanese Romaji typing practice application written in Rust that runs on four platforms from a single shared codebase: desktop GUI, terminal (TUI), WebAssembly (browser), and bare-metal UEFI.
+**Neknaj Typing MP** is a Japanese Romaji typing practice application written in Rust that runs on five platforms from a single shared codebase: desktop GUI, terminal (TUI), WebAssembly (browser), Android (Slint), and bare-metal UEFI.
 
 ## Build & Run Commands
 
@@ -25,6 +25,15 @@ WEBSOCKET_ADDRESS="ws://localhost:8081" wasm-pack build --target web --dev -- --
 node logger_server.js  # WebSocket debug receiver
 node serve.js          # 別ターミナルで起動
 
+# Mobile (Slint) — デスクトップ上でモバイルUIをテスト
+cargo run --release --features mobile
+
+# Android (Slint + cargo-apk)
+# 事前準備: cargo install cargo-apk、Android NDK セットアップ
+# Cargo.toml の slint 依存に features = ["backend-android-activity"] を追加してから:
+# cargo apk build --features mobile
+# cargo apk run --features mobile
+
 # UEFI (bare-metal via QEMU, run from PowerShell)
 ./run_uefi.ps1
 ```
@@ -34,10 +43,11 @@ node serve.js          # 別ターミナルで起動
 The codebase uses Rust feature flags (`gui`, `tui`, `wasm`, `uefi`) to compile different backends from shared core logic:
 
 ```
-Backends (gui.rs / tui.rs / wasm.rs / uefi.rs)
+Backends (gui.rs / tui.rs / wasm.rs / mobile.rs / uefi.rs)
     └── UI Layer (ui.rs) — builds platform-independent Renderable items
         └── Renderers (renderer.rs) — gui_renderer (pixels) / tui_renderer (text)
             └── Core Logic — app.rs, typing.rs, parser.rs, model.rs, layout_data.rs
+Mobile Slint UI definition: ui/mobile.slint (compiled by slint-build in build.rs)
 ```
 
 **Core modules** (platform-agnostic):
@@ -49,9 +59,10 @@ Backends (gui.rs / tui.rs / wasm.rs / uefi.rs)
 - `ui.rs` — builds `Renderable` items from app state; all layout logic lives here
 
 **Platform backends** (feature-gated):
-- `gui.rs` — minifb window, pixel buffer, font rendering via ab_glyph
+- `gui.rs` — minifb window, pixel buffer, font rendering via ab_glyph; mouse click/scroll wheel support
 - `tui.rs` — crossterm terminal with three modes: SimpleText, AsciiArt, Braille
-- `wasm.rs` — HTML canvas rendering, IME via hidden `<input>`, web-sys bindings
+- `wasm.rs` — HTML canvas rendering, IME via hidden `<input>`, web-sys bindings; touch/swipe/flick keyboard
+- `mobile.rs` — Slint window, pixel-buffer-to-Image bridge, flick keyboard via `ui/mobile.slint`; Android entry via `android_main`
 - `uefi.rs` — bare-metal UEFI graphics and keyboard, no std allocator
 
 **Build infrastructure:**

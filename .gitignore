@@ -4,3 +4,4 @@
 /uefi_image
 /node_modules
 /logs
+/.playwright-mcp

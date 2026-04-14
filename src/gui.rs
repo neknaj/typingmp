@@ -9,7 +9,7 @@ use crate::ui::{self, ActiveLowerElement, LowerTypingSegment, Renderable, UpperS
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
 use ab_glyph::FontRef;
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
-use minifb::{Key, KeyRepeat, Window, WindowOptions};
+use minifb::{Key, KeyRepeat, MouseButton, Window, WindowOptions};
 #[cfg(not(feature = "uefi"))]
 use std::time::Instant;
 #[cfg(feature = "gui")]
@@ -98,6 +98,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     app.on_event(AppEvent::Start);
 
     let mut last_frame_time = Instant::now();
+    let mut prev_mouse_down = false;
 
     while window.is_open() && !app.should_quit {
         let (new_width, new_height) = window.get_size();
@@ -111,6 +112,22 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         last_frame_time = now_time;
 
         handle_input(&mut window, &mut app);
+
+        // マウスクリック → Enter（押下の立ち上がりエッジのみ）
+        let mouse_down = window.get_mouse_down(MouseButton::Left);
+        if mouse_down && !prev_mouse_down {
+            app.on_event(AppEvent::Enter);
+        }
+        prev_mouse_down = mouse_down;
+
+        // スクロールホイール → Up/Down
+        if let Some((_scroll_x, scroll_y)) = window.get_scroll_wheel() {
+            if scroll_y > 0.0 {
+                app.on_event(AppEvent::Up);
+            } else if scroll_y < 0.0 {
+                app.on_event(AppEvent::Down);
+            }
+        }
 
         // ファイルオープンダイアログ処理（ブロッキング、modal なので二重起動なし）
         #[cfg(feature = "gui")]
