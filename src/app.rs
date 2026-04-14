@@ -57,9 +57,10 @@ include!(concat!(env!("OUT_DIR"), "/problem_files.rs"));
 pub enum AppState {
     MainMenu,
     ProblemSelection,
+    ProblemSource, // 問題ファイルのソースを閲覧するシーン
     Typing,
     Result,
-    Settings, // 設定画面の状態を追加
+    Settings,
 }
 
 /// TUIの描画モードを定義するenum
@@ -121,9 +122,12 @@ pub struct App<'a> {
     // フォント管理用のフィールド
     pub fonts: Fonts<'a>,
     pub font_choice: FontChoice,
-    pub fps: f64, // FPSを保持するフィールドを追加
-    #[cfg(target_arch = "wasm32")] // wasmでのみ利用
-    pub should_reset_ime: bool, // IMEリセット要求フラグ
+    pub fps: f64,
+    pub source_scroll: usize, // ProblemSource でのスクロール行数
+    #[cfg(target_arch = "wasm32")]
+    pub should_reset_ime: bool,
+    #[cfg(target_arch = "wasm32")]
+    pub should_save_custom_problems: bool, // localStorage への保存要求フラグ
 }
 
 impl<'a> App<'a> {
@@ -146,9 +150,12 @@ impl<'a> App<'a> {
             should_open_file_dialog: false,
             fonts,
             font_choice: FontChoice::YujiSyuku, // デフォルトフォント
-            fps: 0.0, // FPSを初期化
+            fps: 0.0,
+            source_scroll: 0,
             #[cfg(target_arch = "wasm32")]
-            should_reset_ime: false, // 初期値はfalse
+            should_reset_ime: false,
+            #[cfg(target_arch = "wasm32")]
+            should_save_custom_problems: false,
         }
     }
 
@@ -197,6 +204,90 @@ impl<'a> App<'a> {
         match self.font_choice {
             FontChoice::YujiSyuku => &self.fonts.yuji_syuku,
             FontChoice::NotoSerifJP => &self.fonts.noto_serif,
+        }
+    }
+
+    /// インデックスがカスタム問題（builtin でも open-file エントリでもない）かどうか
+    pub fn is_custom_problem(&self, idx: usize) -> bool {
+        let builtin_count = PROBLEM_FILES_NAMES.len();
+        idx >= builtin_count && idx < builtin_count + self.custom_problems.len()
+    }
+
+    /// 問題のソース種別バッジ文字を返す: "B" = builtin, "W" = web(wasm), "F" = file(non-wasm)
+    pub fn problem_source_label(&self, idx: usize) -> &str {
+        if idx < PROBLEM_FILES_NAMES.len() {
+            "B"
+        } else if idx < PROBLEM_FILES_NAMES.len() + self.custom_problems.len() {
+            #[cfg(target_arch = "wasm32")]
+            { "W" }
+            #[cfg(not(target_arch = "wasm32"))]
+            { "F" }
+        } else {
+            "+"
+        }
+    }
+
+    /// 問題のソーステキストを返す（builtin / custom 両対応、open-file は None）
+    pub fn get_problem_source(&self, idx: usize) -> Option<&str> {
+        let builtin_count = PROBLEM_FILES_NAMES.len();
+        if idx < builtin_count {
+            Some(get_problem_content(idx))
+        } else if idx < builtin_count + self.custom_problems.len() {
+            Some(&self.custom_problems[idx - builtin_count].content)
+        } else {
+            None
+        }
+    }
+
+    /// カスタム問題を削除する。選択カーソルを調整する。
+    pub fn delete_custom_problem_at(&mut self, idx: usize) {
+        let builtin_count = PROBLEM_FILES_NAMES.len();
+        let custom_idx = idx.saturating_sub(builtin_count);
+        if custom_idx < self.custom_problems.len() {
+            self.custom_problems.remove(custom_idx);
+            // 削除後に problem_count を超えていれば一つ前に移動
+            let count = self.problem_count();
+            if count > 0 && self.selected_problem_item >= count {
+                self.selected_problem_item = count - 1;
+            }
+            #[cfg(target_arch = "wasm32")]
+            { self.should_save_custom_problems = true; }
+        }
+    }
+
+    /// カスタム問題を一つ上（インデックスを小さく）に移動する。選択カーソルも追従する。
+    pub fn move_custom_problem_up_at(&mut self, idx: usize) {
+        let builtin_count = PROBLEM_FILES_NAMES.len();
+        let custom_idx = idx.saturating_sub(builtin_count);
+        if custom_idx > 0 && custom_idx < self.custom_problems.len() {
+            self.custom_problems.swap(custom_idx, custom_idx - 1);
+            self.selected_problem_item -= 1;
+            #[cfg(target_arch = "wasm32")]
+            { self.should_save_custom_problems = true; }
+        }
+    }
+
+    /// カスタム問題を一つ下（インデックスを大きく）に移動する。選択カーソルも追従する。
+    pub fn move_custom_problem_down_at(&mut self, idx: usize) {
+        let builtin_count = PROBLEM_FILES_NAMES.len();
+        let custom_idx = idx.saturating_sub(builtin_count);
+        if custom_idx + 1 < self.custom_problems.len() {
+            self.custom_problems.swap(custom_idx, custom_idx + 1);
+            self.selected_problem_item += 1;
+            #[cfg(target_arch = "wasm32")]
+            { self.should_save_custom_problems = true; }
+        }
+    }
+
+    /// ProblemSelection の操作説明を、選択中アイテムに応じて動的に返す
+    pub fn problem_selection_instructions(&self) -> String {
+        let idx = self.selected_problem_item;
+        if self.is_open_file_entry(idx) {
+            "Enter: Open | ESC: Back".to_string()
+        } else if self.is_custom_problem(idx) {
+            "Enter: Start | V: Source | X: Delete | U: Move↑ | D: Move↓ | ESC: Back".to_string()
+        } else {
+            "Enter: Start | V: Source | ESC: Back".to_string()
         }
     }
 
@@ -345,7 +436,8 @@ impl<'a> App<'a> {
         if let AppEvent::ChangeScene = event {
             match self.state {
                 AppState::MainMenu => self.instructions_text = "Up/Down: Navigate | Enter: Select".to_string(),
-                AppState::ProblemSelection => self.instructions_text = "Up/Down: Select | Enter: Start | ESC: Back".to_string(),
+                AppState::ProblemSelection => self.instructions_text = self.problem_selection_instructions(),
+                AppState::ProblemSource => self.instructions_text = "Up/Down: Scroll | Enter/ESC: Back".to_string(),
                 AppState::Typing => self.instructions_text = "ESC: Back to Menu | Tab: Cycle Mode".to_string(),
                 AppState::Result => self.instructions_text = "Enter/ESC: Back to Menu".to_string(),
                 AppState::Settings => self.instructions_text = "Up/Down: Select | Enter: Apply | ESC: Back".to_string(),
@@ -415,6 +507,59 @@ impl<'a> App<'a> {
                     },
                     AppEvent::Escape => {
                         self.state = AppState::MainMenu;
+                        self.on_event(AppEvent::ChangeScene);
+                    }
+                    AppEvent::Char { c, .. } => {
+                        let idx = self.selected_problem_item;
+                        match c {
+                            'v' | 'V' => {
+                                // ソースビューアへ遷移（open-file エントリは除く）
+                                if !self.is_open_file_entry(idx) {
+                                    self.source_scroll = 0;
+                                    self.state = AppState::ProblemSource;
+                                    self.on_event(AppEvent::ChangeScene);
+                                }
+                            }
+                            'x' | 'X' => {
+                                if self.is_custom_problem(idx) {
+                                    self.delete_custom_problem_at(idx);
+                                }
+                            }
+                            'u' | 'U' => {
+                                if self.is_custom_problem(idx) {
+                                    self.move_custom_problem_up_at(idx);
+                                }
+                            }
+                            'd' | 'D' => {
+                                if self.is_custom_problem(idx) {
+                                    self.move_custom_problem_down_at(idx);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ => {}
+                }
+                // instructions_text を選択中アイテムに応じて毎回更新
+                if self.state == AppState::ProblemSelection {
+                    self.instructions_text = self.problem_selection_instructions();
+                }
+            }
+            AppState::ProblemSource => {
+                match event {
+                    AppEvent::Up => {
+                        if self.source_scroll > 0 { self.source_scroll -= 1; }
+                    }
+                    AppEvent::Down => {
+                        let total = self.get_problem_source(self.selected_problem_item)
+                            .map(|s| s.lines().count())
+                            .unwrap_or(0);
+                        if self.source_scroll + 1 < total {
+                            self.source_scroll += 1;
+                        }
+                    }
+                    AppEvent::Enter | AppEvent::Escape => {
+                        self.state = AppState::ProblemSelection;
                         self.on_event(AppEvent::ChangeScene);
                     }
                     _ => {}

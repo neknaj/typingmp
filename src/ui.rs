@@ -20,7 +20,7 @@ use alloc::{format, string::{String, ToString}};
 #[cfg(not(feature = "uefi"))]
 use std::string::{String, ToString};
 
-use crate::app::{App, AppState, FontChoice};
+use crate::app::{App, AppState, FontChoice}; // ProblemSource は AppState に含まれる
 use crate::model::{Segment, TypingCorrectnessChar, TypingCorrectnessSegment, TypingCorrectnessWord};
 use crate::renderer::{calculate_pixel_font_size, gui_renderer};
 use crate::typing; // For calculate_total_metrics
@@ -213,6 +213,7 @@ pub fn build_ui<'a>(app: &App<'a>, font: &FontRef<'a>, width: usize, height: usi
         AppState::MainMenu => build_main_menu_ui(app, &mut render_list, menu_gradient),
         AppState::Typing => build_typing_ui(app, &mut render_list, typing_gradient, font, width, height),
         AppState::ProblemSelection => build_problem_selection_ui(app, &mut render_list, menu_gradient),
+        AppState::ProblemSource => build_problem_source_ui(app, &mut render_list, menu_gradient),
         AppState::Result => build_result_ui(app, &mut render_list, result_gradient),
         AppState::Settings => build_settings_ui(app, &mut render_list, settings_gradient),
     }
@@ -372,13 +373,15 @@ fn build_problem_selection_ui(app: &App, render_list: &mut Vec<Renderable>, grad
     for i in start_index..end_index {
         let item = app.problem_name_at(i);
         let is_open_file = app.is_open_file_entry(i);
-        let (text, color) = if i == app.selected_problem_item {
-            let prefix = if is_open_file { "> " } else { "> " };
-            (format!("{}{}", prefix, item), 0xFF_FFFF00)
+        // ソース種別バッジを付与: [B]=builtin, [W]=web(wasm), [F]=file(desktop), [+]=open-file
+        let badge = if is_open_file { "+".to_string() } else { app.problem_source_label(i).to_string() };
+        let selected = i == app.selected_problem_item;
+        let (text, color) = if selected {
+            (format!(">[{}] {}", badge, item), 0xFF_FFFF00u32)
         } else if is_open_file {
-            (format!("  {}", item), 0xFF_888888)
+            (format!(" [{}] {}", badge, item), 0xFF_888888u32)
         } else {
-            (format!("  {}", item), 0xFF_FFFFFF)
+            (format!(" [{}] {}", badge, item), 0xFF_FFFFFF)
         };
         let y_pos = list_y_start + ((i - start_index) as f32 * item_height);
 
@@ -399,6 +402,92 @@ fn build_problem_selection_ui(app: &App, render_list: &mut Vec<Renderable>, grad
     if end_index < app.problem_count() {
         render_list.push(Renderable::Text { text: "▼".to_string(), anchor: Anchor::TopCenter, shift: Shift { x: 0.0, y: list_y_start + list_height },
             align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center }, font_size: FontSize::WindowHeight(0.04), color: 0xFF_AAAAAA });
+    }
+}
+
+/// 問題ファイルのソースコードを閲覧するシーンを描画する
+fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient) {
+    render_list.push(Renderable::Background { gradient });
+
+    let idx = app.selected_problem_item;
+    let label = app.problem_source_label(idx);
+    let name = app.problem_name_at(idx);
+
+    // ヘッダー: "[種別] 問題名"
+    render_list.push(Renderable::BigText {
+        text: format!("[{}] {}", label, name),
+        anchor: Anchor::TopCenter,
+        shift: Shift { x: 0.0, y: 0.05 },
+        align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
+        font_size: FontSize::WindowHeight(0.09),
+        color: 0xFF_AADDFF,
+    });
+
+    // ソースコンテンツ（1行ずつ描画）
+    let line_h: f32 = 0.046;
+    let content_y: f32 = 0.21;
+    // 下部の status_text / instructions_text 領域を避けるため 0.12 を余白として確保
+    let max_lines = ((1.0f32 - content_y - 0.12) / line_h).floor() as usize;
+
+    if let Some(content) = app.get_problem_source(idx) {
+        let total_lines = content.lines().count();
+
+        for (i, line) in content.lines().skip(app.source_scroll).take(max_lines).enumerate() {
+            // 長い行は60文字で切り詰め（バイト境界ではなく文字境界で）
+            let ch_count = line.chars().count();
+            let display = if ch_count > 60 {
+                let truncated: String = line.chars().take(60).collect();
+                format!("{}…", truncated)
+            } else {
+                line.to_string()
+            };
+
+            render_list.push(Renderable::Text {
+                text: display,
+                anchor: Anchor::TopCenter,
+                shift: Shift { x: -0.46, y: content_y + i as f32 * line_h },
+                align: Align { horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top },
+                font_size: FontSize::WindowHeight(0.033),
+                color: 0xFF_99DDAA,
+            });
+        }
+
+        // スクロール位置インジケータ (右上)
+        let scroll_text = if total_lines == 0 {
+            "0/0".to_string()
+        } else {
+            format!("{}/{}", app.source_scroll + 1, total_lines)
+        };
+        render_list.push(Renderable::Text {
+            text: scroll_text,
+            anchor: Anchor::TopRight,
+            shift: Shift { x: -0.01, y: 0.14 },
+            align: Align { horizontal: HorizontalAlign::Right, vertical: VerticalAlign::Top },
+            font_size: FontSize::WindowHeight(0.035),
+            color: 0xFF_666688,
+        });
+
+        // 上下スクロール可能であることを示す矢印
+        if app.source_scroll > 0 {
+            render_list.push(Renderable::Text {
+                text: "▲".to_string(),
+                anchor: Anchor::TopCenter,
+                shift: Shift { x: 0.45, y: content_y - line_h },
+                align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
+                font_size: FontSize::WindowHeight(0.035),
+                color: 0xFF_888888,
+            });
+        }
+        if app.source_scroll + max_lines < total_lines {
+            render_list.push(Renderable::Text {
+                text: "▼".to_string(),
+                anchor: Anchor::TopCenter,
+                shift: Shift { x: 0.45, y: content_y + max_lines as f32 * line_h },
+                align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
+                font_size: FontSize::WindowHeight(0.035),
+                color: 0xFF_888888,
+            });
+        }
     }
 }
 

@@ -426,6 +426,11 @@ pub fn start() -> Result<(), JsValue> {
                     for c in data.chars() {
                         app.on_event(AppEvent::Char { c, timestamp: crate::timestamp::now() });
                     }
+                    // ProblemSelection での削除・並び替えが発生した場合 localStorage に保存
+                    if app.should_save_custom_problems {
+                        save_custom_problems(&app.custom_problems);
+                        app.should_save_custom_problems = false;
+                    }
                 }
             }
         });
