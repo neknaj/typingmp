@@ -81,6 +81,8 @@ features = [
     'HtmlElement',
     'CssStyleDeclaration',
     'PointerEvent',
+    'WheelEvent',
+    'AddEventListenerOptions',
 ]
 
 

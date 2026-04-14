@@ -9,7 +9,7 @@ use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::Clamped;
 use wasm_bindgen::JsCast;
-use web_sys::{CanvasRenderingContext2d, HtmlInputElement, ImageData, InputEvent, KeyboardEvent};
+use web_sys::{CanvasRenderingContext2d, HtmlInputElement, ImageData, InputEvent, KeyboardEvent, WheelEvent};
 
 const LS_KEY: &str = "typingmp_custom_problems";
 
@@ -306,8 +306,9 @@ pub fn start() -> Result<(), JsValue> {
             let touch_start_clone = touch_start.clone();
             let app_clone = app.clone();
             let file_input_clone = file_input.clone();
-            const TAP_MAX_DIST: f64 = 12.0;   // タップ判定の最大移動量 (px)
-            const SWIPE_MIN_DIST: f64 = 40.0; // スワイプ判定の最小移動量 (px)
+            const TAP_MAX_DIST: f64 = 12.0;    // タップ判定の最大移動量 (px)
+            const SWIPE_MIN_DIST: f64 = 40.0;  // スワイプ判定の最小移動量 (px)
+            const SWIPE_STEP_PX: f64 = 60.0;   // スワイプ距離 60px ごとに 1 ステップ
             let closure = Closure::<dyn FnMut(_)>::new(move |e: PointerEvent| {
                 let start = match touch_start_clone.borrow_mut().take() {
                     Some(s) => s,
@@ -324,21 +325,48 @@ pub fn start() -> Result<(), JsValue> {
                         app_clone.borrow_mut().should_open_file_dialog = false;
                         let _ = file_input_clone.click();
                     }
-                } else if dist >= SWIPE_MIN_DIST {
-                    if dy.abs() > dx.abs() {
-                        // 縦スワイプ
+                } else if dist >= SWIPE_MIN_DIST && dy.abs() > dx.abs() {
+                    // 縦スワイプ: 距離に応じてステップ数を調整 (最小 1、最大 5)
+                    let steps = ((dy.abs() / SWIPE_STEP_PX).ceil() as u32).max(1).min(5);
+                    let mut a = app_clone.borrow_mut();
+                    for _ in 0..steps {
                         if dy < 0.0 {
-                            app_clone.borrow_mut().on_event(AppEvent::Up);
+                            a.on_event(AppEvent::Up);
                         } else {
-                            app_clone.borrow_mut().on_event(AppEvent::Down);
+                            a.on_event(AppEvent::Down);
                         }
                     }
-                    // 横スワイプは typing 中の scroll は既存の慣性スクロールが担うため無視
                 }
+                // 横スワイプは無視（タイピング中の横スクロールは将来対応）
             });
             canvas.add_event_listener_with_callback("pointerup", closure.as_ref().unchecked_ref())?;
             closure.forget();
         }
+    }
+
+    // マウスホイール / タッチパッドスクロール → Up/Down イベント
+    // deltaMode: 0=ピクセル, 1=行, 2=ページ
+    {
+        let app_clone = app.clone();
+        let closure = Closure::<dyn FnMut(_)>::new(move |e: WheelEvent| {
+            e.prevent_default();
+            let delta = e.delta_y();
+            let steps = match e.delta_mode() {
+                0 => ((delta.abs() / 50.0).ceil() as u32).max(1).min(5), // ピクセル単位
+                1 => (delta.abs() as u32).max(1).min(5),                  // 行単位
+                _ => 1,                                                     // ページ単位など
+            };
+            let mut a = app_clone.borrow_mut();
+            for _ in 0..steps {
+                if delta < 0.0 {
+                    a.on_event(AppEvent::Up);
+                } else {
+                    a.on_event(AppEvent::Down);
+                }
+            }
+        });
+        canvas.add_event_listener_with_callback("wheel", closure.as_ref().unchecked_ref())?;
+        closure.forget();
     }
 
     // ウィンドウリサイズ時の処理

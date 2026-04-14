@@ -124,14 +124,14 @@
         .flick-key {
             flex: 1;
             position: relative;
-            aspect-ratio: 1 / 1.1;
+            height: 58px;
             background-color: #333;
             border: 1px solid #555;
             border-radius: 6px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: clamp(12px, 3.5vw, 20px);
+            font-size: clamp(14px, 4.5vw, 22px);
             color: #eee;
             touch-action: none;
             cursor: pointer;
@@ -184,90 +184,99 @@
         <button id="key-esc">Esc</button>
     </div>
 
-    <!-- フリックキーボード（タッチデバイスのタイピング中） -->
+    <!-- フリックキーボード（タッチデバイスのタイピング中）
+         3列レイアウト: mobile.slint と統一
+         フリック方向: 上=う段, 左=い段, 右=え段, 下=お段 -->
     <div id="flick-keyboard">
-        <!-- Row 1: あかさたな -->
+        <!-- Row 1: あ か さ -->
         <div class="flick-row">
-            <div class="flick-key" data-row="a"  data-center="あ" data-up="う" data-right="い" data-down="お" data-left="え">
+            <div class="flick-key" data-center="あ" data-up="う" data-left="い" data-right="え" data-down="お">
                 <span class="flick-preview top">う</span>
-                <span class="flick-preview right">い</span>
+                <span class="flick-preview left">い</span>
+                <span class="flick-preview right">え</span>
                 <span class="flick-preview bottom">お</span>
-                <span class="flick-preview left">え</span>
                 <span class="flick-key-label">あ</span>
             </div>
-            <div class="flick-key" data-row="ka" data-center="か" data-up="く" data-right="き" data-down="こ" data-left="け">
+            <div class="flick-key" data-center="か" data-up="く" data-left="き" data-right="け" data-down="こ">
                 <span class="flick-preview top">く</span>
-                <span class="flick-preview right">き</span>
+                <span class="flick-preview left">き</span>
+                <span class="flick-preview right">け</span>
                 <span class="flick-preview bottom">こ</span>
-                <span class="flick-preview left">け</span>
                 <span class="flick-key-label">か</span>
             </div>
-            <div class="flick-key" data-row="sa" data-center="さ" data-up="す" data-right="し" data-down="そ" data-left="せ">
+            <div class="flick-key" data-center="さ" data-up="す" data-left="し" data-right="せ" data-down="そ">
                 <span class="flick-preview top">す</span>
-                <span class="flick-preview right">し</span>
+                <span class="flick-preview left">し</span>
+                <span class="flick-preview right">せ</span>
                 <span class="flick-preview bottom">そ</span>
-                <span class="flick-preview left">せ</span>
                 <span class="flick-key-label">さ</span>
             </div>
-            <div class="flick-key" data-row="ta" data-center="た" data-up="つ" data-right="ち" data-down="と" data-left="て">
+        </div>
+        <!-- Row 2: た な は -->
+        <div class="flick-row">
+            <div class="flick-key" data-center="た" data-up="つ" data-left="ち" data-right="て" data-down="と">
                 <span class="flick-preview top">つ</span>
-                <span class="flick-preview right">ち</span>
+                <span class="flick-preview left">ち</span>
+                <span class="flick-preview right">て</span>
                 <span class="flick-preview bottom">と</span>
-                <span class="flick-preview left">て</span>
                 <span class="flick-key-label">た</span>
             </div>
-            <div class="flick-key" data-row="na" data-center="な" data-up="ぬ" data-right="に" data-down="の" data-left="ね">
+            <div class="flick-key" data-center="な" data-up="ぬ" data-left="に" data-right="ね" data-down="の">
                 <span class="flick-preview top">ぬ</span>
-                <span class="flick-preview right">に</span>
+                <span class="flick-preview left">に</span>
+                <span class="flick-preview right">ね</span>
                 <span class="flick-preview bottom">の</span>
-                <span class="flick-preview left">ね</span>
                 <span class="flick-key-label">な</span>
             </div>
-        </div>
-        <!-- Row 2: はまやらわ -->
-        <div class="flick-row">
-            <div class="flick-key" data-row="ha" data-center="は" data-up="ふ" data-right="ひ" data-down="ほ" data-left="へ">
+            <div class="flick-key" data-center="は" data-up="ふ" data-left="ひ" data-right="へ" data-down="ほ">
                 <span class="flick-preview top">ふ</span>
-                <span class="flick-preview right">ひ</span>
+                <span class="flick-preview left">ひ</span>
+                <span class="flick-preview right">へ</span>
                 <span class="flick-preview bottom">ほ</span>
-                <span class="flick-preview left">へ</span>
                 <span class="flick-key-label">は</span>
             </div>
-            <div class="flick-key" data-row="ma" data-center="ま" data-up="む" data-right="み" data-down="も" data-left="め">
+        </div>
+        <!-- Row 3: ま や ら -->
+        <div class="flick-row">
+            <div class="flick-key" data-center="ま" data-up="む" data-left="み" data-right="め" data-down="も">
                 <span class="flick-preview top">む</span>
-                <span class="flick-preview right">み</span>
+                <span class="flick-preview left">み</span>
+                <span class="flick-preview right">め</span>
                 <span class="flick-preview bottom">も</span>
-                <span class="flick-preview left">め</span>
                 <span class="flick-key-label">ま</span>
             </div>
-            <div class="flick-key" data-row="ya" data-center="や" data-up="ゆ" data-right="（" data-down="よ" data-left="）">
+            <!-- や行: ゆ(上), ゃ(左/小文字), ゅ(右/小文字), よ(下) -->
+            <div class="flick-key" data-center="や" data-up="ゆ" data-left="ゃ" data-right="ゅ" data-down="よ">
                 <span class="flick-preview top">ゆ</span>
-                <span class="flick-preview right">（</span>
+                <span class="flick-preview left">ゃ</span>
+                <span class="flick-preview right">ゅ</span>
                 <span class="flick-preview bottom">よ</span>
-                <span class="flick-preview left">）</span>
                 <span class="flick-key-label">や</span>
             </div>
-            <div class="flick-key" data-row="ra" data-center="ら" data-up="る" data-right="り" data-down="ろ" data-left="れ">
+            <div class="flick-key" data-center="ら" data-up="る" data-left="り" data-right="れ" data-down="ろ">
                 <span class="flick-preview top">る</span>
-                <span class="flick-preview right">り</span>
+                <span class="flick-preview left">り</span>
+                <span class="flick-preview right">れ</span>
                 <span class="flick-preview bottom">ろ</span>
-                <span class="flick-preview left">れ</span>
                 <span class="flick-key-label">ら</span>
             </div>
-            <div class="flick-key" data-row="wa" data-center="わ" data-up="を" data-right="ゐ" data-down="ん" data-left="ゑ">
-                <span class="flick-preview top">を</span>
-                <span class="flick-preview right">ゐ</span>
+        </div>
+        <!-- Row 4: ⌫  わ(+を/ん)  。(+？/！/…/、)  Enter -->
+        <div class="flick-row">
+            <div class="flick-key wide" id="flick-bs" style="font-size:1.1em;">⌫</div>
+            <div class="flick-key" data-center="わ" data-left="を" data-down="ん">
+                <span class="flick-preview left">を</span>
                 <span class="flick-preview bottom">ん</span>
-                <span class="flick-preview left">ゑ</span>
                 <span class="flick-key-label">わ</span>
             </div>
-        </div>
-        <!-- Row 3: 特殊キー -->
-        <div class="flick-row">
-            <div class="flick-key wide" id="flick-bs"    style="font-size:0.85em;">BS</div>
-            <div class="flick-key wide" id="flick-space" >　</div>
-            <div class="flick-key wide" id="flick-enter" style="background:#335;">Enter</div>
-            <div class="flick-key wide" id="flick-esc"   style="font-size:0.75em;">Esc</div>
+            <div class="flick-key" data-center="。" data-up="？" data-left="、" data-right="！" data-down="…">
+                <span class="flick-preview top">？</span>
+                <span class="flick-preview left">、</span>
+                <span class="flick-preview right">！</span>
+                <span class="flick-preview bottom">…</span>
+                <span class="flick-key-label">。</span>
+            </div>
+            <div class="flick-key wide" id="flick-enter" style="background:#223355; font-size:0.85em;">Enter</div>
         </div>
     </div>
 
@@ -317,13 +326,17 @@
 
         // --- フリックキーボード表示制御 ---
         const flickKeyboard = document.getElementById('flick-keyboard');
+        const controlsContainer = document.getElementById('controls-container');
         const isTouchDevice = navigator.maxTouchPoints > 0;
 
-        // アニメーションフレームごとにタイピング中かどうかで表示切替
+        // アニメーションフレームごとにタイピング中かどうかで表示切替。
+        // タイピング中はフリックキーボードを表示し、ナビゲーションボタンを隠す。
         const updateKeyboardVisibility = () => {
             if (isTouchDevice) {
                 const typing = is_typing_active();
                 flickKeyboard.style.display = typing ? 'block' : 'none';
+                // タイピング中はナビゲーションボタンを隠す（フリックキーボードで代替）
+                controlsContainer.style.display = typing ? 'none' : '';
             }
             requestAnimationFrame(updateKeyboardVisibility);
         };
@@ -372,14 +385,10 @@
             });
         });
 
-        // 特殊キー
+        // 特殊キー（BS / Enter）
         document.getElementById('flick-bs').addEventListener('pointerdown', (e) => {
             e.preventDefault();
             trigger_event('Backspace');
-        });
-        document.getElementById('flick-space').addEventListener('pointerdown', (e) => {
-            e.preventDefault();
-            send_char(' ');
         });
         document.getElementById('flick-enter').addEventListener('pointerdown', (e) => {
             e.preventDefault();
@@ -387,10 +396,6 @@
             if (take_file_open_request()) {
                 document.getElementById('problem-file-input').click();
             }
-        });
-        document.getElementById('flick-esc').addEventListener('pointerdown', (e) => {
-            e.preventDefault();
-            trigger_event('Escape');
         });
     }
 
