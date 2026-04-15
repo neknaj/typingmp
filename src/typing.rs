@@ -57,6 +57,44 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
         return Model::Typing(model);
     }
 
+    // MS IME 方式の「ん」自動確定:
+    // unconfirmed が ['n'] の状態で、次の目標文字が「ん」であり、
+    // 入力が あ/い/う/え/お/n/y/' でない子音の場合、
+    // 「n」をもう一度入力して「nn」→「ん」を確定させてから
+    // 元の子音入力を処理する。
+    {
+        let input_lower = input.to_lowercase().next().unwrap_or(input);
+        let is_n_commit_trigger = model.status.unconfirmed == vec!['n']
+            && !matches!(input_lower, 'a' | 'i' | 'u' | 'e' | 'o' | 'n' | 'y' | '\'')
+            && model.content.lines.get(model.status.line as usize)
+                .and_then(|l| l.words.get(model.status.word as usize))
+                .map(|w| {
+                    let t: String = w.segments[model.status.segment as usize..]
+                        .iter()
+                        .map(|seg| {
+                            fn seg_reading(s: &Segment) -> String {
+                                match s {
+                                    Segment::Plain { text } => text.clone(),
+                                    Segment::Annotated { reading, .. } => reading.clone(),
+                                    Segment::Anno { inner, .. } => inner.iter().map(|x| seg_reading(x)).collect(),
+                                }
+                            }
+                            seg_reading(seg)
+                        })
+                        .collect();
+                    let sl: String = t.chars().skip(model.status.char_ as usize).collect();
+                    sl.starts_with('ん')
+                })
+                .unwrap_or(false);
+        if is_n_commit_trigger {
+            log("  [ん auto-commit] triggering 'n' then original input");
+            return match key_input(model, 'n', timestamp) {
+                Model::Typing(m) => key_input(m, input, timestamp),
+                Model::Result(r) => Model::Result(r),
+            };
+        }
+    }
+
     if model
         .user_input
         .is_empty()
@@ -101,6 +139,14 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     }
 
     fn normalize_char(c: char) -> char {
+        // 古典かなの代替入力: ゐ・ヰ は「い」、ゑ・ヱ は「え」として扱う。
+        // フリックキーボードには ゐ/ゑ キーが存在しないため、通常の い/え フリックで
+        // 代替入力できるようにする。ヰ・ヱ（カタカナ版）も同様に対応する。
+        match c {
+            'ゐ' | 'ヰ' => return 'い',
+            'ゑ' | 'ヱ' => return 'え',
+            _ => {}
+        }
         let lower = c.to_lowercase().next().unwrap_or(c);
         if lower >= 'ァ' && lower <= 'ヶ' {
             core::char::from_u32(lower as u32 - 0x60).unwrap_or(lower)
