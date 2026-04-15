@@ -113,12 +113,19 @@
             padding: 0;
         }
 
-        /* フリックキーボード */
+        /* =============================================
+           フリックキーボード
+           5列 × 4行:
+             左列 = 特殊キー (Esc / ▲ / 小゛ / ⌨)
+             中3列 = かなフリックキー
+             右列 = 特殊キー (⌫ / ▼ / ー / ↩)
+           フリック方向: 上=う段 / 左=い段 / 右=え段 / 下=お段
+        ============================================= */
         #flick-keyboard {
             display: none; /* JS で表示制御 */
             flex-shrink: 0;
             width: 100%;
-            background-color: #1a1a1a;
+            background-color: #161620;
             padding: 4px;
             box-sizing: border-box;
             user-select: none;
@@ -132,46 +139,99 @@
             margin-bottom: 3px;
         }
 
+        /* かなフリックキー */
         .flick-key {
             flex: 1;
             position: relative;
-            height: 58px;
-            background-color: #333;
-            border: 1px solid #555;
-            border-radius: 6px;
+            height: 52px;
+            background-color: #2e2e3e;
+            border: 1px solid #444455;
+            border-radius: 8px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: clamp(14px, 4.5vw, 22px);
+            font-size: clamp(13px, 3.8vw, 20px);
             color: #eee;
             touch-action: none;
             cursor: pointer;
-            transition: background-color 0.05s;
+            transition: background-color 0.05s, border-color 0.1s;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.4);
         }
 
         .flick-key.pressing {
-            background-color: #556;
+            background-color: #445;
+        }
+
+        /* 特殊キー (左右の列) */
+        .flick-key.special {
+            background-color: #1e1e2c;
+            border-color: #333344;
+            color: #aaa;
+            font-size: clamp(11px, 3vw, 16px);
+        }
+
+        .flick-key.special.pressing {
+            background-color: #334;
+        }
+
+        /* 決定/Enterキー */
+        .flick-key.enter-key {
+            background-color: #1e304a;
+            border-color: #2255aa;
+            color: #aac4ff;
+        }
+
+        .flick-key.enter-key.pressing {
+            background-color: #2a4a6a;
+        }
+
+        /* BSキー */
+        .flick-key.bs-key {
+            background-color: #2a1e2e;
+            border-color: #553355;
+            color: #cc99cc;
+        }
+
+        /* 無効キー (グリッド維持用の空白) */
+        .flick-key.disabled {
+            background-color: transparent;
+            border-color: transparent;
+            box-shadow: none;
+            pointer-events: none;
+        }
+
+        /* 小゛キー: 濁点モードごとに色変化 */
+        .flick-key.dakuten-mode-dakuten {
+            background-color: #1e3050;
+            border-color: #4488dd;
+            color: #88bbff;
+        }
+        .flick-key.dakuten-mode-handakuten {
+            background-color: #1e4030;
+            border-color: #44aa66;
+            color: #88ffbb;
+        }
+        .flick-key.dakuten-mode-small {
+            background-color: #402010;
+            border-color: #cc7733;
+            color: #ffbb77;
         }
 
         /* フリック方向プレビュー */
         .flick-preview {
             position: absolute;
-            font-size: 0.65em;
-            color: #aaa;
+            font-size: 0.6em;
+            color: #8888aa;
             pointer-events: none;
+            line-height: 1;
         }
-        .flick-preview.top    { top: 2px;    left: 50%; transform: translateX(-50%); }
-        .flick-preview.right  { right: 3px;  top: 50%;  transform: translateY(-50%); }
-        .flick-preview.bottom { bottom: 2px; left: 50%; transform: translateX(-50%); }
-        .flick-preview.left   { left: 3px;   top: 50%;  transform: translateY(-50%); }
+        .flick-preview.top    { top: 3px;    left: 50%; transform: translateX(-50%); }
+        .flick-preview.right  { right: 4px;  top: 50%;  transform: translateY(-50%); }
+        .flick-preview.bottom { bottom: 3px; left: 50%; transform: translateX(-50%); }
+        .flick-preview.left   { left: 4px;   top: 50%;  transform: translateY(-50%); }
 
         .flick-key-label {
             font-weight: bold;
-        }
-
-        /* 特殊キー（BS、Enterなど）は列を広げる */
-        .flick-key.wide {
-            flex: 1.5;
         }
     </style>
 </head>
@@ -179,14 +239,14 @@
 <body>
 
     <div id="canvas-wrapper">
-        <!-- CanvasはRustコードによってここに追加される -->
+        <!-- Canvas は Rust コードによってここに追加される -->
     </div>
 
     <p class="description">
         クロスプラットフォーム対応のタイピング練習アプリケーションです。
     </p>
 
-    <!-- 通常コントロールボタン（縦向き時） -->
+    <!-- 通常コントロールボタン（縦向き時、フリックキーボード非表示中） -->
     <div id="controls-container">
         <button id="key-up">▲</button>
         <button id="key-down">▼</button>
@@ -197,12 +257,23 @@
         <button id="key-kb-toggle" title="キーボード切替">⌨</button>
     </div>
 
-    <!-- フリックキーボード（タッチデバイスのタイピング中）
-         3列レイアウト: mobile.slint と統一
-         フリック方向: 上=う段, 左=い段, 右=え段, 下=お段 -->
+    <!--
+        フリックキーボード (タッチデバイス + タイピング中のみ表示)
+
+        レイアウト:
+          [Esc]  [あ行] [か行] [さ行] [⌫ ]
+          [▲  ]  [た行] [な行] [は行] [▼ ]
+          [小゛]  [ま行] [や行] [ら行] [ー ]
+          [⌨  ]  [    ] [わ行] [。行] [↩ ]
+
+        フリック方向: 上=う段 / 左=い段 / 右=え段 / 下=お段
+        小゛キー: タップ=濁点モード / 上フリック=半濁点モード / 下フリック=小文字モード
+    -->
     <div id="flick-keyboard">
-        <!-- Row 1: あ か さ -->
+
+        <!-- Row 1: Esc  /  あ か さ  /  ⌫ -->
         <div class="flick-row">
+            <div class="flick-key special" id="flick-esc">Esc</div>
             <div class="flick-key" data-center="あ" data-up="う" data-left="い" data-right="え" data-down="お">
                 <span class="flick-preview top">う</span>
                 <span class="flick-preview left">い</span>
@@ -224,9 +295,12 @@
                 <span class="flick-preview bottom">そ</span>
                 <span class="flick-key-label">さ</span>
             </div>
+            <div class="flick-key special bs-key" id="flick-bs">⌫</div>
         </div>
-        <!-- Row 2: た な は -->
+
+        <!-- Row 2: ▲  /  た な は  /  ▼ -->
         <div class="flick-row">
+            <div class="flick-key special" id="flick-nav-up">▲</div>
             <div class="flick-key" data-center="た" data-up="つ" data-left="ち" data-right="て" data-down="と">
                 <span class="flick-preview top">つ</span>
                 <span class="flick-preview left">ち</span>
@@ -248,9 +322,17 @@
                 <span class="flick-preview bottom">ほ</span>
                 <span class="flick-key-label">は</span>
             </div>
+            <div class="flick-key special" id="flick-nav-down">▼</div>
         </div>
-        <!-- Row 3: ま や ら -->
+
+        <!-- Row 3: 小゛  /  ま や ら  /  ー -->
         <div class="flick-row">
+            <!-- 小゛: デッドキー。タップ=濁点 / 上フリック=半濁点 / 下フリック=小文字 -->
+            <div class="flick-key special" id="flick-dakuten">
+                <span class="flick-preview top" style="font-size:0.7em;">゜</span>
+                <span class="flick-preview bottom" style="font-size:0.7em;">小</span>
+                <span class="flick-key-label">小゛</span>
+            </div>
             <div class="flick-key" data-center="ま" data-up="む" data-left="み" data-right="め" data-down="も">
                 <span class="flick-preview top">む</span>
                 <span class="flick-preview left">み</span>
@@ -258,7 +340,7 @@
                 <span class="flick-preview bottom">も</span>
                 <span class="flick-key-label">ま</span>
             </div>
-            <!-- や行: ゆ(上), ゃ(左/小文字), ゅ(右/小文字), よ(下) -->
+            <!-- や行: 中央=や / 上=ゆ / 左=ゃ / 右=ゅ / 下=よ -->
             <div class="flick-key" data-center="や" data-up="ゆ" data-left="ゃ" data-right="ゅ" data-down="よ">
                 <span class="flick-preview top">ゆ</span>
                 <span class="flick-preview left">ゃ</span>
@@ -273,15 +355,23 @@
                 <span class="flick-preview bottom">ろ</span>
                 <span class="flick-key-label">ら</span>
             </div>
+            <!-- ー: 長音符 (カタカナ語に使用) -->
+            <div class="flick-key special" id="flick-chouon">ー</div>
         </div>
-        <!-- Row 4: ⌫  わ(+を/ん)  。(+？/！/…/、)  Enter -->
+
+        <!-- Row 4: ⌨  /  (空白) わ 。  /  ↩ -->
         <div class="flick-row">
-            <div class="flick-key wide" id="flick-bs" style="font-size:1.1em;">⌫</div>
+            <!-- キーボードモード切替 (フリック中でも切替可能) -->
+            <div class="flick-key special" id="flick-kb-mode" style="font-size:0.75em;">⌨</div>
+            <!-- グリッド維持用の空白キー -->
+            <div class="flick-key disabled"></div>
+            <!-- わ行: 中央=わ / 左=を / 下=ん -->
             <div class="flick-key" data-center="わ" data-left="を" data-down="ん">
                 <span class="flick-preview left">を</span>
                 <span class="flick-preview bottom">ん</span>
                 <span class="flick-key-label">わ</span>
             </div>
+            <!-- 。行: 中央=。 / 上=？ / 左=、 / 右=！ / 下=… -->
             <div class="flick-key" data-center="。" data-up="？" data-left="、" data-right="！" data-down="…">
                 <span class="flick-preview top">？</span>
                 <span class="flick-preview left">、</span>
@@ -289,8 +379,9 @@
                 <span class="flick-preview bottom">…</span>
                 <span class="flick-key-label">。</span>
             </div>
-            <div class="flick-key wide" id="flick-enter" style="background:#223355; font-size:0.85em;">Enter</div>
+            <div class="flick-key special enter-key" id="flick-enter">↩</div>
         </div>
+
     </div>
 
     <div id="link-container">
@@ -304,32 +395,100 @@
 <script type="module">
     import init, { trigger_event, take_file_open_request, send_char, is_typing_active } from './pkg/rust_multibackend_app.js';
 
-    // --- キーボードモード管理 ---
-    // localStorage に保存し、次回起動時に復元する。
-    // "app"  : アプリ提供のフリックキーボードを使用 (OSキーボードを抑制)
-    // "device": デバイス標準キーボード(OS IME)を使用
+    // =============================================
+    // キーボードモード管理
+    // "app"   : アプリ提供のフリックキーボード (OSキーボードを抑制)
+    // "device": デバイス標準キーボード (OS IME)
+    // localStorage に保存し次回起動時に復元。デフォルト: app
+    // =============================================
     const LS_KB_KEY = 'typingmp_kb_mode';
     let useAppKeyboard = (localStorage.getItem(LS_KB_KEY) ?? 'app') === 'app';
-    let hiddenInput = null; // WASM init後に取得
+    let hiddenInput = null; // WASM init 後に取得
 
     const applyKeyboardMode = () => {
         if (hiddenInput) {
             if (useAppKeyboard) {
-                // inputmode="none" でOSキーボードを抑制しつつ focus は維持できる
                 hiddenInput.setAttribute('inputmode', 'none');
                 hiddenInput.blur();
             } else {
                 hiddenInput.setAttribute('inputmode', 'text');
             }
         }
-        const btn = document.getElementById('key-kb-toggle');
-        if (btn) {
-            btn.textContent = useAppKeyboard ? '⌨フリック' : '⌨OS';
-            btn.style.borderColor = useAppKeyboard ? '#44aa66' : '#446';
+        // controls-container のトグルボタン
+        const btnCtrl = document.getElementById('key-kb-toggle');
+        if (btnCtrl) {
+            btnCtrl.textContent = useAppKeyboard ? '⌨フリック' : '⌨OS';
+            btnCtrl.style.borderColor = useAppKeyboard ? '#44aa66' : '#446';
+        }
+        // フリックキーボード内のトグルボタン
+        const btnFlick = document.getElementById('flick-kb-mode');
+        if (btnFlick) {
+            btnFlick.textContent = useAppKeyboard ? '⌨' : '⌨OS';
+            btnFlick.style.borderColor = useAppKeyboard ? '#44aa66' : '#446';
         }
         localStorage.setItem(LS_KB_KEY, useAppKeyboard ? 'app' : 'device');
     };
 
+    const toggleKeyboardMode = () => {
+        useAppKeyboard = !useAppKeyboard;
+        applyKeyboardMode();
+    };
+
+    // =============================================
+    // 小゛キー: デッドキー方式の変音/小文字モード
+    // モードが active な間は、次のかなキー入力時に変換してから送信する。
+    // =============================================
+    let dakutenMode = null; // null | 'dakuten' | 'handakuten' | 'small'
+
+    // 濁点変換 (か行・さ行・た行・は行・う)
+    const DAKUTEN = {
+        'か':'が','き':'ぎ','く':'ぐ','け':'げ','こ':'ご',
+        'さ':'ざ','し':'じ','す':'ず','せ':'ぜ','そ':'ぞ',
+        'た':'だ','ち':'ぢ','つ':'づ','て':'で','と':'ど',
+        'は':'ば','ひ':'び','ふ':'ぶ','へ':'べ','ほ':'ぼ',
+        'う':'ゔ',
+    };
+    // 半濁点変換 (は行のみ)
+    const HANDAKUTEN = {
+        'は':'ぱ','ひ':'ぴ','ふ':'ぷ','へ':'ぺ','ほ':'ぽ',
+    };
+    // 小文字変換
+    const SMALL = {
+        'あ':'ぁ','い':'ぃ','う':'ぅ','え':'ぇ','お':'ぉ',
+        'や':'ゃ','ゆ':'ゅ','よ':'ょ','つ':'っ','わ':'ゎ',
+    };
+
+    // 変換テーブルを適用して変換後の文字を返す。変換不可の場合は元文字を返す。
+    const convertWithMode = (char) => {
+        if (!dakutenMode) return char;
+        let table = dakutenMode === 'dakuten' ? DAKUTEN
+                  : dakutenMode === 'handakuten' ? HANDAKUTEN
+                  : SMALL;
+        return table[char] ?? char;
+    };
+
+    // 次のかな入力後にモードをクリアする
+    const clearDakutenMode = () => {
+        dakutenMode = null;
+        updateDakutenKey();
+    };
+
+    // モードを切替える (同じモードを再度選ぶとキャンセル)
+    const setDakutenMode = (mode) => {
+        dakutenMode = (dakutenMode === mode) ? null : mode;
+        updateDakutenKey();
+    };
+
+    const updateDakutenKey = () => {
+        const key = document.getElementById('flick-dakuten');
+        if (!key) return;
+        key.classList.remove('dakuten-mode-dakuten', 'dakuten-mode-handakuten', 'dakuten-mode-small');
+        if (dakutenMode) key.classList.add(`dakuten-mode-${dakutenMode}`);
+    };
+
+    // =============================================
+    // メインの非同期処理
+    // =============================================
     async function run() {
         await init();
 
@@ -337,22 +496,14 @@
         hiddenInput = document.querySelector('input[type="text"]');
         if (hiddenInput) {
             // app キーボードモード時: Rust の pointerdown → input.focus() を即 blur で打ち消す
-            // これによりOSキーボードが表示されない
+            // これにより OS キーボードが表示されない
             hiddenInput.addEventListener('focus', () => {
                 if (useAppKeyboard) {
-                    // setTimeout(0) で Rust の focus 呼び出し完了後に blur
                     setTimeout(() => hiddenInput && hiddenInput.blur(), 0);
                 }
             });
         }
         applyKeyboardMode(); // 保存済みモードを適用
-
-        // キーボード切替ボタン
-        document.getElementById('key-kb-toggle').addEventListener('mousedown', (e) => {
-            e.preventDefault();
-            useAppKeyboard = !useAppKeyboard;
-            applyKeyboardMode();
-        });
 
         const copyToClipboardOnce = async () => {
             try {
@@ -371,7 +522,7 @@
             adjustHeight();
         }
 
-        // --- ナビゲーションボタン ---
+        // --- controls-container のナビゲーションボタン ---
         document.getElementById('key-up').addEventListener('mousedown', (e) => { e.preventDefault(); trigger_event('Up'); });
         document.getElementById('key-down').addEventListener('mousedown', (e) => { e.preventDefault(); trigger_event('Down'); });
         document.getElementById('key-enter').addEventListener('mousedown', (e) => {
@@ -383,15 +534,15 @@
         });
         document.getElementById('key-backspace').addEventListener('mousedown', (e) => { e.preventDefault(); trigger_event('Backspace'); });
         document.getElementById('key-esc').addEventListener('mousedown', (e) => { e.preventDefault(); trigger_event('Escape'); });
+        document.getElementById('key-kb-toggle').addEventListener('mousedown', (e) => { e.preventDefault(); toggleKeyboardMode(); });
 
         // --- フリックキーボード表示制御 ---
         const flickKeyboard = document.getElementById('flick-keyboard');
         const controlsContainer = document.getElementById('controls-container');
         const isTouchDevice = navigator.maxTouchPoints > 0;
 
-        // アニメーションフレームごとにタイピング中かどうかで表示切替。
-        // useAppKeyboard=true  かつタイピング中: フリックキーボード表示、ナビボタン非表示
-        // useAppKeyboard=false またはタイピング外: フリックキーボード非表示、ナビボタン通常
+        // アニメーションフレームごとに状態を確認して表示切替
+        // useAppKeyboard=true かつタイピング中: フリックキーボード表示、ナビボタン非表示
         const updateKeyboardVisibility = () => {
             if (isTouchDevice) {
                 const typing = is_typing_active();
@@ -403,11 +554,13 @@
         };
         requestAnimationFrame(updateKeyboardVisibility);
 
-        // --- フリックキーボードのジェスチャー検出 ---
+        // =============================================
+        // フリックキーボードのジェスチャー検出
+        // =============================================
         const FLICK_THRESHOLD = 20; // px
 
-        const flickKeys = document.querySelectorAll('.flick-key[data-center]');
-        flickKeys.forEach(key => {
+        // --- かなフリックキー (data-center を持つ要素) ---
+        document.querySelectorAll('.flick-key[data-center]').forEach(key => {
             let startX = 0, startY = 0;
 
             key.addEventListener('pointerdown', (e) => {
@@ -426,19 +579,21 @@
                 const dy = e.clientY - startY;
                 const dist = Math.sqrt(dx * dx + dy * dy);
 
-                let char;
+                let base;
                 if (dist < FLICK_THRESHOLD) {
-                    // タップ → センター文字
-                    char = key.dataset.center;
+                    base = key.dataset.center;
                 } else if (Math.abs(dy) > Math.abs(dx)) {
-                    // 縦フリック
-                    char = dy < 0 ? key.dataset.up : key.dataset.down;
+                    base = dy < 0 ? key.dataset.up : key.dataset.down;
                 } else {
-                    // 横フリック
-                    char = dx > 0 ? key.dataset.right : key.dataset.left;
+                    base = dx > 0 ? key.dataset.right : key.dataset.left;
                 }
 
-                if (char) send_char(char);
+                if (base) {
+                    // 小゛モードが active な場合は変換して送信し、モードをクリア
+                    const finalChar = convertWithMode(base);
+                    send_char(finalChar);
+                    if (dakutenMode) clearDakutenMode();
+                }
             });
 
             key.addEventListener('pointercancel', () => {
@@ -446,17 +601,89 @@
             });
         });
 
-        // 特殊キー（BS / Enter）
+        // --- 小゛キー (デッドキー): フリックで濁点/半濁点/小文字モードを切替 ---
+        {
+            const key = document.getElementById('flick-dakuten');
+            let startX = 0, startY = 0;
+
+            key.addEventListener('pointerdown', (e) => {
+                e.preventDefault();
+                startX = e.clientX;
+                startY = e.clientY;
+                key.classList.add('pressing');
+                key.setPointerCapture(e.pointerId);
+            });
+
+            key.addEventListener('pointerup', (e) => {
+                e.preventDefault();
+                key.classList.remove('pressing');
+
+                const dx = e.clientX - startX;
+                const dy = e.clientY - startY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                if (dist < FLICK_THRESHOLD) {
+                    setDakutenMode('dakuten');      // タップ: 濁点モード
+                } else if (Math.abs(dy) > Math.abs(dx)) {
+                    if (dy < 0) setDakutenMode('handakuten'); // 上フリック: 半濁点モード
+                    else        setDakutenMode('small');      // 下フリック: 小文字モード
+                } else {
+                    clearDakutenMode();             // 横フリック: モード解除
+                }
+            });
+
+            key.addEventListener('pointercancel', () => {
+                key.classList.remove('pressing');
+            });
+        }
+
+        // --- ⌫ Backspace ---
         document.getElementById('flick-bs').addEventListener('pointerdown', (e) => {
             e.preventDefault();
+            clearDakutenMode(); // 修飾モード中の BS はモードキャンセルとして使う
             trigger_event('Backspace');
         });
+
+        // --- ↩ Enter ---
         document.getElementById('flick-enter').addEventListener('pointerdown', (e) => {
             e.preventDefault();
+            clearDakutenMode();
             trigger_event('Enter');
             if (take_file_open_request()) {
                 document.getElementById('problem-file-input').click();
             }
+        });
+
+        // --- Esc ---
+        document.getElementById('flick-esc').addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            clearDakutenMode();
+            trigger_event('Escape');
+        });
+
+        // --- ▲ Up ---
+        document.getElementById('flick-nav-up').addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            trigger_event('Up');
+        });
+
+        // --- ▼ Down ---
+        document.getElementById('flick-nav-down').addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            trigger_event('Down');
+        });
+
+        // --- ー 長音符 ---
+        document.getElementById('flick-chouon').addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            send_char('ー');
+            if (dakutenMode) clearDakutenMode();
+        });
+
+        // --- ⌨ キーボードモード切替 (フリックキーボード内) ---
+        document.getElementById('flick-kb-mode').addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            toggleKeyboardMode();
         });
     }
 
