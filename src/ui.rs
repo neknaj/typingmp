@@ -20,7 +20,7 @@ use alloc::{format, string::{String, ToString}};
 #[cfg(not(feature = "uefi"))]
 use std::string::{String, ToString};
 
-use crate::app::{App, AppState, FontChoice}; // ProblemSource は AppState に含まれる
+use crate::app::{App, AppState, FontChoice, ScrollCache}; // ProblemSource は AppState に含まれる
 use crate::model::{Segment, TypingCorrectnessChar, TypingCorrectnessSegment, TypingCorrectnessWord};
 use crate::renderer::{calculate_pixel_font_size, gui_renderer};
 use crate::typing; // For calculate_total_metrics
@@ -680,10 +680,19 @@ fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradien
         let base_font_size = FontSize::WindowHeight(BASE_FONT_SIZE_RATIO);
         let base_pixel_font_size = calculate_pixel_font_size(base_font_size, width, height);
         
-        let target_line_total_width = content_line.words.iter().flat_map(|w| &w.segments).map(|seg| {
-            let text = segment_base_text(seg);
-            gui_renderer::measure_text(font, &text, base_pixel_font_size).0
-        }).sum::<u32>();
+        // スクロールキャッシュに total_width が既にあればそれを使い、毎フレームの
+        // 全セグメント measure_text を回避する。app::update() がこのフレームより先に
+        // キャッシュを更新しているため、タイピング中は常にキャッシュが有効である。
+        let target_line_total_width = app.scroll_cache
+            .as_ref()
+            .filter(|c: &&ScrollCache| c.line == model.status.line)
+            .map(|c| c.total_width as u32)
+            .unwrap_or_else(|| {
+                content_line.words.iter().flat_map(|w| &w.segments).map(|seg| {
+                    let text = segment_base_text(seg);
+                    gui_renderer::measure_text(font, &text, base_pixel_font_size).0
+                }).sum::<u32>()
+            });
 
         // --- 上段（目標テキスト）の構築 ---
         let mut upper_segments = Vec::new();

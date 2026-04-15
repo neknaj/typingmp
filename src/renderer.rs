@@ -117,27 +117,43 @@ pub mod gui_renderer {
         color: u32,
     ) {
         let bounds = outlined.px_bounds();
+        // バッファ高さとテキスト色チャンネルをクロージャ外で一度だけ計算する。
+        // これらはグリフの全ピクセルで共通の値であり、内側で計算すると
+        // ピクセルごとに無駄な除算・シフト・キャストが繰り返されていた。
+        let buf_height = buffer.len() / stride;
+        let text_r = ((color >> 16) & 0xFF) as f32;
+        let text_g = ((color >> 8) & 0xFF) as f32;
+        let text_b = (color & 0xFF) as f32;
+
         outlined.draw(|x, y, c| {
+            // カバレッジがほぼゼロなら背景が透けて見えるだけなのでスキップする。
+            // アンチエイリアス端部には c ≈ 0 のピクセルが多く、分岐コストを補って余りある。
+            if c < 0.004 { return; }
+
             let buffer_x = bounds.min.x as i32 + x as i32;
             let buffer_y = bounds.min.y as i32 + y as i32;
-            let height = buffer.len() / stride;
-            if buffer_x >= 0
-                && buffer_x < stride as i32
-                && buffer_y >= 0
-                && buffer_y < height as i32
+            if buffer_x < 0 || buffer_x >= stride as i32
+                || buffer_y < 0 || buffer_y >= buf_height as i32
             {
-                let index = (buffer_y as usize) * stride + (buffer_x as usize);
-                let text_r = ((color >> 16) & 0xFF) as f32;
-                let text_g = ((color >> 8) & 0xFF) as f32;
-                let text_b = (color & 0xFF) as f32;
-                let bg_r = ((buffer[index] >> 16) & 0xFF) as f32;
-                let bg_g = ((buffer[index] >> 8) & 0xFF) as f32;
-                let bg_b = (buffer[index] & 0xFF) as f32;
-                let r = (text_r * c + bg_r * (1.0 - c)) as u32;
-                let g = (text_g * c + bg_g * (1.0 - c)) as u32;
-                let b = (text_b * c + bg_b * (1.0 - c)) as u32;
-                buffer[index] = (0xFF << 24) | (r << 16) | (g << 8) | b;
+                return;
             }
+            let index = (buffer_y as usize) * stride + (buffer_x as usize);
+
+            // カバレッジがほぼ 1.0 なら背景を読まずに直接書き込む高速パス
+            if c > 0.996 {
+                buffer[index] = (0xFF << 24) | color;
+                return;
+            }
+
+            let c_inv = 1.0 - c;
+            let bg = buffer[index];
+            let bg_r = ((bg >> 16) & 0xFF) as f32;
+            let bg_g = ((bg >> 8) & 0xFF) as f32;
+            let bg_b = (bg & 0xFF) as f32;
+            let r = (text_r * c + bg_r * c_inv) as u32;
+            let g = (text_g * c + bg_g * c_inv) as u32;
+            let b = (text_b * c + bg_b * c_inv) as u32;
+            buffer[index] = (0xFF << 24) | (r << 16) | (g << 8) | b;
         });
     }
 

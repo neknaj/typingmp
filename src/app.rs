@@ -395,30 +395,30 @@ impl<'a> App<'a> {
                 });
 
                 let (total_width, cursor_x_offset) = if need_recompute {
-                    // 1. Calculate the total width of the current line's BASE text for centering
-                    let tw: f32 = current_line_content.words.iter().flat_map(|w| &w.segments).map(|seg| {
-                        let text = seg_base_text_owned(seg);
-                        gui_renderer::measure_text(font, &text, base_pixel_font_size).0 as f32
-                    }).sum();
-
-                    // 2. Calculate the width up to the cursor
+                    // カーソル位置を一度の走査で total_width と cursor_x_offset を同時に求める。
+                    // 以前は全セグメントで total_width を計算した後、カーソル前セグメントで
+                    // cursor_x_offset を別途計算しており、重複した measure_text 呼び出しが発生していた。
+                    let cursor_word = status.word as usize;
+                    let cursor_seg = status.segment as usize;
+                    let mut tw = 0.0f32;
                     let mut cx = 0.0f32;
-                    for i in 0..status.word as usize {
-                        if let Some(word) = current_line_content.words.get(i) {
-                            for seg in &word.segments {
-                                let text = seg_base_text_owned(seg);
-                                cx += gui_renderer::measure_text(font, &text, base_pixel_font_size).0 as f32;
+
+                    for (word_idx, word) in current_line_content.words.iter().enumerate() {
+                        for (seg_idx, seg) in word.segments.iter().enumerate() {
+                            let text = seg_base_text_owned(seg);
+                            let seg_w = gui_renderer::measure_text(font, &text, base_pixel_font_size).0 as f32;
+                            tw += seg_w;
+                            // カーソル位置より前のセグメントのみ cursor_x_offset に加算
+                            if word_idx < cursor_word
+                                || (word_idx == cursor_word && seg_idx < cursor_seg)
+                            {
+                                cx += seg_w;
                             }
                         }
                     }
-                    if let Some(current_word) = current_line_content.words.get(status.word as usize) {
-                        for i in 0..status.segment as usize {
-                            if let Some(seg) = current_word.segments.get(i) {
-                                let text = seg_base_text_owned(seg);
-                                cx += gui_renderer::measure_text(font, &text, base_pixel_font_size).0 as f32;
-                            }
-                        }
-                        if let Some(seg) = current_word.segments.get(status.segment as usize) {
+                    // カーソルが現在セグメント内にある場合、タイプ済み読み仮名分の幅を加算
+                    if let Some(current_word) = current_line_content.words.get(cursor_word) {
+                        if let Some(seg) = current_word.segments.get(cursor_seg) {
                             let reading_text = seg_reading_text_owned(seg);
                             let typed_part = reading_text.chars().take(status.char_ as usize).collect::<String>();
                             cx += gui_renderer::measure_text(font, &typed_part, base_pixel_font_size).0 as f32;

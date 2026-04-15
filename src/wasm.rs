@@ -75,6 +75,9 @@ thread_local! {
     static PIXEL_BUFFER: RefCell<Vec<u32>> = RefCell::new(Vec::new());
     /// ImageData 生成用 u8 バッファを永続化する
     static U8_BUFFER: RefCell<Vec<u8>> = RefCell::new(Vec::new());
+    /// グラデーション描画結果のキャッシュ。パラメータが変わった場合のみ再計算する。
+    /// キー: (start_color, end_color, width, height)
+    static GRADIENT_CACHE: RefCell<Option<(u32, u32, usize, usize, Vec<u32>)>> = RefCell::new(None);
 }
 
 // --- デバッグ用のログ出力ヘルパー関数を追加 ---
@@ -521,14 +524,37 @@ pub fn start() -> Result<(), JsValue> {
                 if pb.len() != needed {
                     pb.resize(needed, 0);
                 }
-                pb.fill(0);
+                // pb.fill(0) は不要: Background グラデーションが毎フレーム全画面を上書きする
 
                 let render_list = ui::build_ui(&app_borrow, current_font, width, height);
 
                 for item in render_list {
                     match item {
                         Renderable::Background { gradient } => {
-                            crate::renderer::draw_linear_gradient(&mut pb, width, height, gradient.start_color, gradient.end_color, (0.0, 0.0), (width as f32, height as f32));
+                            // グラデーションはパラメータ（色・サイズ）が変わった場合のみ再計算し、
+                            // それ以外はキャッシュ済みバッファを memcpy するだけにする。
+                            // 毎フレーム ~2000万 float 演算していたものが memcpy に置き換わる。
+                            GRADIENT_CACHE.with(|gc| {
+                                let mut gc = gc.borrow_mut();
+                                let matches = gc.as_ref().map_or(false, |(sc, ec, gw, gh, _)| {
+                                    *sc == gradient.start_color && *ec == gradient.end_color
+                                        && *gw == width && *gh == height
+                                });
+                                if matches {
+                                    let cached = &gc.as_ref().unwrap().4;
+                                    pb.copy_from_slice(cached);
+                                } else {
+                                    crate::renderer::draw_linear_gradient(
+                                        &mut pb, width, height,
+                                        gradient.start_color, gradient.end_color,
+                                        (0.0, 0.0), (width as f32, height as f32),
+                                    );
+                                    *gc = Some((
+                                        gradient.start_color, gradient.end_color,
+                                        width, height, pb.to_vec(),
+                                    ));
+                                }
+                            });
                         }
                         Renderable::BigText { text, anchor, shift, align, font_size, color } |
                         Renderable::Text { text, anchor, shift, align, font_size, color } => {
