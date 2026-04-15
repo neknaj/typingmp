@@ -108,6 +108,25 @@ pub fn is_typing_active() -> bool {
     })
 }
 
+/// 直前の入力が誤り状態かどうかを返す。
+/// JS 側の大⇔小キー（後置修飾）の適用判定に使用する:
+/// true の場合は最後に送信した文字が間違いとして記録されており、
+/// Backspace で消して修正文字を再送できる。
+#[wasm_bindgen]
+pub fn has_wrong_input() -> bool {
+    APP_INSTANCE.with(|instance| {
+        instance.borrow().as_ref().map_or(false, |app_rc| {
+            let app = app_rc.borrow();
+            if let Some(model) = &app.typing_model {
+                model.status.last_wrong_keydown.is_some()
+                    || !model.status.unconfirmed.is_empty()
+            } else {
+                false
+            }
+        })
+    })
+}
+
 /// ファイルダイアログ要求フラグを取り出す。
 /// JS 側がユーザージェスチャのコールスタック内でこれを呼び、
 /// true なら file input を click() する。

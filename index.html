@@ -263,11 +263,11 @@
         レイアウト:
           [Esc]  [あ行] [か行] [さ行] [⌫ ]
           [▲  ]  [た行] [な行] [は行] [▼ ]
-          [小゛]  [ま行] [や行] [ら行] [ー ]
+          [大⇔小] [ま行] [や行] [ら行] [ー ]
           [⌨  ]  [    ] [わ行] [。行] [↩ ]
 
         フリック方向: 上=う段 / 左=い段 / 右=え段 / 下=お段
-        小゛キー: タップ=濁点モード / 上フリック=半濁点モード / 下フリック=小文字モード
+        大⇔小キー: 直前のフリック文字が誤りのときのみ作動。Gboard 後置修飾方式。
     -->
     <div id="flick-keyboard">
 
@@ -325,13 +325,12 @@
             <div class="flick-key special" id="flick-nav-down">▼</div>
         </div>
 
-        <!-- Row 3: 小゛  /  ま や ら  /  ー -->
+        <!-- Row 3: 大⇔小  /  ま や ら  /  ー -->
         <div class="flick-row">
-            <!-- 小゛: デッドキー。タップ=濁点 / 上フリック=半濁点 / 下フリック=小文字 -->
+            <!-- 大⇔小: 後置修飾キー。直前のフリック文字が誤りのときのみ作動し、
+                 濁音・半濁音・小文字の連鎖に沿って次の形に変換する。 -->
             <div class="flick-key special" id="flick-dakuten">
-                <span class="flick-preview top" style="font-size:0.7em;">゜</span>
-                <span class="flick-preview bottom" style="font-size:0.7em;">小</span>
-                <span class="flick-key-label">小゛</span>
+                <span class="flick-key-label" style="font-size:0.75em;">大⇔小</span>
             </div>
             <div class="flick-key" data-center="ま" data-up="む" data-left="み" data-right="め" data-down="も">
                 <span class="flick-preview top">む</span>
@@ -393,7 +392,7 @@
 
 </html>
 <script type="module">
-    import init, { trigger_event, take_file_open_request, send_char, is_typing_active } from './pkg/rust_multibackend_app.js';
+    import init, { trigger_event, take_file_open_request, send_char, is_typing_active, has_wrong_input } from './pkg/rust_multibackend_app.js';
 
     // =============================================
     // キーボードモード管理
@@ -435,55 +434,76 @@
     };
 
     // =============================================
-    // 小゛キー: デッドキー方式の変音/小文字モード
-    // モードが active な間は、次のかなキー入力時に変換してから送信する。
+    // 大⇔小キー: Gboard スタイルの後置修飾
+    //
+    // 直前のフリック入力が誤りだった場合 (has_wrong_input() = true) のみ作動する。
+    // DAIKOSHO_MAP の連鎖に沿って次の形に変換し、誤り状態を Backspace でクリアしてから
+    // 変換後の文字を再送する。
+    //
+    // 連鎖例:
+    //   か→が→か (2連鎖)
+    //   つ→っ→づ→つ (3連鎖)
+    //   は→ば→ぱ→は (3連鎖)
+    //   あ→ぁ→あ (2連鎖)
     // =============================================
-    let dakutenMode = null; // null | 'dakuten' | 'handakuten' | 'small'
 
-    // 濁点変換 (か行・さ行・た行・は行・う)
-    const DAKUTEN = {
-        'か':'が','き':'ぎ','く':'ぐ','け':'げ','こ':'ご',
-        'さ':'ざ','し':'じ','す':'ず','せ':'ぜ','そ':'ぞ',
-        'た':'だ','ち':'ぢ','つ':'づ','て':'で','と':'ど',
-        'は':'ば','ひ':'び','ふ':'ぶ','へ':'べ','ほ':'ぼ',
-        'う':'ゔ',
-    };
-    // 半濁点変換 (は行のみ)
-    const HANDAKUTEN = {
-        'は':'ぱ','ひ':'ぴ','ふ':'ぷ','へ':'ぺ','ほ':'ぽ',
-    };
-    // 小文字変換
-    const SMALL = {
-        'あ':'ぁ','い':'ぃ','う':'ぅ','え':'ぇ','お':'ぉ',
-        'や':'ゃ','ゆ':'ゅ','よ':'ょ','つ':'っ','わ':'ゎ',
+    // 各文字が次の形へ連鎖するマップ
+    const DAIKOSHO_MAP = new Map([
+        // か行 (清音↔濁音)
+        ['か','が'], ['が','か'],
+        ['き','ぎ'], ['ぎ','き'],
+        ['く','ぐ'], ['ぐ','く'],
+        ['け','げ'], ['げ','け'],
+        ['こ','ご'], ['ご','こ'],
+        // さ行
+        ['さ','ざ'], ['ざ','さ'],
+        ['し','じ'], ['じ','し'],
+        ['す','ず'], ['ず','す'],
+        ['せ','ぜ'], ['ぜ','せ'],
+        ['そ','ぞ'], ['ぞ','そ'],
+        // た行
+        ['た','だ'], ['だ','た'],
+        ['ち','ぢ'], ['ぢ','ち'],
+        ['つ','っ'], ['っ','づ'], ['づ','つ'],  // 3連鎖: 大→小→濁→大
+        ['て','で'], ['で','て'],
+        ['と','ど'], ['ど','と'],
+        // は行 (3連鎖: 清→濁→半濁→清)
+        ['は','ば'], ['ば','ぱ'], ['ぱ','は'],
+        ['ひ','び'], ['び','ぴ'], ['ぴ','ひ'],
+        ['ふ','ぶ'], ['ぶ','ぷ'], ['ぷ','ふ'],
+        ['へ','べ'], ['べ','ぺ'], ['ぺ','へ'],
+        ['ほ','ぼ'], ['ぼ','ぽ'], ['ぽ','ほ'],
+        // う (清音↔濁音)
+        ['う','ゔ'], ['ゔ','う'],
+        // あ行 小文字 (大↔小)
+        ['あ','ぁ'], ['ぁ','あ'],
+        ['い','ぃ'], ['ぃ','い'],
+        ['え','ぇ'], ['ぇ','え'],
+        ['お','ぉ'], ['ぉ','お'],
+        // や行 小文字
+        ['や','ゃ'], ['ゃ','や'],
+        ['ゆ','ゅ'], ['ゅ','ゆ'],
+        ['よ','ょ'], ['ょ','よ'],
+        // わ行 小文字
+        ['わ','ゎ'], ['ゎ','わ'],
+    ]);
+
+    // 直前のフリック入力状態を追跡する
+    let lastFlickChar = null;   // 最後に送信したかな文字
+    let lastFlickAccepted = false; // true = 正解として受理された
+
+    // かな文字をフリックキーボードから送信し、受理状態を更新する
+    const sendFlickChar = (char) => {
+        send_char(char);
+        lastFlickChar = char;
+        // WASM はシングルスレッドなので send_char 直後に状態が確定している
+        lastFlickAccepted = !has_wrong_input();
     };
 
-    // 変換テーブルを適用して変換後の文字を返す。変換不可の場合は元文字を返す。
-    const convertWithMode = (char) => {
-        if (!dakutenMode) return char;
-        let table = dakutenMode === 'dakuten' ? DAKUTEN
-                  : dakutenMode === 'handakuten' ? HANDAKUTEN
-                  : SMALL;
-        return table[char] ?? char;
-    };
-
-    // 次のかな入力後にモードをクリアする
-    const clearDakutenMode = () => {
-        dakutenMode = null;
-        updateDakutenKey();
-    };
-
-    // モードを切替える (同じモードを再度選ぶとキャンセル)
-    const setDakutenMode = (mode) => {
-        dakutenMode = (dakutenMode === mode) ? null : mode;
-        updateDakutenKey();
-    };
-
-    const updateDakutenKey = () => {
-        const key = document.getElementById('flick-dakuten');
-        if (!key) return;
-        key.classList.remove('dakuten-mode-dakuten', 'dakuten-mode-handakuten', 'dakuten-mode-small');
-        if (dakutenMode) key.classList.add(`dakuten-mode-${dakutenMode}`);
+    // ナビゲーション・BS・Enter・Esc など、フリック入力以外の操作でリセット
+    const resetFlickState = () => {
+        lastFlickChar = null;
+        lastFlickAccepted = false;
     };
 
     // =============================================
@@ -589,10 +609,7 @@
                 }
 
                 if (base) {
-                    // 小゛モードが active な場合は変換して送信し、モードをクリア
-                    const finalChar = convertWithMode(base);
-                    send_char(finalChar);
-                    if (dakutenMode) clearDakutenMode();
+                    sendFlickChar(base);
                 }
             });
 
@@ -601,35 +618,28 @@
             });
         });
 
-        // --- 小゛キー (デッドキー): フリックで濁点/半濁点/小文字モードを切替 ---
+        // --- 大⇔小キー (後置修飾): 直前のフリック文字が誤りの場合のみ変換 ---
         {
             const key = document.getElementById('flick-dakuten');
-            let startX = 0, startY = 0;
 
             key.addEventListener('pointerdown', (e) => {
                 e.preventDefault();
-                startX = e.clientX;
-                startY = e.clientY;
                 key.classList.add('pressing');
-                key.setPointerCapture(e.pointerId);
+
+                // 直前のフリックが誤り入力で、変換候補がある場合のみ作動する
+                if (!lastFlickAccepted && lastFlickChar !== null) {
+                    const nextChar = DAIKOSHO_MAP.get(lastFlickChar);
+                    if (nextChar !== undefined) {
+                        // 誤り状態をクリアしてから変換後の文字を送信する
+                        trigger_event('Backspace');
+                        sendFlickChar(nextChar);
+                    }
+                }
             });
 
             key.addEventListener('pointerup', (e) => {
                 e.preventDefault();
                 key.classList.remove('pressing');
-
-                const dx = e.clientX - startX;
-                const dy = e.clientY - startY;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-
-                if (dist < FLICK_THRESHOLD) {
-                    setDakutenMode('dakuten');      // タップ: 濁点モード
-                } else if (Math.abs(dy) > Math.abs(dx)) {
-                    if (dy < 0) setDakutenMode('handakuten'); // 上フリック: 半濁点モード
-                    else        setDakutenMode('small');      // 下フリック: 小文字モード
-                } else {
-                    clearDakutenMode();             // 横フリック: モード解除
-                }
             });
 
             key.addEventListener('pointercancel', () => {
@@ -640,14 +650,14 @@
         // --- ⌫ Backspace ---
         document.getElementById('flick-bs').addEventListener('pointerdown', (e) => {
             e.preventDefault();
-            clearDakutenMode(); // 修飾モード中の BS はモードキャンセルとして使う
+            resetFlickState();
             trigger_event('Backspace');
         });
 
         // --- ↩ Enter ---
         document.getElementById('flick-enter').addEventListener('pointerdown', (e) => {
             e.preventDefault();
-            clearDakutenMode();
+            resetFlickState();
             trigger_event('Enter');
             if (take_file_open_request()) {
                 document.getElementById('problem-file-input').click();
@@ -657,27 +667,28 @@
         // --- Esc ---
         document.getElementById('flick-esc').addEventListener('pointerdown', (e) => {
             e.preventDefault();
-            clearDakutenMode();
+            resetFlickState();
             trigger_event('Escape');
         });
 
         // --- ▲ Up ---
         document.getElementById('flick-nav-up').addEventListener('pointerdown', (e) => {
             e.preventDefault();
+            resetFlickState();
             trigger_event('Up');
         });
 
         // --- ▼ Down ---
         document.getElementById('flick-nav-down').addEventListener('pointerdown', (e) => {
             e.preventDefault();
+            resetFlickState();
             trigger_event('Down');
         });
 
         // --- ー 長音符 ---
         document.getElementById('flick-chouon').addEventListener('pointerdown', (e) => {
             e.preventDefault();
-            send_char('ー');
-            if (dakutenMode) clearDakutenMode();
+            sendFlickChar('ー');
         });
 
         // --- ⌨ キーボードモード切替 (フリックキーボード内) ---
