@@ -73,6 +73,17 @@
             touch-action: manipulation;
         }
 
+        /* キーボード切替ボタン: やや小さめで右端に固定 */
+        #key-kb-toggle {
+            flex-grow: 0;
+            flex-shrink: 0;
+            padding: 8px 10px;
+            font-size: 0.8em;
+            background-color: #2a3a4a;
+            border-color: #446;
+            white-space: nowrap;
+        }
+
         @media (orientation: portrait) {
             #controls-container {
                 display: flex;
@@ -182,6 +193,8 @@
         <button id="key-enter">Enter</button>
         <button id="key-backspace">BS</button>
         <button id="key-esc">Esc</button>
+        <!-- キーボードモード切替: フリック(アプリ提供) ↔ OS IME -->
+        <button id="key-kb-toggle" title="キーボード切替">⌨</button>
     </div>
 
     <!-- フリックキーボード（タッチデバイスのタイピング中）
@@ -291,8 +304,55 @@
 <script type="module">
     import init, { trigger_event, take_file_open_request, send_char, is_typing_active } from './pkg/rust_multibackend_app.js';
 
+    // --- キーボードモード管理 ---
+    // localStorage に保存し、次回起動時に復元する。
+    // "app"  : アプリ提供のフリックキーボードを使用 (OSキーボードを抑制)
+    // "device": デバイス標準キーボード(OS IME)を使用
+    const LS_KB_KEY = 'typingmp_kb_mode';
+    let useAppKeyboard = (localStorage.getItem(LS_KB_KEY) ?? 'app') === 'app';
+    let hiddenInput = null; // WASM init後に取得
+
+    const applyKeyboardMode = () => {
+        if (hiddenInput) {
+            if (useAppKeyboard) {
+                // inputmode="none" でOSキーボードを抑制しつつ focus は維持できる
+                hiddenInput.setAttribute('inputmode', 'none');
+                hiddenInput.blur();
+            } else {
+                hiddenInput.setAttribute('inputmode', 'text');
+            }
+        }
+        const btn = document.getElementById('key-kb-toggle');
+        if (btn) {
+            btn.textContent = useAppKeyboard ? '⌨フリック' : '⌨OS';
+            btn.style.borderColor = useAppKeyboard ? '#44aa66' : '#446';
+        }
+        localStorage.setItem(LS_KB_KEY, useAppKeyboard ? 'app' : 'device');
+    };
+
     async function run() {
         await init();
+
+        // WASM が body に追加する hidden input を取得
+        hiddenInput = document.querySelector('input[type="text"]');
+        if (hiddenInput) {
+            // app キーボードモード時: Rust の pointerdown → input.focus() を即 blur で打ち消す
+            // これによりOSキーボードが表示されない
+            hiddenInput.addEventListener('focus', () => {
+                if (useAppKeyboard) {
+                    // setTimeout(0) で Rust の focus 呼び出し完了後に blur
+                    setTimeout(() => hiddenInput && hiddenInput.blur(), 0);
+                }
+            });
+        }
+        applyKeyboardMode(); // 保存済みモードを適用
+
+        // キーボード切替ボタン
+        document.getElementById('key-kb-toggle').addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            useAppKeyboard = !useAppKeyboard;
+            applyKeyboardMode();
+        });
 
         const copyToClipboardOnce = async () => {
             try {
@@ -330,13 +390,14 @@
         const isTouchDevice = navigator.maxTouchPoints > 0;
 
         // アニメーションフレームごとにタイピング中かどうかで表示切替。
-        // タイピング中はフリックキーボードを表示し、ナビゲーションボタンを隠す。
+        // useAppKeyboard=true  かつタイピング中: フリックキーボード表示、ナビボタン非表示
+        // useAppKeyboard=false またはタイピング外: フリックキーボード非表示、ナビボタン通常
         const updateKeyboardVisibility = () => {
             if (isTouchDevice) {
                 const typing = is_typing_active();
-                flickKeyboard.style.display = typing ? 'block' : 'none';
-                // タイピング中はナビゲーションボタンを隠す（フリックキーボードで代替）
-                controlsContainer.style.display = typing ? 'none' : '';
+                const showFlick = typing && useAppKeyboard;
+                flickKeyboard.style.display = showFlick ? 'block' : 'none';
+                controlsContainer.style.display = showFlick ? 'none' : '';
             }
             requestAnimationFrame(updateKeyboardVisibility);
         };
