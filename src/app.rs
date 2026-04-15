@@ -411,9 +411,12 @@ impl<'a> App<'a> {
                 let target_scroll = cursor_x_offset - total_width / 2.0;
 
                 // 4. Smoothly update the scroll value using delta_time for frame-rate independence
+                // 順方向(右→左, diff > 0): カーソル追従のため素早く追いかける
+                // 逆方向(左→右, diff < 0): かな→漢字確定などでテキストが縮んだ際の
+                //   急激な戻りを抑え、視覚的なノイズを減らす
                 let now = model.scroll.scroll;
                 let diff = target_scroll as f64 - now;
-                let scroll_speed_factor = 5.0; // Adjust this value for faster/slower scrolling
+                let scroll_speed_factor = if diff > 0.0 { 5.0 } else { 1.2 };
                 model.scroll.scroll += diff * scroll_speed_factor * (clamped_delta_time / 1000.0);
             }
         }
