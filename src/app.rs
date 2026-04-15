@@ -414,12 +414,21 @@ impl<'a> App<'a> {
                 let target_scroll = cursor_x_offset - total_width / 2.0;
 
                 // 4. Smoothly update the scroll value using delta_time for frame-rate independence
-                // 順方向(右→左, diff > 0): カーソル追従のため素早く追いかける
-                // 逆方向(左→右, diff < 0): かな→漢字確定などでテキストが縮んだ際の
-                //   急激な戻りを抑え、視覚的なノイズを減らす
+                // 基本速度係数に加え、目標との距離の1.5乗に比例するボーナスを加算する。
+                // これにより、問題切り替え直後などで大きく離れている場合は素早く追従し、
+                // 通常タイピング中の小さなズレは穏やかに補正する。
+                // 順方向(right→left, diff > 0): カーソル追従のため素早く追いかける
+                // 逆方向(left→right, diff < 0): かな→漢字確定などでテキストが縮んだ際の
+                //   急激な戻りを抑えつつ、長距離は加速する
                 let now = model.scroll.scroll;
                 let diff = target_scroll as f64 - now;
-                let scroll_speed_factor = if diff > 0.0 { 5.0 } else { 1.2 };
+                let abs_diff = diff.abs();
+                let exp_bonus = (abs_diff / 150.0).powf(1.5);
+                let scroll_speed_factor = if diff > 0.0 {
+                    5.0 + exp_bonus          // 順方向: 基本5倍 + 距離ボーナス
+                } else {
+                    1.2 + exp_bonus * 0.4    // 逆方向: 基本1.2倍 + 抑制した距離ボーナス
+                };
                 model.scroll.scroll += diff * scroll_speed_factor * (clamped_delta_time / 1000.0);
             }
         }
