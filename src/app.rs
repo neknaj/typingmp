@@ -61,6 +61,7 @@ pub enum AppState {
     Typing,
     Result,
     Settings,
+    HowToUse, // 使い方説明シーン
 }
 
 /// TUIの描画モードを定義するenum
@@ -85,10 +86,10 @@ pub struct Fonts<'a> {
 }
 
 #[cfg(target_arch = "wasm32")]
-const MENU_ITEM_COUNT: usize = 2; // Quitなし
+const MENU_ITEM_COUNT: usize = 3; // Quitなし
 
 #[cfg(not(target_arch = "wasm32"))]
-const MENU_ITEM_COUNT: usize = 3;
+const MENU_ITEM_COUNT: usize = 4;
 
 /// アプリケーションで発生するイベントを定義するenum
 pub enum AppEvent {
@@ -124,6 +125,7 @@ pub struct App<'a> {
     pub font_choice: FontChoice,
     pub fps: f64,
     pub source_scroll: usize, // ProblemSource でのスクロール行数
+    pub how_to_use_scroll: usize, // HowToUse でのスクロール行数
     #[cfg(target_arch = "wasm32")]
     pub should_reset_ime: bool,
     #[cfg(target_arch = "wasm32")]
@@ -152,6 +154,7 @@ impl<'a> App<'a> {
             font_choice: FontChoice::YujiSyuku, // デフォルトフォント
             fps: 0.0,
             source_scroll: 0,
+            how_to_use_scroll: 0,
             #[cfg(target_arch = "wasm32")]
             should_reset_ime: false,
             #[cfg(target_arch = "wasm32")]
@@ -444,6 +447,7 @@ impl<'a> App<'a> {
                 AppState::Typing => self.instructions_text = "ESC: Back to Menu | Tab: Cycle Mode".to_string(),
                 AppState::Result => self.instructions_text = "Enter/ESC: Back to Menu".to_string(),
                 AppState::Settings => self.instructions_text = "Up/Down: Select | Enter: Apply | ESC: Back".to_string(),
+                AppState::HowToUse => self.instructions_text = "Up/Down: Scroll | Enter/ESC: Back".to_string(),
             }
         }
 
@@ -459,10 +463,15 @@ impl<'a> App<'a> {
                             self.on_event(AppEvent::ChangeScene);
                         }
                         1 => {
-                            self.state = AppState::Settings;
+                            self.how_to_use_scroll = 0;
+                            self.state = AppState::HowToUse;
                             self.on_event(AppEvent::ChangeScene);
                         }
                         2 => {
+                            self.state = AppState::Settings;
+                            self.on_event(AppEvent::ChangeScene);
+                        }
+                        3 => {
                             #[cfg(not(target_arch = "wasm32"))]
                             { self.should_quit = true; }
                         }
@@ -568,6 +577,25 @@ impl<'a> App<'a> {
                     _ => {}
                 }
             }
+            AppState::HowToUse => {
+                self.status_text = "How to Use".to_string();
+                match event {
+                    AppEvent::Up => {
+                        if self.how_to_use_scroll > 0 { self.how_to_use_scroll -= 1; }
+                    }
+                    AppEvent::Down => {
+                        let total = crate::ui::HOW_TO_USE_CONTENT.len();
+                        if self.how_to_use_scroll + 1 < total {
+                            self.how_to_use_scroll += 1;
+                        }
+                    }
+                    AppEvent::Enter | AppEvent::Escape => {
+                        self.state = AppState::MainMenu;
+                        self.on_event(AppEvent::ChangeScene);
+                    }
+                    _ => {}
+                }
+            }
             AppState::Typing => {
                 self.status_text = "Start typing!".to_string();
                 match event {
@@ -598,6 +626,24 @@ impl<'a> App<'a> {
                     }
                     AppEvent::Backspace => {
                         if let Some(model) = self.typing_model.as_mut() {
+                            // 誤り入力がある状態で Backspace が押された場合、その位置の TypingCorrectnessChar を
+                            // Incorrect から Pending に戻す。これにより大⇔小キーで修正した後に赤表示が残らない。
+                            if model.status.last_wrong_keydown.is_some() {
+                                let line = model.status.line as usize;
+                                let word = model.status.word as usize;
+                                let seg = model.status.segment as usize;
+                                let char_i = model.status.char_ as usize;
+                                if let Some(c) = model.typing_correctness.lines
+                                    .get_mut(line)
+                                    .and_then(|l| l.words.get_mut(word))
+                                    .and_then(|w| w.segments.get_mut(seg))
+                                    .and_then(|s| s.chars.get_mut(char_i))
+                                {
+                                    if *c == crate::model::TypingCorrectnessChar::Incorrect {
+                                        *c = crate::model::TypingCorrectnessChar::Pending;
+                                    }
+                                }
+                            }
                             model.status.unconfirmed.pop();
                             model.status.last_wrong_keydown = None;
                         }

@@ -263,8 +263,8 @@
         レイアウト:
           [Esc]  [あ行] [か行] [さ行] [⌫ ]
           [▲  ]  [た行] [な行] [は行] [▼ ]
-          [大⇔小] [ま行] [や行] [ら行] [ー ]
-          [⌨  ]  [    ] [わ行] [。行] [↩ ]
+          [    ] [ま行] [や行] [ら行] [ー ]
+          [⌨  ]  [大⇔小] [わ行] [。行] [↩ ]
 
         フリック方向: 上=う段 / 左=い段 / 右=え段 / 下=お段
         大⇔小キー: 直前のフリック文字が誤りのときのみ作動。Gboard 後置修飾方式。
@@ -325,13 +325,9 @@
             <div class="flick-key special" id="flick-nav-down">▼</div>
         </div>
 
-        <!-- Row 3: 大⇔小  /  ま や ら  /  ー -->
+        <!-- Row 3: (空白)  /  ま や ら  /  ー -->
         <div class="flick-row">
-            <!-- 大⇔小: 後置修飾キー。直前のフリック文字が誤りのときのみ作動し、
-                 濁音・半濁音・小文字の連鎖に沿って次の形に変換する。 -->
-            <div class="flick-key special" id="flick-dakuten">
-                <span class="flick-key-label" style="font-size:0.75em;">大⇔小</span>
-            </div>
+            <div class="flick-key disabled"></div>
             <div class="flick-key" data-center="ま" data-up="む" data-left="み" data-right="め" data-down="も">
                 <span class="flick-preview top">む</span>
                 <span class="flick-preview left">み</span>
@@ -358,12 +354,14 @@
             <div class="flick-key special" id="flick-chouon">ー</div>
         </div>
 
-        <!-- Row 4: ⌨  /  (空白) わ 。  /  ↩ -->
+        <!-- Row 4: ⌨  /  大⇔小 わ 。  /  ↩ -->
         <div class="flick-row">
             <!-- キーボードモード切替 (フリック中でも切替可能) -->
             <div class="flick-key special" id="flick-kb-mode" style="font-size:0.75em;">⌨</div>
-            <!-- グリッド維持用の空白キー -->
-            <div class="flick-key disabled"></div>
+            <!-- 大⇔小: 後置修飾キー (わ左・ま下の位置)。直前が誤りのときのみ作動。 -->
+            <div class="flick-key special" id="flick-dakuten">
+                <span class="flick-key-label" style="font-size:0.75em;">大⇔小</span>
+            </div>
             <!-- わ行: 中央=わ / 左=を / 下=ん -->
             <div class="flick-key" data-center="わ" data-left="を" data-down="ん">
                 <span class="flick-preview left">を</span>
@@ -406,7 +404,10 @@
 
     const applyKeyboardMode = () => {
         if (hiddenInput) {
-            if (useAppKeyboard) {
+            // タッチデバイスのみ inputmode="none" / blur を適用して OS 仮想キーボードを抑制する。
+            // デスクトップでは inputmode="text" を維持し、物理キーボードが常に受け付けられるようにする。
+            const isTouch = navigator.maxTouchPoints > 0;
+            if (useAppKeyboard && isTouch) {
                 hiddenInput.setAttribute('inputmode', 'none');
                 hiddenInput.blur();
             } else {
@@ -515,10 +516,11 @@
         // WASM が body に追加する hidden input を取得
         hiddenInput = document.querySelector('input[type="text"]');
         if (hiddenInput) {
-            // app キーボードモード時: Rust の pointerdown → input.focus() を即 blur で打ち消す
-            // これにより OS キーボードが表示されない
+            // app キーボードモード かつ タッチデバイスのときのみ: Rust の pointerdown →
+            // input.focus() を即 blur で打ち消して OS 仮想キーボードを抑制する。
+            // デスクトップ (非タッチ) では blur しないことで物理キーボード入力を維持する。
             hiddenInput.addEventListener('focus', () => {
-                if (useAppKeyboard) {
+                if (useAppKeyboard && navigator.maxTouchPoints > 0) {
                     setTimeout(() => hiddenInput && hiddenInput.blur(), 0);
                 }
             });

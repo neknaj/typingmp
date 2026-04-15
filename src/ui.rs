@@ -180,11 +180,58 @@ pub enum Renderable {
     },
 }
 
+/// How to Use 画面に表示する各行: (テキスト, 色) の定義。
+/// app.rs から行数参照のために pub(crate) で公開する。
+pub(crate) const HOW_TO_USE_CONTENT: &[(&str, u32)] = &[
+    // ─── 基本操作 ───
+    ("[ 基本操作 ]",                              0xFF_FFDD88),
+    ("  ↑ / ↓   : 項目を選択",                   0xFF_CCCCCC),
+    ("  Enter    : 選択 / 決定",                  0xFF_CCCCCC),
+    ("  Esc      : 前の画面に戻る",               0xFF_CCCCCC),
+    ("",                                          0xFF_000000),
+    // ─── タイピング ───
+    ("[ タイピング ]",                            0xFF_FFDD88),
+    ("  ローマ字でひらがな / カタカナを入力",     0xFF_CCCCCC),
+    ("  例: か→ka  き→ki  が→ga  は→ha",        0xFF_888888),
+    ("  青色 : 正しくタイプされた文字",           0xFF_9097FF),
+    ("  赤色 : 間違いを含んだ文字",              0xFF_FF9898),
+    ("  白色 : 現在の入力位置",                  0xFF_FFFFFF),
+    ("  Backspace : 未確定ローマ字 / 誤り入力を消す", 0xFF_CCCCCC),
+    ("",                                          0xFF_000000),
+    // ─── 問題選択 ───
+    ("[ 問題選択 ]",                              0xFF_FFDD88),
+    ("  Enter : タイピング開始",                  0xFF_CCCCCC),
+    ("  V     : ソースファイルを確認",            0xFF_CCCCCC),
+    ("  X     : カスタム問題を削除",              0xFF_CCCCCC),
+    ("  U / D : カスタム問題の順序を変更",        0xFF_CCCCCC),
+    ("",                                          0xFF_000000),
+    // ─── フリック入力 ───
+    ("[ フリック入力 (タッチデバイス) ]",         0xFF_FFDD88),
+    ("  タイピング中に画面下部にキーボードが表示", 0xFF_CCCCCC),
+    ("  中央タップ : あ段  (例: か → か)",        0xFF_CCCCCC),
+    ("  上フリック : う段  (例: か → く)",        0xFF_CCCCCC),
+    ("  左フリック : い段  (例: か → き)",        0xFF_CCCCCC),
+    ("  右フリック : え段  (例: か → け)",        0xFF_CCCCCC),
+    ("  下フリック : お段  (例: か → こ)",        0xFF_CCCCCC),
+    ("  大⇔小キー : 直前の誤り入力を変換",       0xFF_CCCCCC),
+    ("           か→が→か  は→ば→ぱ→は  など", 0xFF_888888),
+    ("           (直前が誤りのときのみ作動)",     0xFF_888888),
+    ("  ゐ / ゑ  : 「い」/「え」で代替入力可",   0xFF_AAAAAA),
+    ("",                                          0xFF_000000),
+    // ─── カスタム問題 ───
+    ("[ カスタム問題 (.ntq 形式) ]",              0xFF_FFDD88),
+    ("  #title タイトル名",                       0xFF_99DDAA),
+    ("  [漢字/よみがな]  : ルビ付きテキスト",    0xFF_99DDAA),
+    ("  {内容/注釈}      : 注釈付きテキスト",    0xFF_99DDAA),
+    ("  空白 / スラッシュ : 単語の区切り",        0xFF_99DDAA),
+    ("  Web版: [Open File...] からアップロード",  0xFF_CCCCCC),
+];
+
 #[cfg(target_arch = "wasm32")]
-const MENU_ITEMS: [&str; 2] = ["Start Typing", "Settings"];
+const MENU_ITEMS: [&str; 3] = ["Start Typing", "How to Use", "Settings"];
 
 #[cfg(not(target_arch = "wasm32"))]
-const MENU_ITEMS: [&str; 3] = ["Start Typing", "Settings", "Quit"];
+const MENU_ITEMS: [&str; 4] = ["Start Typing", "How to Use", "Settings", "Quit"];
 
 // --- タイピング画面のレイアウト定数 ---
 pub const BASE_FONT_SIZE_RATIO: f32 = 0.2;
@@ -216,6 +263,7 @@ pub fn build_ui<'a>(app: &App<'a>, font: &FontRef<'a>, width: usize, height: usi
         AppState::ProblemSource => build_problem_source_ui(app, &mut render_list, menu_gradient),
         AppState::Result => build_result_ui(app, &mut render_list, result_gradient),
         AppState::Settings => build_settings_ui(app, &mut render_list, settings_gradient),
+        AppState::HowToUse => build_how_to_use_ui(app, &mut render_list, menu_gradient),
     }
 
     if app.state != AppState::Typing {
@@ -488,6 +536,81 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
                 color: 0xFF_888888,
             });
         }
+    }
+}
+
+/// How to Use 画面を描画する。
+/// コンテンツは HOW_TO_USE_CONTENT 定数で定義し、スクロールに対応する。
+fn build_how_to_use_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient) {
+    render_list.push(Renderable::Background { gradient });
+
+    render_list.push(Renderable::BigText {
+        text: "How to Use".to_string(),
+        anchor: Anchor::TopCenter,
+        shift: Shift { x: 0.0, y: 0.05 },
+        align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
+        font_size: FontSize::WindowHeight(0.09),
+        color: 0xFF_AADDFF,
+    });
+
+    // ProblemSource と同じレイアウト定数を使用
+    let line_h: f32 = 0.046;
+    let content_y: f32 = 0.21;
+    // 下部の status_text / instructions_text 領域 (0.12) を除いた最大表示行数
+    let max_lines = ((1.0f32 - content_y - 0.12) / line_h).floor() as usize;
+
+    let total_lines = HOW_TO_USE_CONTENT.len();
+    let scroll = app.how_to_use_scroll;
+
+    for (i, (text, color)) in HOW_TO_USE_CONTENT
+        .iter()
+        .skip(scroll)
+        .take(max_lines)
+        .enumerate()
+    {
+        render_list.push(Renderable::Text {
+            text: text.to_string(),
+            anchor: Anchor::TopCenter,
+            shift: Shift { x: -0.46, y: content_y + i as f32 * line_h },
+            align: Align { horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top },
+            font_size: FontSize::WindowHeight(0.033),
+            color: *color,
+        });
+    }
+
+    // スクロール位置インジケータ (右上)
+    let scroll_text = format!("{}/{}", scroll + 1, total_lines.max(1));
+    render_list.push(Renderable::Text {
+        text: scroll_text,
+        anchor: Anchor::TopRight,
+        shift: Shift { x: -0.01, y: 0.14 },
+        align: Align { horizontal: HorizontalAlign::Right, vertical: VerticalAlign::Top },
+        font_size: FontSize::WindowHeight(0.035),
+        color: 0xFF_666688,
+    });
+
+    // 上スクロール可能な場合 ▲ を表示
+    if scroll > 0 {
+        render_list.push(Renderable::Text {
+            text: "▲".to_string(),
+            anchor: Anchor::TopCenter,
+            shift: Shift { x: 0.45, y: content_y - line_h },
+            align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
+            font_size: FontSize::WindowHeight(0.035),
+            color: 0xFF_888888,
+        });
+    }
+
+    // 下スクロール可能な場合 ▼ を表示
+    if scroll + max_lines < total_lines {
+        render_list.push(Renderable::Text {
+            text: "▼".to_string(),
+            anchor: Anchor::TopCenter,
+            shift: Shift { x: 0.45, y: content_y + max_lines as f32 * line_h },
+            align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
+            font_size: FontSize::WindowHeight(0.035),
+            color: 0xFF_888888,
+        });
     }
 }
 
