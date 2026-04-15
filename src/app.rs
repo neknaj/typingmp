@@ -105,6 +105,20 @@ pub enum AppEvent {
     Quit,
 }
 
+/// スクロール計算結果のキャッシュ。毎フレームの全セグメント計測を回避する。
+/// カーソル位置・ウィンドウサイズ・フォントが変わった場合のみ再計算する。
+pub struct ScrollCache {
+    pub line: i32,
+    pub word: i32,
+    pub segment: i32,
+    pub char_: i32,
+    pub width: usize,
+    pub height: usize,
+    pub font_choice: FontChoice,
+    pub total_width: f32,
+    pub cursor_x_offset: f32,
+}
+
 /// アプリケーション全体で共有される状態を保持する構造体
 pub struct App<'a> {
     pub state: AppState,
@@ -126,6 +140,7 @@ pub struct App<'a> {
     pub fps: f64,
     pub source_scroll: usize, // ProblemSource でのスクロール行数
     pub how_to_use_scroll: usize, // HowToUse でのスクロール行数
+    pub scroll_cache: Option<ScrollCache>,
     #[cfg(target_arch = "wasm32")]
     pub should_reset_ime: bool,
     #[cfg(target_arch = "wasm32")]
@@ -155,6 +170,7 @@ impl<'a> App<'a> {
             fps: 0.0,
             source_scroll: 0,
             how_to_use_scroll: 0,
+            scroll_cache: None,
             #[cfg(target_arch = "wasm32")]
             should_reset_ime: false,
             #[cfg(target_arch = "wasm32")]
@@ -327,6 +343,7 @@ impl<'a> App<'a> {
             },
         });
         self.result_model = None;
+        self.scroll_cache = None;
         self.state = AppState::Typing;
         self.on_event(AppEvent::ChangeScene);
 
@@ -363,51 +380,66 @@ impl<'a> App<'a> {
             let base_pixel_font_size = crate::renderer::calculate_pixel_font_size(base_font_size_enum, width, height);
 
             if let Some(current_line_content) = model.content.lines.get(model.status.line as usize) {
-                // 1. Calculate the total width of the current line's BASE text for centering
-                let total_width: f32 = current_line_content.words.iter().flat_map(|w| &w.segments).map(|seg| {
-                    let text = seg_base_text_owned(seg);
-                    gui_renderer::measure_text(font, &text, base_pixel_font_size).0 as f32
-                }).sum();
+                // カーソル位置・ウィンドウサイズ・フォントが変わった場合のみ全セグメント計測を実行する。
+                // 毎フレーム全セグメントを measure_text するのは長大行でのFPS低下の主因。
+                let font_choice = self.font_choice;
+                let status = &model.status;
+                let need_recompute = self.scroll_cache.as_ref().map_or(true, |c| {
+                    c.line != status.line
+                        || c.word != status.word
+                        || c.segment != status.segment
+                        || c.char_ != status.char_
+                        || c.width != width
+                        || c.height != height
+                        || c.font_choice != font_choice
+                });
+
+                let (total_width, cursor_x_offset) = if need_recompute {
+                    // 1. Calculate the total width of the current line's BASE text for centering
+                    let tw: f32 = current_line_content.words.iter().flat_map(|w| &w.segments).map(|seg| {
+                        let text = seg_base_text_owned(seg);
+                        gui_renderer::measure_text(font, &text, base_pixel_font_size).0 as f32
+                    }).sum();
+
+                    // 2. Calculate the width up to the cursor
+                    let mut cx = 0.0f32;
+                    for i in 0..status.word as usize {
+                        if let Some(word) = current_line_content.words.get(i) {
+                            for seg in &word.segments {
+                                let text = seg_base_text_owned(seg);
+                                cx += gui_renderer::measure_text(font, &text, base_pixel_font_size).0 as f32;
+                            }
+                        }
+                    }
+                    if let Some(current_word) = current_line_content.words.get(status.word as usize) {
+                        for i in 0..status.segment as usize {
+                            if let Some(seg) = current_word.segments.get(i) {
+                                let text = seg_base_text_owned(seg);
+                                cx += gui_renderer::measure_text(font, &text, base_pixel_font_size).0 as f32;
+                            }
+                        }
+                        if let Some(seg) = current_word.segments.get(status.segment as usize) {
+                            let reading_text = seg_reading_text_owned(seg);
+                            let typed_part = reading_text.chars().take(status.char_ as usize).collect::<String>();
+                            cx += gui_renderer::measure_text(font, &typed_part, base_pixel_font_size).0 as f32;
+                        }
+                    }
+
+                    self.scroll_cache = Some(ScrollCache {
+                        line: status.line, word: status.word,
+                        segment: status.segment, char_: status.char_,
+                        width, height, font_choice,
+                        total_width: tw, cursor_x_offset: cx,
+                    });
+                    (tw, cx)
+                } else {
+                    let c = self.scroll_cache.as_ref().unwrap();
+                    (c.total_width, c.cursor_x_offset)
+                };
 
                 // セッション開始時の最初のフレームで、スクロールの初期値を設定する
-                // これにより、テキストが画面の右側からスライドインする演出が生まれる
-                // user_inputが空かつscrollが0.0の場合をセッション開始直後と判断
                 if model.user_input.is_empty() && model.scroll.scroll == 0.0 {
-                    // テキストブロックの左端が画面の右端に来るようにスクロール値を計算
                     model.scroll.scroll = (-(width as f32 / 2.0) - (total_width / 2.0)) as f64;
-                }
-
-                // 2. Calculate the width up to the cursor
-                let mut cursor_x_offset = 0.0;
-                // Add width of completed words (based on BASE text)
-                for i in 0..model.status.word as usize {
-                    if let Some(word) = current_line_content.words.get(i) {
-                        for seg in &word.segments {
-                            let text = seg_base_text_owned(seg);
-                            cursor_x_offset += gui_renderer::measure_text(font, &text, base_pixel_font_size).0 as f32;
-                        }
-                    }
-                }
-                
-                // Add width of completed segments in the current word
-                if let Some(current_word) = current_line_content.words.get(model.status.word as usize) {
-                    for i in 0..model.status.segment as usize {
-                        if let Some(seg) = current_word.segments.get(i) {
-                            let text = seg_base_text_owned(seg);
-                            cursor_x_offset += gui_renderer::measure_text(font, &text, base_pixel_font_size).0 as f32;
-                        }
-                    }
-
-                    // For the current segment, add the width of the typed READING text
-                    if let Some(seg) = current_word.segments.get(model.status.segment as usize) {
-                        let reading_text = seg_reading_text_owned(seg);
-                        // Get the substring of the reading text that has been typed so far.
-                        let typed_reading_part = reading_text.chars().take(model.status.char_ as usize).collect::<String>();
-                        // Measure the actual pixel width of the typed part.
-                        let typed_reading_width = gui_renderer::measure_text(font, &typed_reading_part, base_pixel_font_size).0 as f32;
-                        // Add this width to the cursor offset.
-                        cursor_x_offset += typed_reading_width;
-                    }
                 }
 
                 // 3. Calculate target scroll position so the cursor is centered
