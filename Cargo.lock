@@ -4231,6 +4231,7 @@ dependencies = [
  "slint-build",
  "uefi",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
  "winapi",
 ]

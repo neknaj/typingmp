@@ -24,7 +24,7 @@ use crate::app::{App, AppState, FontChoice, ScrollCache}; // ProblemSource は A
 use crate::model::{Segment, TypingCorrectnessChar, TypingCorrectnessSegment, TypingCorrectnessWord};
 use crate::renderer::{calculate_pixel_font_size, gui_renderer};
 use crate::typing; // For calculate_total_metrics
-use ab_glyph::FontRef; // FontRefを渡すために必要
+use ab_glyph::FontVec;
 
 /// 画面上の描画基準点を定義するenum
 #[derive(Clone, Copy)]
@@ -248,7 +248,7 @@ pub const CURSOR_COLOR: u32 = 0xFF_FFFFFF;
 pub const UNCONFIRMED_COLOR: u32 = 0xFF_CCCCCC;
 
 /// Appの状態を受け取り、描画リスト（UIレイアウト）を構築する
-pub fn build_ui<'a>(app: &App<'a>, font: &FontRef<'a>, width: usize, height: usize) -> Vec<Renderable> {
+pub fn build_ui(app: &App, font: &FontVec, width: usize, height: usize) -> Vec<Renderable> {
     let mut render_list = Vec::new();
 
     let menu_gradient = Gradient { start_color: 0xFF_000010, end_color: 0xFF_000000 };
@@ -654,7 +654,7 @@ fn is_segment_correct(segment: &TypingCorrectnessSegment) -> bool {
     !segment.chars.iter().any(|c| *c == TypingCorrectnessChar::Incorrect)
 }
 
-fn build_typing_ui<'a>(app: &App<'a>, render_list: &mut Vec<Renderable>, gradient: Gradient, font: &FontRef<'a>, width: usize, height: usize) {
+fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient, font: &FontVec, width: usize, height: usize) {
     render_list.push(Renderable::Background { gradient });
 
     if let Some(model) = &app.typing_model {

@@ -20,6 +20,7 @@ gui = [
 tui = ["dep:crossterm"]
 wasm = [
     "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
     "dep:web-sys",
     "dep:console_error_panic_hook",
     "getrandom/js"
@@ -46,6 +47,7 @@ winapi = { version = "0.3", features = ["dwmapi", "windef", "minwindef"], option
 
 # WASM用のオプショナルな依存関係
 wasm-bindgen = { version = "0.2.87", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
 console_error_panic_hook = { version = "0.1.7", optional = true }
 getrandom = { version = "0.2", optional = true, features = ["js"] }
 
@@ -83,6 +85,10 @@ features = [
     'PointerEvent',
     'WheelEvent',
     'AddEventListenerOptions',
+    'Request',
+    'RequestInit',
+    'RequestMode',
+    'Response',
 ]
 
 

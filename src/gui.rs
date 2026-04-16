@@ -7,7 +7,7 @@ use crate::renderer::{calculate_pixel_font_size, draw_linear_gradient, gui_rende
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
 use crate::ui::{self, ActiveLowerElement, LowerTypingSegment, Renderable, UpperSegmentState};
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
-use ab_glyph::FontRef;
+use ab_glyph::FontVec;
 #[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
 use minifb::{Key, KeyRepeat, MouseButton, Window, WindowOptions};
 #[cfg(not(feature = "uefi"))]
@@ -36,15 +36,31 @@ fn rgb_to_colorref(r: u8, g: u8, b: u8) -> u32 {
     ((b as u32) << 16) | ((g as u32) << 8) | (r as u32)
 }
 
+/// 実行バイナリのディレクトリまたはカレントディレクトリの `fonts/` からフォントファイルを読み込む
+#[cfg(not(feature = "uefi"))]
+fn load_font_file(name: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    // 1. 実行ファイルのあるディレクトリの fonts/ を試みる
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let path = dir.join("fonts").join(name);
+            if let Ok(data) = std::fs::read(&path) {
+                return Ok(data);
+            }
+        }
+    }
+    // 2. カレントディレクトリの fonts/ にフォールバック
+    let path = std::path::PathBuf::from("fonts").join(name);
+    Ok(std::fs::read(&path)?)
+}
+
 /// GUIアプリケーションのメイン関数
 #[cfg(not(feature = "uefi"))]
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-    // フォントの読み込み
-    let yuji_font_data = include_bytes!("../fonts/YujiSyuku-Regular.ttf");
-    let yuji_font = FontRef::try_from_slice(yuji_font_data).map_err(|_| "Failed to load Yuji Syuku font")?;
-    
-    let noto_font_data = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
-    let noto_font = FontRef::try_from_slice(noto_font_data).map_err(|_| "Failed to load Noto Serif JP font")?;
+    // フォントを実行時にファイルシステムから読み込む
+    let yuji_font = FontVec::try_from_vec(load_font_file("YujiSyuku-Regular.ttf")?)
+        .map_err(|_| "Failed to parse Yuji Syuku font")?;
+    let noto_font = FontVec::try_from_vec(load_font_file("NotoSerifJP-Regular.ttf")?)
+        .map_err(|_| "Failed to parse Noto Serif JP font")?;
 
     let fonts = Fonts {
         yuji_syuku: yuji_font,
@@ -264,7 +280,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[cfg(not(feature = "uefi"))]
-fn handle_input(window: &mut Window, app: &mut App) {
+fn handle_input(window: &mut Window, app: &mut App) {  // App は 'a を持たなくなった
     for key in window.get_keys_pressed(KeyRepeat::No) {
         match key {
             Key::Up => app.on_event(AppEvent::Up),

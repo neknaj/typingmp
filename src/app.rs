@@ -47,7 +47,7 @@ use crate::parser;
 use crate::typing;
 use crate::ui; // typing_rendererの代わりにuiをインポート
 use crate::renderer::gui_renderer;
-use ab_glyph::FontRef;
+use ab_glyph::FontVec;
 
 // ビルドスクリプトによってOUT_DIRに生成されたファイルを取り込む
 include!(concat!(env!("OUT_DIR"), "/problem_files.rs"));
@@ -79,10 +79,10 @@ pub enum FontChoice {
     NotoSerifJP,
 }
 
-/// ロードされたフォントデータを保持する構造体
-pub struct Fonts<'a> {
-    pub yuji_syuku: FontRef<'a>,
-    pub noto_serif: FontRef<'a>,
+/// ロードされたフォントデータを保持する構造体（FontVec はデータを所有するため 'a 不要）
+pub struct Fonts {
+    pub yuji_syuku: FontVec,
+    pub noto_serif: FontVec,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -120,7 +120,7 @@ pub struct ScrollCache {
 }
 
 /// アプリケーション全体で共有される状態を保持する構造体
-pub struct App<'a> {
+pub struct App {
     pub state: AppState,
     pub selected_main_menu_item: usize,
     pub selected_problem_item: usize,
@@ -135,7 +135,7 @@ pub struct App<'a> {
     /// ファイルダイアログを開く要求フラグ（gui/wasm のみ）
     pub should_open_file_dialog: bool,
     // フォント管理用のフィールド
-    pub fonts: Fonts<'a>,
+    pub fonts: Fonts,
     pub font_choice: FontChoice,
     pub fps: f64,
     pub source_scroll: usize, // ProblemSource でのスクロール行数
@@ -147,9 +147,9 @@ pub struct App<'a> {
     pub should_save_custom_problems: bool, // localStorage への保存要求フラグ
 }
 
-impl<'a> App<'a> {
+impl App {
     /// Appの新しいインスタンスを生成する
-    pub fn new(fonts: Fonts<'a>) -> Self {
+    pub fn new(fonts: Fonts) -> Self {
         #[cfg(feature = "uefi")]
         uefi::println!("APP: START");
         Self {
@@ -219,7 +219,7 @@ impl<'a> App<'a> {
     }
 
     /// 現在選択されているフォントへの参照を取得する
-    pub fn get_current_font(&self) -> &FontRef<'a> {
+    pub fn get_current_font(&self) -> &FontVec {
         match self.font_choice {
             FontChoice::YujiSyuku => &self.fonts.yuji_syuku,
             FontChoice::NotoSerifJP => &self.fonts.noto_serif,

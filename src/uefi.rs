@@ -5,7 +5,7 @@ extern crate alloc;
 use crate::app::{App, AppEvent, Fonts};
 use crate::renderer::{calculate_pixel_font_size, gui_renderer};
 use crate::ui::{self, ActiveLowerElement, LowerTypingSegment, Renderable, UpperSegmentState};
-use ab_glyph::{point, Font, FontRef, OutlinedGlyph, PxScale, ScaleFont};
+use ab_glyph::{point, Font, FontVec, OutlinedGlyph, PxScale, ScaleFont};
 use alloc::vec::Vec;
 use uefi::boot::{EventType, TimerTrigger, Tpl};
 use uefi::prelude::*;
@@ -22,12 +22,12 @@ pub fn run() -> Status {
     let mode_info = gop.current_mode_info();
     let (width, height) = mode_info.resolution();
 
-    // 両方のフォントを読み込む
+    // UEFI ではファイルシステムアクセスが困難なため、バイナリにフォントを埋め込む
     let yuji_font_data: &[u8] = include_bytes!("../fonts/YujiSyuku-Regular.ttf");
-    let yuji_font = FontRef::try_from_slice(yuji_font_data).expect("Failed to load Yuji Syuku font");
+    let yuji_font = FontVec::try_from_vec(yuji_font_data.to_vec()).expect("Failed to load Yuji Syuku font");
 
     let noto_font_data: &[u8] = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
-    let noto_font = FontRef::try_from_slice(noto_font_data).expect("Failed to load Noto Serif JP font");
+    let noto_font = FontVec::try_from_vec(noto_font_data.to_vec()).expect("Failed to load Noto Serif JP font");
 
     // Fonts構造体を初期化
     let fonts = Fonts {
@@ -279,7 +279,7 @@ fn draw_rect(
 fn draw_text(
     buffer: &mut [BltPixel],
     stride: usize,
-    font: &FontRef,
+    font: &FontVec,
     text: &str,
     pos: (f32, f32),
     font_size: f32,

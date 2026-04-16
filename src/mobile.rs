@@ -1,7 +1,7 @@
 // src/mobile.rs
 // Slint バックエンド — Android / デスクトップ Mobile UI
 
-use ab_glyph::FontRef;
+use ab_glyph::FontVec;
 use slint::{Image, Rgb8Pixel, SharedPixelBuffer};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -143,11 +143,25 @@ fn canvas_physical_size(win: &AppWindow) -> Option<(usize, usize)> {
     Some((phys.width as usize, h as usize))
 }
 
+/// 実行バイナリのディレクトリまたはカレントディレクトリの `fonts/` からフォントファイルを読み込む
+fn load_font_file(name: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let path = dir.join("fonts").join(name);
+            if let Ok(data) = std::fs::read(&path) {
+                return Ok(data);
+            }
+        }
+    }
+    let path = std::path::PathBuf::from("fonts").join(name);
+    Ok(std::fs::read(&path)?)
+}
+
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let yuji_data: &'static [u8] = include_bytes!("../fonts/YujiSyuku-Regular.ttf");
-    let yuji_font = FontRef::try_from_slice(yuji_data).map_err(|e| e.to_string())?;
-    let noto_data: &'static [u8] = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
-    let noto_font = FontRef::try_from_slice(noto_data).map_err(|e| e.to_string())?;
+    let yuji_font = FontVec::try_from_vec(load_font_file("YujiSyuku-Regular.ttf")?)
+        .map_err(|e| e.to_string())?;
+    let noto_font = FontVec::try_from_vec(load_font_file("NotoSerifJP-Regular.ttf")?)
+        .map_err(|e| e.to_string())?;
 
     let fonts = Fonts { yuji_syuku: yuji_font, noto_serif: noto_font };
     let app_state = Arc::new(Mutex::new(App::new(fonts)));

@@ -15,7 +15,7 @@ use std::vec::Vec;
 use core_maths::CoreFloat;
 
 use crate::ui::FontSize;
-use ab_glyph::{point, Font, FontRef, OutlinedGlyph, PxScale, ScaleFont};
+use ab_glyph::{point, Font, OutlinedGlyph, PxScale, ScaleFont};
 
 /// 背景の描画色
 pub const BG_COLOR: u32 = 0x00_000000;
@@ -79,10 +79,10 @@ pub mod gui_renderer {
     use super::*;
 
     /// 指定されたピクセルバッファの指定位置にテキストを描画する
-    pub fn draw_text(
+    pub fn draw_text<F: Font>(
         buffer: &mut [u32],
         stride: usize,
-        font: &FontRef,
+        font: &F,
         text: &str,
         pos: (f32, f32),
         font_size: f32,
@@ -180,7 +180,7 @@ pub mod gui_renderer {
     }
 
     /// テキストの描画サイズ（幅と高さ）を計算する
-    pub fn measure_text(font: &FontRef, text: &str, size: f32) -> (u32, u32, f32) {
+    pub fn measure_text<F: Font>(font: &F, text: &str, size: f32) -> (u32, u32, f32) {
         let scale = PxScale::from(size);
         let scaled_font = font.as_scaled(scale);
         let mut total_width = 0.0;
@@ -214,8 +214,8 @@ pub mod tui_renderer {
     pub const ART_V_PIXELS_PER_CELL: f32 = 2.0;
 
     /// 指定されたテキストをASCIIアート化し、(文字バッファ, 幅, 高さ, アセント)を返す
-    pub fn render_text_to_art(
-        font: &FontRef,
+    pub fn render_text_to_art<F: Font>(
+        font: &F,
         text: &str,
         font_size_px: f32,
     ) -> (Vec<char>, usize, usize, usize) {
@@ -317,8 +317,8 @@ pub mod tui_renderer {
     }
 
     /// 指定されたテキストを点字アート化し、(文字バッファ, 幅, 高さ, アセント)を返す
-    pub fn render_text_to_braille_art(
-        font: &FontRef,
+    pub fn render_text_to_braille_art<F: Font>(
+        font: &F,
         text: &str,
         font_size_px: f32,
     ) -> (Vec<char>, usize, usize, usize) {

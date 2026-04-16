@@ -12,7 +12,7 @@ use crate::ui::{
     Renderable, Shift, VerticalAlign,
 };
 #[cfg(not(feature = "uefi"))]
-use ab_glyph::FontRef;
+use ab_glyph::FontVec;
 #[cfg(not(feature = "uefi"))]
 use crossterm::{
     cursor, event, execute,
@@ -57,14 +57,28 @@ fn u32_to_crossterm_color(c: u32) -> Color {
 }
 
 
+/// 実行バイナリのディレクトリまたはカレントディレクトリの `fonts/` からフォントファイルを読み込む
+#[cfg(not(feature = "uefi"))]
+fn load_font_file(name: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let path = dir.join("fonts").join(name);
+            if let Ok(data) = std::fs::read(&path) {
+                return Ok(data);
+            }
+        }
+    }
+    let path = std::path::PathBuf::from("fonts").join(name);
+    Ok(std::fs::read(&path)?)
+}
+
 /// TUIアプリケーションのメイン関数
 #[cfg(not(feature = "uefi"))]
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let yuji_font_data = include_bytes!("../fonts/YujiSyuku-Regular.ttf");
-    let yuji_font = FontRef::try_from_slice(yuji_font_data).map_err(|_| "Failed to load Yuji Syuku font")?;
-    
-    let noto_font_data = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
-    let noto_font = FontRef::try_from_slice(noto_font_data).map_err(|_| "Failed to load Noto Serif JP font")?;
+    let yuji_font = FontVec::try_from_vec(load_font_file("YujiSyuku-Regular.ttf")?)
+        .map_err(|_| "Failed to parse Yuji Syuku font")?;
+    let noto_font = FontVec::try_from_vec(load_font_file("NotoSerifJP-Regular.ttf")?)
+        .map_err(|_| "Failed to parse Noto Serif JP font")?;
 
     let fonts = Fonts {
         yuji_syuku: yuji_font,
@@ -450,7 +464,7 @@ fn draw_plain_text_at(buffer: &mut [Cell], text: &str, x: i32, y: i32, width: us
 /// AA化または点字化されたテキストを描画する
 #[cfg(not(feature = "uefi"))]
 fn draw_art_text(
-    buffer: &mut [Cell], font: &FontRef, text: &str, anchor: Anchor, shift: Shift, align: Align, font_size: FontSize,
+    buffer: &mut [Cell], font: &FontVec, text: &str, anchor: Anchor, shift: Shift, align: Align, font_size: FontSize,
     cols: usize, rows: usize, is_braille: bool, color: Color,
 ) {
     let target_art_height_in_cells = calculate_target_art_height(font_size, cols, rows);

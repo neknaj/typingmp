@@ -3,12 +3,13 @@
 use crate::app::{App, AppEvent, CustomProblem, Fonts};
 use crate::renderer::{calculate_pixel_font_size, gui_renderer};
 use crate::ui::{self, ActiveLowerElement, LowerTypingSegment, Renderable, UpperSegmentState};
-use ab_glyph::FontRef;
+use ab_glyph::FontVec;
 use std::cell::RefCell;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::Clamped;
 use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::JsFuture;
 use web_sys::{CanvasRenderingContext2d, HtmlInputElement, ImageData, InputEvent, KeyboardEvent, WheelEvent};
 
 const LS_KEY: &str = "typingmp_custom_problems";
@@ -70,7 +71,7 @@ fn save_custom_problems(problems: &[CustomProblem]) {
 }
 
 thread_local! {
-    static APP_INSTANCE: RefCell<Option<Rc<RefCell<App<'static>>>>> = RefCell::new(None);
+    static APP_INSTANCE: RefCell<Option<Rc<RefCell<App>>>> = RefCell::new(None);
     /// フレームごとの再確保を避けるためピクセルバッファを永続化する
     static PIXEL_BUFFER: RefCell<Vec<u32>> = RefCell::new(Vec::new());
     /// ImageData 生成用 u8 バッファを永続化する
@@ -170,17 +171,39 @@ pub fn trigger_event(event_type: &str) {
 }
 
 
+/// フォントを `/fonts/` から非同期に fetch して Vec<u8> で返す
+async fn fetch_font_bytes(url: &str) -> Result<Vec<u8>, JsValue> {
+    let window = web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;
+    let resp_value = JsFuture::from(window.fetch_with_str(url)).await?;
+    let resp: web_sys::Response = resp_value.dyn_into()?;
+    if !resp.ok() {
+        return Err(JsValue::from_str(&format!("Failed to fetch font (status {}): {}", resp.status(), url)));
+    }
+    let buffer = JsFuture::from(resp.array_buffer()?).await?;
+    let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
+    Ok(bytes)
+}
+
 #[wasm_bindgen(start)]
 #[cfg(feature = "wasm")]
-pub fn start() -> Result<(), JsValue> {
+pub fn start() {
     #[cfg(debug_assertions)]
     {
         crate::wasm_debug_logger::init();
     }
-    
-    debug_log("Application starting.");
-
     console_error_panic_hook::set_once();
+
+    // フォント取得とアプリ初期化を非同期で実行する
+    wasm_bindgen_futures::spawn_local(async {
+        if let Err(e) = start_async().await {
+            web_sys::console::error_1(&e);
+        }
+    });
+}
+
+#[cfg(feature = "wasm")]
+async fn start_async() -> Result<(), JsValue> {
+    debug_log("Application starting (async).");
     let window = web_sys::window().unwrap();
     let document = window.document().unwrap();
     let body = document.body().unwrap();
@@ -218,12 +241,10 @@ pub fn start() -> Result<(), JsValue> {
     
     let context = canvas.get_context("2d")?.unwrap().dyn_into::<CanvasRenderingContext2d>()?;
     
-    let yuji_font_data: &'static [u8] = include_bytes!("../fonts/YujiSyuku-Regular.ttf");
-    let yuji_font = FontRef::try_from_slice(yuji_font_data)
+    // フォントをサーバーから非同期 fetch する（WASM バイナリへの埋め込みを回避）
+    let yuji_font = FontVec::try_from_vec(fetch_font_bytes("/fonts/YujiSyuku-Regular.ttf").await?)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
-
-    let noto_font_data: &'static [u8] = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
-    let noto_font = FontRef::try_from_slice(noto_font_data)
+    let noto_font = FontVec::try_from_vec(fetch_font_bytes("/fonts/NotoSerifJP-Regular.ttf").await?)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     let fonts = Fonts {
