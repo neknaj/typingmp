@@ -171,7 +171,7 @@ pub fn trigger_event(event_type: &str) {
 }
 
 
-/// フォントを `/fonts/` から非同期に fetch して Vec<u8> で返す
+/// フォントを `fonts/` 相対パスから非同期に fetch して Vec<u8> で返す
 async fn fetch_font_bytes(url: &str) -> Result<Vec<u8>, JsValue> {
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;
     let resp_value = JsFuture::from(window.fetch_with_str(url)).await?;
@@ -242,9 +242,9 @@ async fn start_async() -> Result<(), JsValue> {
     let context = canvas.get_context("2d")?.unwrap().dyn_into::<CanvasRenderingContext2d>()?;
     
     // フォントをサーバーから非同期 fetch する（WASM バイナリへの埋め込みを回避）
-    let yuji_font = FontVec::try_from_vec(fetch_font_bytes("/fonts/YujiSyuku-Regular.ttf").await?)
+    let yuji_font = FontVec::try_from_vec(fetch_font_bytes("./fonts/YujiSyuku-Regular.ttf").await?)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let noto_font = FontVec::try_from_vec(fetch_font_bytes("/fonts/NotoSerifJP-Regular.ttf").await?)
+    let noto_font = FontVec::try_from_vec(fetch_font_bytes("./fonts/NotoSerifJP-Regular.ttf").await?)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     let fonts = Fonts {
