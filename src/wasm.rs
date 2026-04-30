@@ -242,14 +242,21 @@ async fn start_async() -> Result<(), JsValue> {
     let context = canvas.get_context("2d")?.unwrap().dyn_into::<CanvasRenderingContext2d>()?;
     
     // フォントをサーバーから非同期 fetch する（WASM バイナリへの埋め込みを回避）
-    let yuji_font = FontVec::try_from_vec(fetch_font_bytes("./fonts/YujiSyuku-Regular.ttf").await?)
+    let japanese_font = FontVec::try_from_vec(fetch_font_bytes("./fonts/YujiSyuku-Regular.ttf").await?)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let noto_font = FontVec::try_from_vec(fetch_font_bytes("./fonts/NotoSerifJP-Regular.ttf").await?)
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let traditional_chinese_font = FontVec::try_from_vec(
+        fetch_font_bytes("./fonts/NotoSerifJP-Regular.ttf").await?,
+    )
+    .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let simplified_chinese_font = FontVec::try_from_vec(
+        fetch_font_bytes("./fonts/NotoSerifJP-Regular.ttf").await?,
+    )
+    .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     let fonts = Fonts {
-        yuji_syuku: yuji_font,
-        noto_serif: noto_font,
+        japanese: japanese_font,
+        traditional_chinese: Some(traditional_chinese_font),
+        simplified_chinese: Some(simplified_chinese_font),
     };
 
     let app = Rc::new(RefCell::new(App::new(fonts)));

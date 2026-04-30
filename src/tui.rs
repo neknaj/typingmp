@@ -75,14 +75,17 @@ fn load_font_file(name: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
 /// TUIアプリケーションのメイン関数
 #[cfg(not(feature = "uefi"))]
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let yuji_font = FontVec::try_from_vec(load_font_file("YujiSyuku-Regular.ttf")?)
+    let japanese_font = FontVec::try_from_vec(load_font_file("YujiSyuku-Regular.ttf")?)
         .map_err(|_| "Failed to parse Yuji Syuku font")?;
-    let noto_font = FontVec::try_from_vec(load_font_file("NotoSerifJP-Regular.ttf")?)
+    let traditional_chinese_font = FontVec::try_from_vec(load_font_file("NotoSerifJP-Regular.ttf")?)
+        .map_err(|_| "Failed to parse Noto Serif JP font")?;
+    let simplified_chinese_font = FontVec::try_from_vec(load_font_file("NotoSerifJP-Regular.ttf")?)
         .map_err(|_| "Failed to parse Noto Serif JP font")?;
 
     let fonts = Fonts {
-        yuji_syuku: yuji_font,
-        noto_serif: noto_font,
+        japanese: japanese_font,
+        traditional_chinese: Some(traditional_chinese_font),
+        simplified_chinese: Some(simplified_chinese_font),
     };
 
     let mut stdout = stdout();

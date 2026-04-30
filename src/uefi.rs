@@ -26,13 +26,18 @@ pub fn run() -> Status {
     let yuji_font_data: &[u8] = include_bytes!("../fonts/YujiSyuku-Regular.ttf");
     let yuji_font = FontVec::try_from_vec(yuji_font_data.to_vec()).expect("Failed to load Yuji Syuku font");
 
-    let noto_font_data: &[u8] = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
-    let noto_font = FontVec::try_from_vec(noto_font_data.to_vec()).expect("Failed to load Noto Serif JP font");
+    let traditional_chinese_font_data: &[u8] = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
+    let traditional_chinese_font = FontVec::try_from_vec(traditional_chinese_font_data.to_vec())
+        .expect("Failed to load Noto Serif JP font");
+    let simplified_chinese_font_data: &[u8] = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
+    let simplified_chinese_font = FontVec::try_from_vec(simplified_chinese_font_data.to_vec())
+        .expect("Failed to load Noto Serif JP font");
 
     // Fonts構造体を初期化
     let fonts = Fonts {
-        yuji_syuku: yuji_font,
-        noto_serif: noto_font,
+        japanese: yuji_font,
+        traditional_chinese: Some(traditional_chinese_font),
+        simplified_chinese: Some(simplified_chinese_font),
     };
 
     // AppにFontsを渡して初期化

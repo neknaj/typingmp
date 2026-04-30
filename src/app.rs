@@ -72,17 +72,61 @@ pub enum TuiDisplayMode {
     Braille,
 }
 
-/// 利用可能なフォントを定義するenum
-#[derive(PartialEq, Clone, Copy, Debug)]
-pub enum FontChoice {
-    YujiSyuku,
-    NotoSerifJP,
+/// どのスクリプト種別のフォントを選択しているか
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Script {
+    Japanese,
+    TraditionalChinese,
+    SimplifiedChinese,
 }
 
-/// ロードされたフォントデータを保持する構造体（FontVec はデータを所有するため 'a 不要）
+impl Script {
+    pub fn label(self) -> &'static str {
+        match self {
+            Script::Japanese => "Japanese",
+            Script::TraditionalChinese => "Traditional Chinese",
+            Script::SimplifiedChinese => "Simplified Chinese",
+        }
+    }
+}
+
+/// ディスカバリーされたフォントエントリ（デスクトップのみ）
+#[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
+#[derive(Clone)]
+pub enum FontSource {
+    Bundled,
+    System,
+}
+
+#[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
+#[derive(Clone)]
+pub struct FontEntry {
+    pub name: String,
+    pub path: std::path::PathBuf,
+    pub source: FontSource,
+}
+
+/// ロードされたフォントデータ（スクリプト別）
 pub struct Fonts {
-    pub yuji_syuku: FontVec,
-    pub noto_serif: FontVec,
+    pub japanese: FontVec,
+    pub traditional_chinese: Option<FontVec>,
+    pub simplified_chinese: Option<FontVec>,
+}
+
+impl Fonts {
+    /// スクリプトに対応するフォントを返す（未設定時は japanese で代替）
+    pub fn get_for_script(&self, script: Script) -> &FontVec {
+        match script {
+            Script::Japanese => &self.japanese,
+            Script::TraditionalChinese => self.traditional_chinese.as_ref().unwrap_or(&self.japanese),
+            Script::SimplifiedChinese => self.simplified_chinese.as_ref().unwrap_or(&self.japanese),
+        }
+    }
+
+    /// メインフォント（日本語フォント）を返す
+    pub fn primary(&self) -> &FontVec {
+        &self.japanese
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -106,7 +150,7 @@ pub enum AppEvent {
 }
 
 /// スクロール計算結果のキャッシュ。毎フレームの全セグメント計測を回避する。
-/// カーソル位置・ウィンドウサイズ・フォントが変わった場合のみ再計算する。
+/// カーソル位置・ウィンドウサイズが変わった場合のみ再計算する。
 pub struct ScrollCache {
     pub line: i32,
     pub word: i32,
@@ -114,7 +158,6 @@ pub struct ScrollCache {
     pub char_: i32,
     pub width: usize,
     pub height: usize,
-    pub font_choice: FontChoice,
     pub total_width: f32,
     pub cursor_x_offset: f32,
 }
@@ -134,9 +177,16 @@ pub struct App {
     pub should_quit: bool,
     /// ファイルダイアログを開く要求フラグ（gui/wasm のみ）
     pub should_open_file_dialog: bool,
-    // フォント管理用のフィールド
     pub fonts: Fonts,
-    pub font_choice: FontChoice,
+    /// Settings画面で選択中のスクリプト
+    pub settings_script: Script,
+    /// フォントピッカーを開いているか
+    pub settings_picking_font: bool,
+    /// フォントピッカー内の選択インデックス
+    pub selected_font_item: usize,
+    /// 発見されたフォント一覧（起動時にディスカバリー）
+    #[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
+    pub available_fonts: Vec<FontEntry>,
     pub fps: f64,
     pub source_scroll: usize, // ProblemSource でのスクロール行数
     pub how_to_use_scroll: usize, // HowToUse でのスクロール行数
@@ -147,11 +197,80 @@ pub struct App {
     pub should_save_custom_problems: bool, // localStorage への保存要求フラグ
 }
 
+/// 非WASM・非UEFI環境でフォントファイルを探索し FontEntry のリストを返す
+#[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
+pub fn discover_available_fonts() -> Vec<FontEntry> {
+    let mut entries: Vec<FontEntry> = Vec::new();
+
+    let mut search_dirs: Vec<(std::path::PathBuf, FontSource)> = Vec::new();
+
+    // バンドル済みフォントディレクトリ
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            search_dirs.push((dir.join("fonts"), FontSource::Bundled));
+        }
+    }
+    search_dirs.push((std::path::PathBuf::from("fonts"), FontSource::Bundled));
+
+    // OS 別のシステムフォントディレクトリ
+    #[cfg(target_os = "windows")]
+    {
+        search_dirs.push((std::path::PathBuf::from(r"C:\Windows\Fonts"), FontSource::System));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        search_dirs.push((std::path::PathBuf::from("/System/Library/Fonts"), FontSource::System));
+        search_dirs.push((std::path::PathBuf::from("/Library/Fonts"), FontSource::System));
+        if let Ok(home) = std::env::var("HOME") {
+            search_dirs.push((std::path::PathBuf::from(home).join("Library/Fonts"), FontSource::System));
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        search_dirs.push((std::path::PathBuf::from("/usr/share/fonts"), FontSource::System));
+        search_dirs.push((std::path::PathBuf::from("/usr/local/share/fonts"), FontSource::System));
+        if let Ok(home) = std::env::var("HOME") {
+            search_dirs.push((std::path::PathBuf::from(home).join(".local/share/fonts"), FontSource::System));
+        }
+    }
+
+    let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for (dir, source) in search_dirs {
+        if let Ok(read_dir) = std::fs::read_dir(&dir) {
+            for entry in read_dir.flatten() {
+                let path = entry.path();
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    let ext_lower = ext.to_lowercase();
+                    if ext_lower == "ttf" || ext_lower == "otf" {
+                        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                            let name = stem.to_string();
+                            if seen_names.insert(name.clone()) {
+                                entries.push(FontEntry {
+                                    name,
+                                    path,
+                                    source: source.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    entries
+}
+
 impl App {
     /// Appの新しいインスタンスを生成する
     pub fn new(fonts: Fonts) -> Self {
         #[cfg(feature = "uefi")]
         uefi::println!("APP: START");
+
+        #[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
+        let available_fonts = discover_available_fonts();
+
         Self {
             state: AppState::MainMenu,
             selected_main_menu_item: 0,
@@ -166,7 +285,11 @@ impl App {
             should_quit: false,
             should_open_file_dialog: false,
             fonts,
-            font_choice: FontChoice::YujiSyuku, // デフォルトフォント
+            settings_script: Script::Japanese,
+            settings_picking_font: false,
+            selected_font_item: 0,
+            #[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
+            available_fonts,
             fps: 0.0,
             source_scroll: 0,
             how_to_use_scroll: 0,
@@ -218,12 +341,9 @@ impl App {
         }
     }
 
-    /// 現在選択されているフォントへの参照を取得する
+    /// 現在の設定言語に合わせたメインフォントへの参照を取得する
     pub fn get_current_font(&self) -> &FontVec {
-        match self.font_choice {
-            FontChoice::YujiSyuku => &self.fonts.yuji_syuku,
-            FontChoice::NotoSerifJP => &self.fonts.noto_serif,
-        }
+        self.fonts.get_for_script(self.settings_script)
     }
 
     /// インデックスがカスタム問題（builtin でも open-file エントリでもない）かどうか
@@ -310,6 +430,21 @@ impl App {
         }
     }
 
+    /// 選択中のスクリプトに対してフォントファイルをロードして適用する
+    pub fn load_font_for_script(&mut self, script: Script, path: &std::path::Path) {
+        if let Ok(data) = std::fs::read(path) {
+            if let Ok(font) = FontVec::try_from_vec(data) {
+                match script {
+                    Script::Japanese => self.fonts.japanese = font,
+                    Script::TraditionalChinese => self.fonts.traditional_chinese = Some(font),
+                    Script::SimplifiedChinese => self.fonts.simplified_chinese = Some(font),
+                }
+                // フォントが変わったのでスクロールキャッシュを破棄する
+                self.scroll_cache = None;
+            }
+        }
+    }
+
     /// 新しいタイピングセッションを開始する
     fn start_typing_session(&mut self, problem_index: usize) {
         // 選択されたインデックスに基づいて問題文を読み込む
@@ -365,24 +500,17 @@ impl App {
             return;
         }
         // delta_timeが極端に大きい場合（デバッガで停止した場合など）にスクロールが飛びすぎるのを防ぐ
-        // 100ms (0.1秒) を上限とする
         let clamped_delta_time = delta_time.min(100.0);
 
         if let Some(model) = self.typing_model.as_mut() {
 
-            // ブロック内で不変参照を取得することで借用ルール違反を回避
-            let font = match self.font_choice {
-                FontChoice::YujiSyuku => &self.fonts.yuji_syuku,
-                FontChoice::NotoSerifJP => &self.fonts.noto_serif,
-            };
+            let font = self.fonts.primary();
 
             let base_font_size_enum = crate::ui::FontSize::WindowHeight(ui::BASE_FONT_SIZE_RATIO);
             let base_pixel_font_size = crate::renderer::calculate_pixel_font_size(base_font_size_enum, width, height);
 
             if let Some(current_line_content) = model.content.lines.get(model.status.line as usize) {
-                // カーソル位置・ウィンドウサイズ・フォントが変わった場合のみ全セグメント計測を実行する。
-                // 毎フレーム全セグメントを measure_text するのは長大行でのFPS低下の主因。
-                let font_choice = self.font_choice;
+                // カーソル位置・ウィンドウサイズが変わった場合のみ全セグメント計測を実行する。
                 let status = &model.status;
                 let need_recompute = self.scroll_cache.as_ref().map_or(true, |c| {
                     c.line != status.line
@@ -391,13 +519,9 @@ impl App {
                         || c.char_ != status.char_
                         || c.width != width
                         || c.height != height
-                        || c.font_choice != font_choice
                 });
 
                 let (total_width, cursor_x_offset) = if need_recompute {
-                    // カーソル位置を一度の走査で total_width と cursor_x_offset を同時に求める。
-                    // 以前は全セグメントで total_width を計算した後、カーソル前セグメントで
-                    // cursor_x_offset を別途計算しており、重複した measure_text 呼び出しが発生していた。
                     let cursor_word = status.word as usize;
                     let cursor_seg = status.segment as usize;
                     let mut tw = 0.0f32;
@@ -408,7 +532,6 @@ impl App {
                             let text = seg_base_text_owned(seg);
                             let seg_w = gui_renderer::measure_text(font, &text, base_pixel_font_size).0 as f32;
                             tw += seg_w;
-                            // カーソル位置より前のセグメントのみ cursor_x_offset に加算
                             if word_idx < cursor_word
                                 || (word_idx == cursor_word && seg_idx < cursor_seg)
                             {
@@ -416,7 +539,6 @@ impl App {
                             }
                         }
                     }
-                    // カーソルが現在セグメント内にある場合、タイプ済み読み仮名分の幅を加算
                     if let Some(current_word) = current_line_content.words.get(cursor_word) {
                         if let Some(seg) = current_word.segments.get(cursor_seg) {
                             let reading_text = seg_reading_text_owned(seg);
@@ -428,7 +550,7 @@ impl App {
                     self.scroll_cache = Some(ScrollCache {
                         line: status.line, word: status.word,
                         segment: status.segment, char_: status.char_,
-                        width, height, font_choice,
+                        width, height,
                         total_width: tw, cursor_x_offset: cx,
                     });
                     (tw, cx)
@@ -437,29 +559,20 @@ impl App {
                     (c.total_width, c.cursor_x_offset)
                 };
 
-                // セッション開始時の最初のフレームで、スクロールの初期値を設定する
                 if model.user_input.is_empty() && model.scroll.scroll == 0.0 {
                     model.scroll.scroll = (-(width as f32 / 2.0) - (total_width / 2.0)) as f64;
                 }
 
-                // 3. Calculate target scroll position so the cursor is centered
                 let target_scroll = cursor_x_offset - total_width / 2.0;
 
-                // 4. Smoothly update the scroll value using delta_time for frame-rate independence
-                // 基本速度係数に加え、目標との距離の1.5乗に比例するボーナスを加算する。
-                // これにより、問題切り替え直後などで大きく離れている場合は素早く追従し、
-                // 通常タイピング中の小さなズレは穏やかに補正する。
-                // 順方向(right→left, diff > 0): カーソル追従のため素早く追いかける
-                // 逆方向(left→right, diff < 0): かな→漢字確定などでテキストが縮んだ際の
-                //   急激な戻りを抑えつつ、長距離は加速する
                 let now = model.scroll.scroll;
                 let diff = target_scroll as f64 - now;
                 let abs_diff = diff.abs();
                 let exp_bonus = (abs_diff / 150.0).powf(1.5);
                 let scroll_speed_factor = if diff > 0.0 {
-                    5.0 + exp_bonus          // 順方向: 基本5倍 + 距離ボーナス
+                    5.0 + exp_bonus
                 } else {
-                    1.2 + exp_bonus * 0.4    // 逆方向: 基本1.2倍 + 抑制した距離ボーナス
+                    1.2 + exp_bonus * 0.4
                 };
                 model.scroll.scroll += diff * scroll_speed_factor * (clamped_delta_time / 1000.0);
             }
@@ -522,23 +635,82 @@ impl App {
                 }
             }
             AppState::Settings => {
-                self.status_text = "Select a font.".to_string();
-                match event {
-                    AppEvent::Up => if self.selected_settings_item > 0 { self.selected_settings_item -= 1; },
-                    AppEvent::Down => if self.selected_settings_item < 1 { self.selected_settings_item += 1; },
-                    AppEvent::Enter => {
-                        self.font_choice = match self.selected_settings_item {
-                            0 => FontChoice::YujiSyuku,
-                            _ => FontChoice::NotoSerifJP,
-                        };
-                        self.state = AppState::MainMenu;
-                        self.on_event(AppEvent::ChangeScene);
+                self.status_text = "Select a font for each script.".to_string();
+                if !self.settings_picking_font {
+                    // スクリプト選択モード: Up/Down で 3 スクリプトをサイクル
+                    const SCRIPT_COUNT: usize = 3;
+                    match event {
+                        AppEvent::Up => {
+                            if self.selected_settings_item > 0 {
+                                self.selected_settings_item -= 1;
+                            }
+                            self.settings_script = match self.selected_settings_item {
+                                0 => Script::Japanese,
+                                1 => Script::TraditionalChinese,
+                                _ => Script::SimplifiedChinese,
+                            };
+                        }
+                        AppEvent::Down => {
+                            if self.selected_settings_item < SCRIPT_COUNT - 1 {
+                                self.selected_settings_item += 1;
+                            }
+                            self.settings_script = match self.selected_settings_item {
+                                0 => Script::Japanese,
+                                1 => Script::TraditionalChinese,
+                                _ => Script::SimplifiedChinese,
+                            };
+                        }
+                        AppEvent::Enter => {
+                            // 選択スクリプトのフォントピッカーを開く
+                            self.settings_picking_font = true;
+                            self.selected_font_item = 0;
+                        }
+                        AppEvent::Escape => {
+                            self.state = AppState::MainMenu;
+                            self.on_event(AppEvent::ChangeScene);
+                        }
+                        _ => {}
                     }
-                    AppEvent::Escape => {
-                        self.state = AppState::MainMenu;
-                        self.on_event(AppEvent::ChangeScene);
+                } else {
+                    // フォントピッカーモード: Up/Down で available_fonts を選択、Enter で適用
+                    #[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
+                    {
+                        let font_count = self.available_fonts.len();
+                        match event {
+                            AppEvent::Up => {
+                                if self.selected_font_item > 0 {
+                                    self.selected_font_item -= 1;
+                                }
+                            }
+                            AppEvent::Down => {
+                                if font_count > 0 && self.selected_font_item < font_count - 1 {
+                                    self.selected_font_item += 1;
+                                }
+                            }
+                            AppEvent::Enter => {
+                                if self.selected_font_item < font_count {
+                                    let path = self.available_fonts[self.selected_font_item].path.clone();
+                                    let script = self.settings_script;
+                                    self.load_font_for_script(script, &path);
+                                }
+                                self.settings_picking_font = false;
+                            }
+                            AppEvent::Escape => {
+                                self.settings_picking_font = false;
+                            }
+                            _ => {}
+                        }
                     }
-                    _ => {}
+                    // WASM / UEFI ではフォントピッカー操作なし
+                    #[cfg(any(target_arch = "wasm32", feature = "uefi"))]
+                    {
+                        match event {
+                            AppEvent::Escape | AppEvent::Enter => {
+                                self.settings_picking_font = false;
+                            }
+                            _ => {}
+                        }
+                    }
                 }
             }
             AppState::ProblemSelection => {
@@ -566,7 +738,6 @@ impl App {
                         let idx = self.selected_problem_item;
                         match c {
                             'v' | 'V' => {
-                                // ソースビューアへ遷移（open-file エントリは除く）
                                 if !self.is_open_file_entry(idx) {
                                     self.source_scroll = 0;
                                     self.state = AppState::ProblemSource;
@@ -593,7 +764,6 @@ impl App {
                     }
                     _ => {}
                 }
-                // instructions_text を選択中アイテムに応じて毎回更新
                 if self.state == AppState::ProblemSelection {
                     self.instructions_text = self.problem_selection_instructions();
                 }
@@ -642,7 +812,6 @@ impl App {
                 match event {
                     AppEvent::Char { c, timestamp } => {
                         if let Some(model) = self.typing_model.take() {
-                            // key_input呼び出し前の状態を保存
                             let old_word = model.status.word;
                             let old_line = model.status.line;
 
@@ -650,7 +819,6 @@ impl App {
                                 Model::Typing(new_model) => {
                                     #[cfg(target_arch = "wasm32")]
                                     {
-                                        // 単語または行が完了したかをチェック
                                         if new_model.status.line != old_line || new_model.status.word != old_word {
                                             self.should_reset_ime = true;
                                         }
@@ -667,8 +835,6 @@ impl App {
                     }
                     AppEvent::Backspace => {
                         if let Some(model) = self.typing_model.as_mut() {
-                            // 誤り入力がある状態で Backspace が押された場合、その位置の TypingCorrectnessChar を
-                            // Incorrect から Pending に戻す。これにより大⇔小キーで修正した後に赤表示が残らない。
                             if model.status.last_wrong_keydown.is_some() {
                                 let line = model.status.line as usize;
                                 let word = model.status.word as usize;

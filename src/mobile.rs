@@ -158,12 +158,18 @@ fn load_font_file(name: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
 }
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let yuji_font = FontVec::try_from_vec(load_font_file("YujiSyuku-Regular.ttf")?)
+    let japanese_font = FontVec::try_from_vec(load_font_file("YujiSyuku-Regular.ttf")?)
         .map_err(|e| e.to_string())?;
-    let noto_font = FontVec::try_from_vec(load_font_file("NotoSerifJP-Regular.ttf")?)
+    let traditional_chinese_font = FontVec::try_from_vec(load_font_file("NotoSerifJP-Regular.ttf")?)
+        .map_err(|e| e.to_string())?;
+    let simplified_chinese_font = FontVec::try_from_vec(load_font_file("NotoSerifJP-Regular.ttf")?)
         .map_err(|e| e.to_string())?;
 
-    let fonts = Fonts { yuji_syuku: yuji_font, noto_serif: noto_font };
+    let fonts = Fonts {
+        japanese: japanese_font,
+        traditional_chinese: Some(traditional_chinese_font),
+        simplified_chinese: Some(simplified_chinese_font),
+    };
     let app_state = Arc::new(Mutex::new(App::new(fonts)));
     {
         let mut a = app_state.lock().unwrap();
