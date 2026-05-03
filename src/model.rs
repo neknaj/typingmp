@@ -159,6 +159,7 @@ pub struct TypingMetrics {
 #[derive(Debug, Clone)]
 pub struct Layout {
     pub mapping: Vec<(String, Vec<String>)>,
+    pub normalized_mapping: Vec<(String, Vec<String>)>,
 }
 
 #[derive(Debug, Clone)]
@@ -169,8 +170,23 @@ pub struct Scroll {
 
 impl Default for Layout {
     fn default() -> Self {
+        let mapping = layout_data::get_layout();
+        let normalized_mapping = mapping
+            .iter()
+            .map(|(key, values)| {
+                (
+                    key.to_ascii_lowercase(),
+                    values
+                        .iter()
+                        .map(|value| value.to_ascii_lowercase())
+                        .collect(),
+                )
+            })
+            .collect();
+
         Layout {
-            mapping: layout_data::get_layout(),
+            mapping,
+            normalized_mapping,
         }
     }
 }

@@ -112,38 +112,6 @@ fn segment_prefix_chars(
     result
 }
 
-fn starts_with_case_insensitive(text: &str, prefix: &str) -> bool {
-    let mut prefix_chars = prefix.chars();
-
-    for text_char in text.chars() {
-        if let Some(prefix_char) = prefix_chars.next() {
-            if !text_char.eq_ignore_ascii_case(&prefix_char) {
-                return false;
-            }
-        } else {
-            return true;
-        }
-    }
-
-    prefix_chars.next().is_none()
-}
-
-fn equals_case_insensitive(left: &str, right: &str) -> bool {
-    let mut left_chars = left.chars();
-    let mut right_chars = right.chars();
-    loop {
-        match (left_chars.next(), right_chars.next()) {
-            (Some(a), Some(b)) => {
-                if !a.eq_ignore_ascii_case(&b) {
-                    return false;
-                }
-            }
-            (None, None) => return true,
-            _ => return false,
-        }
-    }
-}
-
 fn max_mapping_key_len(mapping: &[(String, Vec<String>)]) -> usize {
     mapping.iter().map(|(key, _)| key.chars().count()).max().unwrap_or(0)
 }
@@ -171,7 +139,7 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
 
     let current_segment = model.status.segment as usize;
     let current_char = model.status.char_ as usize;
-    let max_key_len = max_mapping_key_len(&model.layout.mapping).max(1);
+    let max_key_len = max_mapping_key_len(&model.layout.normalized_mapping).max(1);
     let target_slice = segment_prefix_chars(
         &word_content.segments,
         current_segment,
@@ -229,31 +197,29 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
 
     // 2. 直接一致しない場合、ローマ字入力として処理を試みる
     if !is_correct {
+        let input_lower = input.to_ascii_lowercase();
         let mut current_input_str = String::with_capacity(model.status.unconfirmed.len() + 1);
-        for c in model.status.unconfirmed.iter() {
-            current_input_str.push(*c);
+        for unconfirmed_char in model.status.unconfirmed.iter() {
+            current_input_str.push(*unconfirmed_char);
         }
-        current_input_str.push(input);
-        let current_input_lower = current_input_str.to_lowercase();
+        current_input_str.push(input_lower);
 
-        for (key, values) in model.layout.mapping.iter() {
-            if !starts_with_case_insensitive(&target_slice, key) {
+        for (key, values) in model.layout.normalized_mapping.iter() {
+            if !target_slice.starts_with(key) {
                 continue;
             }
             let key_chars_count = key.chars().count();
 
             for value in values {
-                let value_lower = value.to_lowercase();
-
-                if equals_case_insensitive(&value_lower, &current_input_lower) {
+                if value == &current_input_str {
                     is_correct = true;
                     model.status.unconfirmed.clear();
                     advance_chars = key_chars_count;
                     break;
-                } else if starts_with_case_insensitive(&value_lower, &current_input_lower) {
+                } else if value.starts_with(&current_input_str) {
                     is_correct = true;
                     is_romaji_in_progress = true;
-                    model.status.unconfirmed.push(input);
+                    model.status.unconfirmed.push(input_lower);
                     break;
                 }
             }
