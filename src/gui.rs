@@ -363,50 +363,59 @@ fn render_frame(
                 let total_height = gui_renderer::measure_text(current_font, " ", pixel_font_size).1;
 
                 let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
-                let (mut pen_x, y) = ui::calculate_aligned_position(
-                    anchor_pos,
-                    target_line_total_width,
-                    total_height,
-                    align,
-                );
+                let (mut pen_x, y) = ui::calculate_aligned_position(anchor_pos, target_line_total_width, total_height, align);
+                let visible_left = -100;
+                let visible_right = width as i32 + 100;
 
                 for seg in segments {
                     match seg {
-                        LowerTypingSegment::Completed { base_text, ruby_text, is_correct } => {
-                            let color = if is_correct {
-                                ui::CORRECT_COLOR
-                            } else {
-                                ui::INCORRECT_COLOR
-                            };
-                            gui_renderer::draw_text(
-                                pixel_buffer,
-                                width,
-                                current_font,
-                                &base_text,
-                                (pen_x as f32, y as f32),
-                                pixel_font_size,
-                                color,
-                            );
+                        LowerTypingSegment::Completed {
+                            base_text,
+                            ruby_text,
+                            is_correct,
+                            width: seg_width,
+                        } => {
+                            let seg_width_px = seg_width as i32;
+                            if seg_width_px > 0 && pen_x <= visible_right && pen_x + seg_width_px >= visible_left {
+                                let color = if is_correct {
+                                    ui::CORRECT_COLOR
+                                } else {
+                                    ui::INCORRECT_COLOR
+                                };
+                                if seg_width_px > 0 {
+                                    gui_renderer::draw_text(
+                                        pixel_buffer,
+                                        width,
+                                        current_font,
+                                        &base_text,
+                                        (pen_x as f32, y as f32),
+                                        pixel_font_size,
+                                        color,
+                                    );
+                                }
 
-                            if let Some(ruby) = ruby_text {
-                                let (base_w, ..) =
-                                    gui_renderer::measure_text(current_font, &base_text, pixel_font_size);
-                                let (ruby_w, ..) =
-                                    gui_renderer::measure_text(current_font, &ruby, ruby_pixel_font_size);
-                                let ruby_x = pen_x as f32 + (base_w as f32 - ruby_w as f32) / 2.0;
-                                let ruby_y = y as f32 - ruby_pixel_font_size * 0.5;
-                                gui_renderer::draw_text(
-                                    pixel_buffer,
-                                    width,
-                                    current_font,
-                                    &ruby,
-                                    (ruby_x, ruby_y),
-                                    ruby_pixel_font_size,
-                                    color,
-                                );
+                                if let Some(ruby) = ruby_text {
+                                    let base_w = seg_width;
+                                    let (ruby_w, ..) =
+                                        gui_renderer::measure_text(current_font, &ruby, ruby_pixel_font_size);
+                                    if ruby_w > 0 {
+                                        let ruby_x = pen_x as f32 + (base_w as f32 - ruby_w as f32) / 2.0;
+                                        let ruby_y = y as f32 - ruby_pixel_font_size * 0.5;
+                                        gui_renderer::draw_text(
+                                            pixel_buffer,
+                                            width,
+                                            current_font,
+                                            &ruby,
+                                            (ruby_x, ruby_y),
+                                            ruby_pixel_font_size,
+                                            color,
+                                        );
+                                    }
+                                }
                             }
-
-                            pen_x += gui_renderer::measure_text(current_font, &base_text, pixel_font_size).0 as i32;
+                            if seg_width_px > 0 {
+                                pen_x += seg_width_px;
+                            }
                         }
                         LowerTypingSegment::Active { elements } => {
                             for el in elements {
@@ -427,17 +436,19 @@ fn render_frame(
                                         (c.to_string(), ui::WRONG_KEY_COLOR)
                                     }
                                 };
-                                gui_renderer::draw_text(
-                                    pixel_buffer,
-                                    width,
-                                    current_font,
-                                    &text,
-                                    (pen_x as f32, y as f32),
-                                    pixel_font_size,
-                                    color,
-                                );
-                                pen_x +=
-                                    gui_renderer::measure_text(current_font, &text, pixel_font_size).0 as i32;
+                                let text_width = gui_renderer::measure_text(current_font, &text, pixel_font_size).0 as i32;
+                                if text_width > 0 && pen_x <= visible_right && pen_x + text_width >= visible_left {
+                                    gui_renderer::draw_text(
+                                        pixel_buffer,
+                                        width,
+                                        current_font,
+                                        &text,
+                                        (pen_x as f32, y as f32),
+                                        pixel_font_size,
+                                        color,
+                                    );
+                                }
+                                pen_x += text_width;
                             }
                         }
                     }

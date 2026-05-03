@@ -192,21 +192,27 @@ pub fn run() -> Status {
                     let (mut pen_x, y) = ui::calculate_aligned_position(anchor_pos, target_line_total_width, total_height, align);
 
                     for seg in segments {
-                        match seg {
-                            LowerTypingSegment::Completed { base_text, ruby_text, is_correct } => {
-                                let color = if is_correct { ui::CORRECT_COLOR } else { ui::INCORRECT_COLOR };
-                                draw_text(&mut pixel_buffer, width, current_font, base_text.as_str(), (pen_x as f32, y as f32), pixel_font_size, color);
-                                
-                                if let Some(ruby) = ruby_text {
-                                    let (base_w, ..) = gui_renderer::measure_text(current_font, base_text.as_str(), pixel_font_size);
-                                    let (ruby_w, ..) = gui_renderer::measure_text(current_font, ruby.as_str(), ruby_pixel_font_size);
-                                    let ruby_x = pen_x as f32 + (base_w as f32 - ruby_w as f32) / 2.0;
-                                    let ruby_y = y as f32 - ruby_pixel_font_size*0.5;
-                                    draw_text(&mut pixel_buffer, width, current_font, ruby.as_str(), (ruby_x, ruby_y), ruby_pixel_font_size, color);
-                                }
-
-                                pen_x += gui_renderer::measure_text(current_font, base_text.as_str(), pixel_font_size).0 as i32;
+                    match seg {
+                        LowerTypingSegment::Completed {
+                            base_text,
+                            ruby_text,
+                            is_correct,
+                            width: seg_width,
+                            ..
+                        } => {
+                            let color = if is_correct { ui::CORRECT_COLOR } else { ui::INCORRECT_COLOR };
+                            draw_text(&mut pixel_buffer, width, current_font, base_text.as_str(), (pen_x as f32, y as f32), pixel_font_size, color);
+                            
+                            if let Some(ruby) = ruby_text {
+                                let base_w = seg_width;
+                                let (ruby_w, ..) = gui_renderer::measure_text(current_font, ruby.as_str(), ruby_pixel_font_size);
+                                let ruby_x = pen_x as f32 + (base_w as f32 - ruby_w as f32) / 2.0;
+                                let ruby_y = y as f32 - ruby_pixel_font_size*0.5;
+                                draw_text(&mut pixel_buffer, width, current_font, ruby.as_str(), (ruby_x, ruby_y), ruby_pixel_font_size, color);
                             }
+
+                            pen_x += seg_width as i32;
+                        }
                             LowerTypingSegment::Active { elements } => {
                                 for el in elements {
                                     let (text, color) = match el {

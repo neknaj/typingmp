@@ -266,7 +266,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                             for seg in segments {
                                 match seg {
-                                    LowerTypingSegment::Completed { base_text, ruby_text, is_correct } => {
+                                    LowerTypingSegment::Completed {
+                                        base_text,
+                                        ruby_text,
+                                        is_correct,
+                                        ..
+                                    } => {
                                         let color = u32_to_crossterm_color(if is_correct { ui::CORRECT_COLOR } else { ui::INCORRECT_COLOR });
                                         let (art_buffer, art_width, _, char_ascent) = renderer(current_font, &base_text, render_font_size);
                                         let blit_y = line_baseline_y - char_ascent as i32;
