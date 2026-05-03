@@ -21,6 +21,20 @@ use crate::model::{
     TypingSession,
 };
 
+#[derive(Debug, Clone, Copy)]
+enum KeystrokeMatch {
+    Direct { advance_chars: usize },
+    RomajiExact { advance_chars: usize },
+    RomajiPrefix,
+    Miss,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum TypingCompletion {
+    Continue,
+    Finished,
+}
+
 // Helper function for logging to handle both native and wasm targets.
 fn log(_message: &str) {
     #[cfg(any(not(feature = "tui"), feature = "gui"))]
@@ -57,6 +71,79 @@ fn normalize_typing_char(c: char) -> char {
     } else {
         lower
     }
+}
+
+fn is_n_auto_commit_trigger(unconfirmed: &[char], input_lower: char, target_slice: &str) -> bool {
+    match (unconfirmed, target_slice.chars().next()) {
+        ([ 'n' ], Some('ん')) if !matches!(
+            input_lower,
+            'a' | 'i' | 'u' | 'e' | 'o' | 'n' | 'y' | '\''
+        ) => true,
+        _ => false,
+    }
+}
+
+fn build_current_input_lower(unconfirmed: &[char], input_lower: char) -> String {
+    let mut current_input_str = String::with_capacity(unconfirmed.len() + 1);
+    for &ch in unconfirmed {
+        current_input_str.push(ch);
+    }
+    current_input_str.push(input_lower);
+    current_input_str
+}
+
+fn match_romaji_mapping(
+    target_slice: &str,
+    current_input: &str,
+    layout: &crate::model::Layout,
+) -> KeystrokeMatch {
+    let candidate_indexes: &[usize] = match target_slice.as_bytes().first() {
+        Some(first_byte) => &layout.normalized_mapping_by_first_char[first_byte.to_ascii_lowercase() as usize],
+        None => &[],
+    };
+
+    for mapping_index in candidate_indexes {
+        let (key, values) = &layout.normalized_mapping[*mapping_index];
+        if !target_slice.starts_with(key) {
+            continue;
+        }
+        let key_chars_count = key.chars().count();
+
+        for value in values {
+            match value.as_str() {
+                v if v == current_input => {
+                    return KeystrokeMatch::RomajiExact {
+                        advance_chars: key_chars_count,
+                    };
+                }
+                v if v.starts_with(current_input) => {
+                    return KeystrokeMatch::RomajiPrefix;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    KeystrokeMatch::Miss
+}
+
+fn classify_keystroke(
+    target_slice: &str,
+    input: char,
+    input_lower: char,
+    unconfirmed: &[char],
+    layout: &crate::model::Layout,
+) -> KeystrokeMatch {
+    let input_normalized = normalize_typing_char(input);
+    match target_slice.chars().next() {
+        Some(target_char) if normalize_typing_char(target_char) == input_normalized => {
+            return KeystrokeMatch::Direct { advance_chars: 1 };
+        }
+        Some(_) | None => {}
+    }
+
+    let current_input = build_current_input_lower(unconfirmed, input_lower);
+    match_romaji_mapping(target_slice, &current_input, layout)
 }
 
 fn segment_prefix_chars(
@@ -159,10 +246,9 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     // 「n」をもう一度入力して「nn」→「ん」を確定させてから
     // 元の子音入力を処理する。
     {
-        let input_lower = input.to_lowercase().next().unwrap_or(input);
-        let is_n_commit_trigger = model.status.unconfirmed.as_slice() == ['n']
-            && !matches!(input_lower, 'a' | 'i' | 'u' | 'e' | 'o' | 'n' | 'y' | '\'')
-            && target_slice.chars().next() == Some('ん');
+        let input_lower = input.to_ascii_lowercase();
+        let is_n_commit_trigger =
+            is_n_auto_commit_trigger(model.status.unconfirmed.as_slice(), input_lower, &target_slice);
         if is_n_commit_trigger {
             log("  [ん auto-commit] triggering 'n' then original input");
             return match key_input(model, 'n', timestamp) {
@@ -187,61 +273,30 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
         });
     }
 
-    let mut is_correct = false;
-    let mut advance_chars = 0;
-    let mut is_romaji_in_progress = false;
+    let input_lower = input.to_ascii_lowercase();
+    let keystroke_match = classify_keystroke(
+        &target_slice,
+        input,
+        input_lower,
+        model.status.unconfirmed.as_slice(),
+        &model.layout,
+    );
 
-    // 1. フリック入力などによる直接の文字一致を優先
-    let input_normalized = normalize_typing_char(input);
-    if let Some(target_char) = target_slice.chars().next() {
-        if normalize_typing_char(target_char) == input_normalized {
-            is_correct = true;
-            advance_chars = 1;
+    let (is_correct, is_romaji_in_progress, advance_chars) = match keystroke_match {
+        KeystrokeMatch::Direct { advance_chars } => {
             model.status.unconfirmed.clear();
+            (true, false, advance_chars)
         }
-    }
-
-    // 2. 直接一致しない場合、ローマ字入力として処理を試みる
-    if !is_correct {
-        let input_lower = input.to_ascii_lowercase();
-        let mut current_input_str = String::with_capacity(model.status.unconfirmed.len() + 1);
-        for unconfirmed_char in model.status.unconfirmed.iter() {
-            current_input_str.push(*unconfirmed_char);
+        KeystrokeMatch::RomajiExact { advance_chars } => {
+            model.status.unconfirmed.clear();
+            (true, false, advance_chars)
         }
-        current_input_str.push(input_lower);
-
-        let mut candidate_indexes: &[usize] = &[];
-        if let Some(first_byte) = target_slice.as_bytes().first().copied() {
-            let bucket = first_byte.to_ascii_lowercase() as usize;
-            candidate_indexes = &model.layout.normalized_mapping_by_first_char[bucket];
+        KeystrokeMatch::RomajiPrefix => {
+            model.status.unconfirmed.push(input_lower);
+            (true, true, 0)
         }
-
-        for mapping_index in candidate_indexes {
-            let (key, values) = &model.layout.normalized_mapping[*mapping_index];
-            if !target_slice.starts_with(key) {
-                continue;
-            }
-            let key_chars_count = key.len();
-
-            for value in values {
-                if value == &current_input_str {
-                    is_correct = true;
-                    model.status.unconfirmed.clear();
-                    advance_chars = key_chars_count;
-                    break;
-                } else if value.starts_with(&current_input_str) {
-                    is_correct = true;
-                    is_romaji_in_progress = true;
-                    model.status.unconfirmed.push(input_lower);
-                    break;
-                }
-            }
-
-            if is_correct {
-                break;
-            }
-        }
-    }
+        KeystrokeMatch::Miss => (false, false, 0),
+    };
 
     // 3. 結果に基づいてモデルの状態を更新
     if is_correct {
@@ -313,8 +368,7 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     model.last_input_time = Some(model.last_input_time.map_or(timestamp, |last| last.max(timestamp)));
 
     // 4. セグメント、単語、行、全体の完了チェック
-    let mut is_finished = false;
-    if model.status.segment as usize >= word_content.segments.len() {
+    let completion = if model.status.segment as usize >= word_content.segments.len() {
         model.status.segment = 0;
         model.status.char_ = 0;
         model.status.word += 1;
@@ -322,21 +376,28 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
             model.status.word = 0;
             model.status.line += 1;
             if model.status.line as usize >= model.content.lines.len() {
-                is_finished = true;
+                TypingCompletion::Finished
+            } else {
+                TypingCompletion::Continue
             }
+        } else {
+            TypingCompletion::Continue
         }
-    }
+    } else {
+        TypingCompletion::Continue
+    };
 
     log(&format!(
         "  [Result] is_correct: {}, is_finished: {}",
-        is_correct, is_finished
+        is_correct,
+        matches!(completion, TypingCompletion::Finished)
     ));
     log(&format!(
         "  [State After] line: {}, word: {}, seg: {}, char: {}, unconfirmed: {:?}",
         model.status.line, model.status.word, model.status.segment, model.status.char_, model.status.unconfirmed
     ));
 
-    if is_finished {
+    if matches!(completion, TypingCompletion::Finished) {
         Model::Result(ResultModel {
             typing_model: model,
         })
