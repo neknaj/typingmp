@@ -470,6 +470,10 @@ impl App {
                 last_wrong_keydown: None,
             },
             user_input: Vec::new(),
+            total_type_count: 0,
+            total_miss_count: 0,
+            first_input_time: None,
+            last_input_time: None,
             typing_correctness,
             layout: Default::default(),
             scroll: Scroll {

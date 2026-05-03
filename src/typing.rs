@@ -1,4 +1,4 @@
-// ./src/typing.rs
+﻿// ./src/typing.rs
 
 #[cfg(feature = "uefi")]
 extern crate alloc;
@@ -42,6 +42,112 @@ fn log(_message: &str) {
     }
 }
 
+fn normalize_typing_char(c: char) -> char {
+    // 古典かなの代替入力: ゐ・ヰ は「い」、ゑ・ヱ は「え」として扱う。
+    // フリックキーボードには ゐ/ゑ キーが存在しないため、通常の い/え フリックで
+    // 代替入力できるようにする。ヰ・ヱ（カタカナ版）も同様に対応する。
+    match c {
+        'ゐ' | 'ヰ' => return 'い',
+        'ゑ' | 'ヱ' => return 'え',
+        _ => {}
+    }
+    let lower = c.to_lowercase().next().unwrap_or(c);
+    if lower >= 'ァ' && lower <= 'ヶ' {
+        core::char::from_u32(lower as u32 - 0x60).unwrap_or(lower)
+    } else {
+        lower
+    }
+}
+
+fn segment_target_text(seg: &Segment) -> String {
+    match seg {
+        Segment::Plain { text } => text.clone(),
+        Segment::Annotated { reading, .. } => reading.clone(),
+        Segment::Anno { inner, .. } => inner.iter().map(|s| segment_target_text(s)).collect(),
+    }
+}
+
+fn segment_prefix_chars(
+    segments: &[Segment],
+    start_segment: usize,
+    start_char: usize,
+    max_chars: usize,
+) -> String {
+    if max_chars == 0 || start_segment >= segments.len() {
+        return String::new();
+    }
+
+    let mut result = String::new();
+    let mut skipped = start_char;
+    let mut remaining = max_chars;
+
+    for seg in segments.iter().skip(start_segment) {
+        if remaining == 0 {
+            break;
+        }
+
+        let seg_text = segment_target_text(seg);
+        if seg_text.is_empty() {
+            continue;
+        }
+
+        let seg_len = seg_text.chars().count();
+        if skipped >= seg_len {
+            skipped -= seg_len;
+            continue;
+        }
+
+        let mut chars = seg_text.chars().skip(skipped);
+        skipped = 0;
+
+        for ch in chars.by_ref().take(remaining) {
+            result.push(ch);
+            remaining -= 1;
+            if remaining == 0 {
+                break;
+            }
+        }
+    }
+
+    result
+}
+
+fn starts_with_case_insensitive(text: &str, prefix: &str) -> bool {
+    let mut text_chars = text.chars();
+    let mut prefix_chars = prefix.chars();
+    loop {
+        match (prefix_chars.next(), text_chars.next()) {
+            (Some(prefix_char), Some(text_char)) => {
+                if text_char.to_lowercase().to_string() != prefix_char.to_lowercase().to_string() {
+                    return false;
+                }
+            }
+            (None, _) => return true,
+            (_, None) => return false,
+        }
+    }
+}
+
+fn equals_case_insensitive(left: &str, right: &str) -> bool {
+    let mut left_chars = left.chars();
+    let mut right_chars = right.chars();
+    loop {
+        match (left_chars.next(), right_chars.next()) {
+            (Some(a), Some(b)) => {
+                if a.to_lowercase().to_string() != b.to_lowercase().to_string() {
+                    return false;
+                }
+            }
+            (None, None) => return true,
+            _ => return false,
+        }
+    }
+}
+
+fn max_mapping_key_len(mapping: &[(String, Vec<String>)]) -> usize {
+    mapping.iter().map(|(key, _)| key.chars().count()).max().unwrap_or(0)
+}
+
 pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     log(&format!("\n--- key_input: '{}' --- typing.rs", input));
     log(&format!(
@@ -57,6 +163,22 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
         return Model::Typing(model);
     }
 
+    let line_content = &model.content.lines[current_line_idx];
+    if line_content.words.len() <= model.status.word as usize {
+        return Model::Typing(model);
+    }
+    let word_content = &line_content.words[model.status.word as usize];
+
+    let current_segment = model.status.segment as usize;
+    let current_char = model.status.char_ as usize;
+    let max_key_len = max_mapping_key_len(&model.layout.mapping).max(1);
+    let target_slice = segment_prefix_chars(
+        &word_content.segments,
+        current_segment,
+        current_char,
+        max_key_len,
+    );
+
     // MS IME 方式の「ん」自動確定:
     // unconfirmed が ['n'] の状態で、次の目標文字が「ん」であり、
     // 入力が あ/い/う/え/お/n/y/' でない子音の場合、
@@ -64,28 +186,9 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     // 元の子音入力を処理する。
     {
         let input_lower = input.to_lowercase().next().unwrap_or(input);
-        let is_n_commit_trigger = model.status.unconfirmed == vec!['n']
+        let is_n_commit_trigger = model.status.unconfirmed.as_slice() == ['n']
             && !matches!(input_lower, 'a' | 'i' | 'u' | 'e' | 'o' | 'n' | 'y' | '\'')
-            && model.content.lines.get(model.status.line as usize)
-                .and_then(|l| l.words.get(model.status.word as usize))
-                .map(|w| {
-                    let t: String = w.segments[model.status.segment as usize..]
-                        .iter()
-                        .map(|seg| {
-                            fn seg_reading(s: &Segment) -> String {
-                                match s {
-                                    Segment::Plain { text } => text.clone(),
-                                    Segment::Annotated { reading, .. } => reading.clone(),
-                                    Segment::Anno { inner, .. } => inner.iter().map(|x| seg_reading(x)).collect(),
-                                }
-                            }
-                            seg_reading(seg)
-                        })
-                        .collect();
-                    let sl: String = t.chars().skip(model.status.char_ as usize).collect();
-                    sl.starts_with('ん')
-                })
-                .unwrap_or(false);
+            && target_slice.chars().next() == Some('ん');
         if is_n_commit_trigger {
             log("  [ん auto-commit] triggering 'n' then original input");
             return match key_input(model, 'n', timestamp) {
@@ -114,50 +217,10 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     let mut advance_chars = 0;
     let mut is_romaji_in_progress = false;
 
-    let line_content = &model.content.lines[current_line_idx];
-    if line_content.words.len() <= model.status.word as usize {
-        return Model::Typing(model);
-    }
-    let word_content = &line_content.words[model.status.word as usize];
-
-    // 現在の単語内で、まだタイプされていない全てのセグメントの「読み」を連結してターゲット文字列を生成
-    let target_reading: String = word_content.segments[model.status.segment as usize..]
-        .iter()
-        .map(|seg| segment_target_reading(seg))
-        .collect();
-    
-    // 現在の文字位置から始まる部分文字列を取得
-    let target_slice = target_reading.chars().skip(model.status.char_ as usize).collect::<String>();
-
-    // セグメントのタイプ対象文字列を返すヘルパー（Anno は inner を再帰的に連結）
-    fn segment_target_reading(seg: &Segment) -> String {
-        match seg {
-            Segment::Plain { text } => text.clone(),
-            Segment::Annotated { reading, .. } => reading.clone(),
-            Segment::Anno { inner, .. } => inner.iter().map(|s| segment_target_reading(s)).collect(),
-        }
-    }
-
-    fn normalize_char(c: char) -> char {
-        // 古典かなの代替入力: ゐ・ヰ は「い」、ゑ・ヱ は「え」として扱う。
-        // フリックキーボードには ゐ/ゑ キーが存在しないため、通常の い/え フリックで
-        // 代替入力できるようにする。ヰ・ヱ（カタカナ版）も同様に対応する。
-        match c {
-            'ゐ' | 'ヰ' => return 'い',
-            'ゑ' | 'ヱ' => return 'え',
-            _ => {}
-        }
-        let lower = c.to_lowercase().next().unwrap_or(c);
-        if lower >= 'ァ' && lower <= 'ヶ' {
-            core::char::from_u32(lower as u32 - 0x60).unwrap_or(lower)
-        } else {
-            lower
-        }
-    }
-
     // 1. フリック入力などによる直接の文字一致を優先
+    let input_normalized = normalize_typing_char(input);
     if let Some(target_char) = target_slice.chars().next() {
-        if normalize_char(input) == normalize_char(target_char) {
+        if normalize_typing_char(target_char) == input_normalized {
             is_correct = true;
             advance_chars = 1;
             model.status.unconfirmed.clear();
@@ -166,36 +229,37 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
 
     // 2. 直接一致しない場合、ローマ字入力として処理を試みる
     if !is_correct {
-        let mut expect = Vec::new();
-        for (key, values) in model.layout.mapping.iter() {
-            if target_slice.starts_with(key) {
-                for v in values {
-                    if v.starts_with(&model.status.unconfirmed.iter().collect::<String>()) {
-                        expect.push((key.clone(), (*v).to_string()));
-                    }
-                }
-            }
+        let mut current_input_str = String::with_capacity(model.status.unconfirmed.len() + 1);
+        for c in model.status.unconfirmed.iter() {
+            current_input_str.push(*c);
         }
+        current_input_str.push(input);
+        let current_input_lower = current_input_str.to_lowercase();
 
-        if !expect.is_empty() {
-            let mut current_input_str = model.status.unconfirmed.iter().collect::<String>();
-            current_input_str.push(input);
+        for (key, values) in model.layout.mapping.iter() {
+            if !starts_with_case_insensitive(&target_slice, key) {
+                continue;
+            }
+            let key_chars_count = key.chars().count();
 
-            for (key, val_str) in expect {
-                let lower_val_str = val_str.to_lowercase();
-                let lower_current_input_str = current_input_str.to_lowercase();
+            for value in values {
+                let value_lower = value.to_lowercase();
 
-                if lower_val_str == lower_current_input_str {
+                if equals_case_insensitive(&value_lower, &current_input_lower) {
                     is_correct = true;
                     model.status.unconfirmed.clear();
-                    advance_chars = key.chars().count();
+                    advance_chars = key_chars_count;
                     break;
-                } else if lower_val_str.starts_with(&lower_current_input_str) {
+                } else if starts_with_case_insensitive(&value_lower, &current_input_lower) {
                     is_correct = true;
                     is_romaji_in_progress = true;
                     model.status.unconfirmed.push(input);
                     break;
                 }
+            }
+
+            if is_correct {
+                break;
             }
         }
     }
@@ -259,6 +323,15 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
             timestamp,
             is_correct,
         });
+    if is_correct {
+        model.total_type_count += 1;
+    } else {
+        model.total_miss_count += 1;
+    }
+    if model.first_input_time.map_or(true, |first| timestamp < first) {
+        model.first_input_time = Some(timestamp);
+    }
+    model.last_input_time = Some(model.last_input_time.map_or(timestamp, |last| last.max(timestamp)));
 
     // 4. セグメント、単語、行、全体の完了チェック
     let mut is_finished = false;
@@ -345,39 +418,12 @@ impl TypingMetrics {
 
 pub fn calculate_total_metrics(model: &TypingModel) -> TypingMetrics {
     let mut metrics = TypingMetrics::new();
-    let mut total_type_count = 0;
-    let mut total_miss_count = 0;
-    
-    let mut first_input_time = f64::MAX;
-    let mut last_input_time = f64::MIN;
-
-    for session in &model.user_input {
-        if session.inputs.is_empty() { continue; }
-
-        if let Some(first) = session.inputs.first() {
-            if first.timestamp < first_input_time {
-                first_input_time = first.timestamp;
-            }
+    metrics.type_count = model.total_type_count;
+    metrics.miss_count = model.total_miss_count;
+    if let (Some(first_input_time), Some(last_input_time)) = (model.first_input_time, model.last_input_time) {
+        if last_input_time > first_input_time {
+            metrics.total_time = last_input_time - first_input_time;
         }
-        if let Some(last) = session.inputs.last() {
-            if last.timestamp > last_input_time {
-                last_input_time = last.timestamp;
-            }
-        }
-
-        for input in &session.inputs {
-            if input.is_correct {
-                total_type_count += 1;
-            } else {
-                total_miss_count +=1;
-            }
-        }
-    }
-    
-    metrics.type_count = total_type_count;
-    metrics.miss_count = total_miss_count;
-    if last_input_time > first_input_time {
-        metrics.total_time = last_input_time - first_input_time;
     }
 
     metrics.calculate();
