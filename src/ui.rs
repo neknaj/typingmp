@@ -1,18 +1,20 @@
-// src/ui.rs
+﻿// src/ui.rs
 
-// uefi feature縺梧怏蜉ｹ縺ｪ蝣ｴ蜷医∵ｨ呎ｺ悶・alloc繧ｯ繝ｬ繝ｼ繝医ｒ繧､繝ｳ繝昴・繝・#[cfg(feature = "uefi")]
+// uefi feature驍ｵ・ｺ隴ｴ・ｧ隲､蜑ｰ諤上・・ｹ驍ｵ・ｺ繝ｻ・ｪ髯懶ｽ｣繝ｻ・ｴ髯ｷ・ｷ陋ｹ・ｻ・つ遶擾ｽｵ繝ｻ・ｨ陷ｻ雜｣・ｽ・ｺ隰費ｽｶ郢晢ｽｻalloc驛｢・ｧ繝ｻ・ｯ驛｢譎｢・ｽ・ｬ驛｢譎｢・ｽ・ｼ驛｢譎冗樟繝ｻ蝣､・ｹ・ｧ繝ｻ・､驛｢譎｢・ｽ・ｳ驛｢譎・ｺ｢郢晢ｽｻ驛｢譏ｴ繝ｻ
+#[cfg(feature = "uefi")]
 extern crate alloc;
 
-// uefi 縺ｧ f64::floor() 繧剃ｽｿ縺・◆繧√↓蠢・ｦ・#[cfg(feature = "uefi")]
+// uefi 驍ｵ・ｺ繝ｻ・ｧ f64::floor() 驛｢・ｧ陷代・・ｽ・ｽ繝ｻ・ｿ驍ｵ・ｺ郢晢ｽｻ隨ｳ繝ｻ・ｹ・ｧ遶丞｣ｺ繝ｻ髯滂ｽ｢郢晢ｽｻ繝ｻ・ｦ郢晢ｽｻ
+#[cfg(feature = "uefi")]
 use core_maths::CoreFloat;
 
-// uefi 縺ｨ std 縺ｧ菴ｿ逕ｨ縺吶ｋ Vec 縺ｨ vec! 繧貞・繧頑崛縺医ｋ
+// uefi 驍ｵ・ｺ繝ｻ・ｨ std 驍ｵ・ｺ繝ｻ・ｧ髣厄ｽｴ繝ｻ・ｿ鬨ｾ蛹・ｽｽ・ｨ驍ｵ・ｺ陷ｷ・ｶ繝ｻ繝ｻVec 驍ｵ・ｺ繝ｻ・ｨ vec! 驛｢・ｧ髮区ｧｭ繝ｻ驛｢・ｧ鬯・､ｧ・ｴ蟶ｷ・ｸ・ｺ陋ｹ・ｻ繝ｻ繝ｻ
 #[cfg(feature = "uefi")]
 use alloc::{vec, vec::Vec};
 #[cfg(not(feature = "uefi"))]
 use std::vec::Vec;
 
-// uefi 縺ｨ std 縺ｧ菴ｿ逕ｨ縺吶ｋ String 縺ｨ format! 繧貞・繧頑崛縺医ｋ
+// uefi 驍ｵ・ｺ繝ｻ・ｨ std 驍ｵ・ｺ繝ｻ・ｧ髣厄ｽｴ繝ｻ・ｿ鬨ｾ蛹・ｽｽ・ｨ驍ｵ・ｺ陷ｷ・ｶ繝ｻ繝ｻString 驍ｵ・ｺ繝ｻ・ｨ format! 驛｢・ｧ髮区ｧｭ繝ｻ驛｢・ｧ鬯・､ｧ・ｴ蟶ｷ・ｸ・ｺ陋ｹ・ｻ繝ｻ繝ｻ
 #[cfg(feature = "uefi")]
 use alloc::{format, string::{String, ToString}};
 #[cfg(not(feature = "uefi"))]
@@ -24,7 +26,7 @@ use crate::renderer::{calculate_pixel_font_size, gui_renderer};
 use crate::typing; // For calculate_total_metrics
 use ab_glyph::FontVec;
 
-/// 逕ｻ髱｢荳翫・謠冗判蝓ｺ貅也せ繧貞ｮ夂ｾｩ縺吶ｋenum
+/// 鬨ｾ蛹・ｽｽ・ｻ鬯ｮ・ｱ繝ｻ・｢髣包ｽｳ驗呻ｽｫ郢晢ｽｻ髫ｰ・ｰ陷諤懈・髯憺屮・ｽ・ｺ髮九・・ｹ貅倪雷驛｢・ｧ髮区ｩｸ・ｽ・ｮ陞溘ｑ・ｽ・ｾ繝ｻ・ｩ驍ｵ・ｺ陷ｷ・ｶ繝ｻ闖穫um
 #[derive(Clone, Copy)]
 pub enum Anchor {
     TopLeft,
@@ -38,13 +40,14 @@ pub enum Anchor {
     BottomRight,
 }
 
-/// Anchor縺九ｉ縺ｮ繧ｪ繝輔そ繝・ヨ・育ｧｻ蜍暮㍼・峨ｒ螳夂ｾｩ縺吶ｋ讒矩菴・#[derive(Clone, Copy)]
+/// Anchor驍ｵ・ｺ闕ｵ譎｢・ｽ閾･・ｸ・ｺ繝ｻ・ｮ驛｢・ｧ繝ｻ・ｪ驛｢譎・ｽｼ譁絶落驛｢譏ｴ繝ｻ郢晢ｽｨ郢晢ｽｻ髢ｧ・ｲ繝ｻ・ｧ繝ｻ・ｻ髯ｷ閧ｴ蝮ｩ郤・ｽｼ郢晢ｽｻ陝ｲ・ｨ繝ｻ螳壽･懆棔繧托ｽｽ・ｾ繝ｻ・ｩ驍ｵ・ｺ陷ｷ・ｶ繝ｻ邇厄ｽｮ蝣､豢ｸ・つ繝ｻ・ｰ髣厄ｽｴ郢晢ｽｻ
+#[derive(Clone, Copy)]
 pub struct Shift {
     pub x: f32,
     pub y: f32,
 }
 
-/// 豌ｴ蟷ｳ譁ｹ蜷代・謠・∴
+/// 髮朱ｯ会ｽｽ・ｴ髯晢ｽｷ繝ｻ・ｳ髫ｴ繝ｻ・ｽ・ｹ髯ｷ・ｷ闔会ｽ｣郢晢ｽｻ髫ｰ・ｰ郢晢ｽｻ遶擾ｽｴ
 #[derive(Clone, Copy)]
 pub enum HorizontalAlign {
     Left,
@@ -52,7 +55,7 @@ pub enum HorizontalAlign {
     Right,
 }
 
-/// 蝙ら峩譁ｹ蜷代・謠・∴
+/// 髯懷生・芽浚・ｩ髫ｴ繝ｻ・ｽ・ｹ髯ｷ・ｷ闔会ｽ｣郢晢ｽｻ髫ｰ・ｰ郢晢ｽｻ遶擾ｽｴ
 #[derive(Clone, Copy)]
 pub enum VerticalAlign {
     Top,
@@ -60,64 +63,76 @@ pub enum VerticalAlign {
     Bottom,
 }
 
-/// 繝・く繧ｹ繝医・謠・∴譁ｹ繧貞ｮ夂ｾｩ縺吶ｋ讒矩菴・#[derive(Clone, Copy)]
+/// 驛｢譏ｴ繝ｻ邵ｺ蜀暦ｽｹ・ｧ繝ｻ・ｹ驛｢譎冗樟郢晢ｽｻ髫ｰ・ｰ郢晢ｽｻ遶擾ｽｴ髫ｴ繝ｻ・ｽ・ｹ驛｢・ｧ髮区ｩｸ・ｽ・ｮ陞溘ｑ・ｽ・ｾ繝ｻ・ｩ驍ｵ・ｺ陷ｷ・ｶ繝ｻ邇厄ｽｮ蝣､豢ｸ・つ繝ｻ・ｰ髣厄ｽｴ郢晢ｽｻ
+#[derive(Clone, Copy)]
 pub struct Align {
     pub horizontal: HorizontalAlign,
     pub vertical: VerticalAlign,
 }
 
-/// 繝輔か繝ｳ繝医し繧､繧ｺ縺ｮ蝓ｺ貅悶ｒ螳夂ｾｩ縺吶ｋenum
+/// 驛｢譎・ｽｼ譁青ｰ驛｢譎｢・ｽ・ｳ驛｢譎冗樟邵ｺ遉ｼ・ｹ・ｧ繝ｻ・､驛｢・ｧ繝ｻ・ｺ驍ｵ・ｺ繝ｻ・ｮ髯憺屮・ｽ・ｺ髮九・縺倥・螳壽･懆棔繧托ｽｽ・ｾ繝ｻ・ｩ驍ｵ・ｺ陷ｷ・ｶ繝ｻ闖穫um
 #[derive(Clone, Copy)]
 pub enum FontSize {
-    /// 繧ｦ繧｣繝ｳ繝峨え縺ｮ鬮倥＆縺ｫ蟇ｾ縺吶ｋ豈皮紫
+    /// 驛｢・ｧ繝ｻ・ｦ驛｢・ｧ繝ｻ・｣驛｢譎｢・ｽ・ｳ驛｢譎擾ｽｳ・ｨ邵ｺ閧ｲ・ｸ・ｺ繝ｻ・ｮ鬯ｯ・ｮ陋滂ｽ･繝ｻ繝ｻ・ｸ・ｺ繝ｻ・ｫ髯昴・・ｽ・ｾ驍ｵ・ｺ陷ｷ・ｶ繝ｻ邇厄ｽｱ閧ｲ蝮ｩ驍擾ｽｫ
     WindowHeight(f32),
-    /// 繧ｦ繧｣繝ｳ繝峨え縺ｮ髱｢遨阪・蟷ｳ譁ｹ譬ｹ縺ｫ蟇ｾ縺吶ｋ豈皮紫
+    /// 驛｢・ｧ繝ｻ・ｦ驛｢・ｧ繝ｻ・｣驛｢譎｢・ｽ・ｳ驛｢譎擾ｽｳ・ｨ邵ｺ閧ｲ・ｸ・ｺ繝ｻ・ｮ鬯ｮ・ｱ繝ｻ・｢鬩包ｽｨ鬮ｦ・ｪ郢晢ｽｻ髯晢ｽｷ繝ｻ・ｳ髫ｴ繝ｻ・ｽ・ｹ髫ｴ・ｬ繝ｻ・ｹ驍ｵ・ｺ繝ｻ・ｫ髯昴・・ｽ・ｾ驍ｵ・ｺ陷ｷ・ｶ繝ｻ邇厄ｽｱ閧ｲ蝮ｩ驍擾ｽｫ
     WindowAreaSqrt(f32),
 }
 
-/// 繧ｰ繝ｩ繝・・繧ｷ繝ｧ繝ｳ縺ｮ螳夂ｾｩ
+/// 驛｢・ｧ繝ｻ・ｰ驛｢譎｢・ｽ・ｩ驛｢譏ｴ繝ｻ郢晢ｽｻ驛｢・ｧ繝ｻ・ｷ驛｢譎｢・ｽ・ｧ驛｢譎｢・ｽ・ｳ驍ｵ・ｺ繝ｻ・ｮ髯橸ｽｳ陞溘ｑ・ｽ・ｾ繝ｻ・ｩ
 #[derive(Clone, Copy)]
 pub struct Gradient {
     pub start_color: u32,
     pub end_color: u32,
 }
 
-/// 荳頑ｮｵ・育岼讓吶ユ繧ｭ繧ｹ繝茨ｼ峨・繧ｻ繧ｰ繝｡繝ｳ繝医・迥ｶ諷・pub enum UpperSegmentState {
-    /// 螳御ｺ・ｸ医∩・域ｭ｣縺励￥繧ｿ繧､繝励＆繧後◆・・    Correct,
-    /// 螳御ｺ・ｸ医∩・磯俣驕輔＞繧貞性繧薙〒縺・◆・・    Incorrect,
-    /// 譛ｪ蜈･蜉・    Pending,
-    /// 迴ｾ蝨ｨ蜈･蜉帑ｸｭ縺ｮ繧｢繧ｯ繝・ぅ繝悶↑繧ｻ繧ｰ繝｡繝ｳ繝・    Active,
+/// 髣包ｽｳ鬯・汚・ｽ・ｮ繝ｻ・ｵ郢晢ｽｻ髢ｧ・ｲ陝ｯ・ｼ髫ｶ轣倡函郢晢ｽｦ驛｢・ｧ繝ｻ・ｭ驛｢・ｧ繝ｻ・ｹ驛｢譎∬か繝ｻ・ｼ陝ｲ・ｨ郢晢ｽｻ驛｢・ｧ繝ｻ・ｻ驛｢・ｧ繝ｻ・ｰ驛｢譎｢・ｽ・｡驛｢譎｢・ｽ・ｳ驛｢譎冗樟郢晢ｽｻ髴托ｽ･繝ｻ・ｶ髫ｲ・ｷ郢晢ｽｻ
+pub enum UpperSegmentState {
+    /// 打ち込みが正しく完了したセグメント。
+    Correct,
+    /// いま未入力のセグメント。
+    Incorrect,
+    /// 文字列が未確定で保留中。
+    Pending,
+    /// 現在入力中のセグメント。
+    Active,
 }
 
-/// 荳頑ｮｵ・育岼讓吶ユ繧ｭ繧ｹ繝茨ｼ峨ｒ讒区・縺吶ｋ縲√Ν繝謎ｻ倥″縺ｮ1繧ｻ繧ｰ繝｡繝ｳ繝・pub struct UpperTypingSegment {
+/// 髣包ｽｳ鬯・汚・ｽ・ｮ繝ｻ・ｵ郢晢ｽｻ髢ｧ・ｲ陝ｯ・ｼ髫ｶ轣倡函郢晢ｽｦ驛｢・ｧ繝ｻ・ｭ驛｢・ｧ繝ｻ・ｹ驛｢譎∬か繝ｻ・ｼ陝ｲ・ｨ繝ｻ螳夲ｽｮ雋樒私郢晢ｽｻ驍ｵ・ｺ陷ｷ・ｶ繝ｻ迢暦ｽｸ・ｲ遶丞｢・刮・ｹ譎・ｽｬ雜｣・ｽ・ｻ陋滂ｽ･遯ｶ・ｳ驍ｵ・ｺ繝ｻ・ｮ1驛｢・ｧ繝ｻ・ｻ驛｢・ｧ繝ｻ・ｰ驛｢譎｢・ｽ・｡驛｢譎｢・ｽ・ｳ驛｢譏ｴ繝ｻ
+pub struct UpperTypingSegment {
     pub base_text: String,
     pub ruby_text: Option<String>,
-    /// anno險俶ｳ輔・豕ｨ驥医ユ繧ｭ繧ｹ繝茨ｼ医・繝ｼ繧ｹ繝・く繧ｹ繝医・荳九↓陦ｨ遉ｺ・・    pub anno_text: Option<String>,
+    /// anno鬮ｫ・ｪ闖ｫ・ｶ繝ｻ・ｳ髴域鱒繝ｻ髮主桁・ｽ・ｨ鬯ｩ・･陋ｹ・ｻ郢晢ｽｦ驛｢・ｧ繝ｻ・ｭ驛｢・ｧ繝ｻ・ｹ驛｢譎∬か繝ｻ・ｼ陋ｹ・ｻ郢晢ｽｻ驛｢譎｢・ｽ・ｼ驛｢・ｧ繝ｻ・ｹ驛｢譏ｴ繝ｻ邵ｺ蜀暦ｽｹ・ｧ繝ｻ・ｹ驛｢譎冗樟郢晢ｽｻ髣包ｽｳ闕ｵ譏ｶ繝ｻ鬮ｯ・ｦ繝ｻ・ｨ鬩穂ｼ夲ｽｽ・ｺ郢晢ｽｻ郢晢ｽｻ
+    pub anno_text: Option<String>,
     pub state: UpperSegmentState,
 }
 
-/// 荳区ｮｵ・亥・蜉帙ユ繧ｭ繧ｹ繝茨ｼ峨・繧｢繧ｯ繝・ぅ繝厄ｼ育樟蝨ｨ蜈･蜉帑ｸｭ・峨そ繧ｰ繝｡繝ｳ繝医ｒ讒区・縺吶ｋ隕∫ｴ
+/// 髣包ｽｳ陋ｹ・ｺ繝ｻ・ｮ繝ｻ・ｵ郢晢ｽｻ闔・･郢晢ｽｻ髯ｷ迚呻ｽｸ蜷ｶﾎ倬Δ・ｧ繝ｻ・ｭ驛｢・ｧ繝ｻ・ｹ驛｢譎∬か繝ｻ・ｼ陝ｲ・ｨ郢晢ｽｻ驛｢・ｧ繝ｻ・｢驛｢・ｧ繝ｻ・ｯ驛｢譏ｴ繝ｻ邵ｺ繝ｻ・ｹ譎冗ｧ√・・ｼ髢ｧ・ｲ隶捺ｺｯ闊峨・・ｨ髯ｷ闌ｨ・ｽ・･髯ｷ迚呻ｽｸ謇假ｽｽ・ｸ繝ｻ・ｭ郢晢ｽｻ陝ｲ・ｨ邵ｺ譎会ｽｹ・ｧ繝ｻ・ｰ驛｢譎｢・ｽ・｡驛｢譎｢・ｽ・ｳ驛｢譎冗樟繝ｻ螳夲ｽｮ雋樒私郢晢ｽｻ驍ｵ・ｺ陷ｷ・ｶ繝ｻ遏ｩ蝗守ｫ擾ｽｫ繝ｻ・ｴ繝ｻ・ｰ
 pub enum ActiveLowerElement {
-    /// 繧ｿ繧､繝玲ｸ医∩縺ｮ譁・ｭ暦ｼ域ｭ｣隱､諠・ｱ莉倥″・・    Typed { character: char, is_correct: bool },
-    /// 繧ｫ繝ｼ繧ｽ繝ｫ
+    /// 驛｢・ｧ繝ｻ・ｿ驛｢・ｧ繝ｻ・､驛｢譎芽ｻｸ繝ｻ・ｸ陋ｹ・ｻ遶擾ｽｩ驍ｵ・ｺ繝ｻ・ｮ髫ｴ竏壹・繝ｻ・ｭ隴会ｽｦ繝ｻ・ｼ陜捺ｻゑｽｽ・ｭ繝ｻ・｣鬮ｫ・ｱ繝ｻ・､髫ｲ・ｰ郢晢ｽｻ繝ｻ・ｰ繝ｻ・ｱ髣皮甥ﾂ・･遯ｶ・ｳ郢晢ｽｻ郢晢ｽｻ
+    Typed { character: char, is_correct: bool },
+    /// 驛｢・ｧ繝ｻ・ｫ驛｢譎｢・ｽ・ｼ驛｢・ｧ繝ｻ・ｽ驛｢譎｢・ｽ・ｫ
     Cursor,
-    /// 譛ｪ遒ｺ螳壹・繝ｭ繝ｼ繝槫ｭ怜・蜉・(萓・ "k", "ky")
+    /// 髫ｴ蟷｢・ｽ・ｪ鬩墓慣・ｽ・ｺ髯橸ｽｳ陞｢・ｹ郢晢ｽｻ驛｢譎｢・ｽ・ｭ驛｢譎｢・ｽ・ｼ驛｢譎・ｽｧ・ｫ繝ｻ・ｭ隲､諛翫・髯ｷ蟲ｨ繝ｻ(髣懆侭繝ｻ "k", "ky")
     UnconfirmedInput(String),
-    /// 逶ｴ蜑阪・隱､蜈･蜉帙く繝ｼ
+    /// 鬨ｾ・ｶ繝ｻ・ｴ髯ｷ鮃ｹ莠らｹ晢ｽｻ鬮ｫ・ｱ繝ｻ・､髯ｷ闌ｨ・ｽ・･髯ｷ迚呻ｽｸ蜷ｶ・･驛｢譎｢・ｽ・ｼ
     LastIncorrectInput(char),
 }
 
-/// 荳区ｮｵ・亥・蜉帙ユ繧ｭ繧ｹ繝茨ｼ峨ｒ讒区・縺吶ｋ繧ｻ繧ｰ繝｡繝ｳ繝・pub enum LowerTypingSegment {
-    /// 螳御ｺ・ｸ医∩縺ｮ繧ｻ繧ｰ繝｡繝ｳ繝・    Completed {
+/// 髣包ｽｳ陋ｹ・ｺ繝ｻ・ｮ繝ｻ・ｵ郢晢ｽｻ闔・･郢晢ｽｻ髯ｷ迚呻ｽｸ蜷ｶﾎ倬Δ・ｧ繝ｻ・ｭ驛｢・ｧ繝ｻ・ｹ驛｢譎∬か繝ｻ・ｼ陝ｲ・ｨ繝ｻ螳夲ｽｮ雋樒私郢晢ｽｻ驍ｵ・ｺ陷ｷ・ｶ繝ｻ迢暦ｽｹ・ｧ繝ｻ・ｻ驛｢・ｧ繝ｻ・ｰ驛｢譎｢・ｽ・｡驛｢譎｢・ｽ・ｳ驛｢譏ｴ繝ｻ
+pub enum LowerTypingSegment {
+    /// 髯橸ｽｳ陟包ｽ｡繝ｻ・ｺ郢晢ｽｻ繝ｻ・ｸ陋ｹ・ｻ遶擾ｽｩ驍ｵ・ｺ繝ｻ・ｮ驛｢・ｧ繝ｻ・ｻ驛｢・ｧ繝ｻ・ｰ驛｢譎｢・ｽ・｡驛｢譎｢・ｽ・ｳ驛｢譏ｴ繝ｻ
+    Completed {
         base_text: String,
         ruby_text: Option<String>,
         is_correct: bool,
         width: u32,
     },
-    /// 迴ｾ蝨ｨ蜈･蜉帑ｸｭ縺ｮ繧｢繧ｯ繝・ぅ繝悶↑繧ｻ繧ｰ繝｡繝ｳ繝・    Active { elements: Vec<ActiveLowerElement> },
+    /// 髴托ｽｴ繝ｻ・ｾ髯懶ｽｨ繝ｻ・ｨ髯ｷ闌ｨ・ｽ・･髯ｷ迚呻ｽｸ謇假ｽｽ・ｸ繝ｻ・ｭ驍ｵ・ｺ繝ｻ・ｮ驛｢・ｧ繝ｻ・｢驛｢・ｧ繝ｻ・ｯ驛｢譏ｴ繝ｻ邵ｺ繝ｻ・ｹ譎・§遶企・・ｹ・ｧ繝ｻ・ｻ驛｢・ｧ繝ｻ・ｰ驛｢譎｢・ｽ・｡驛｢譎｢・ｽ・ｳ驛｢譏ｴ繝ｻ
+    Active { elements: Vec<ActiveLowerElement> },
 }
 
-/// 逕ｻ髱｢縺ｫ謠冗判縺吶∋縺崎ｦ∫ｴ縺ｮ遞ｮ鬘槭→繝ｬ繧､繧｢繧ｦ繝域ュ蝣ｱ繧貞ｮ夂ｾｩ縺吶ｋenum
+/// 鬨ｾ蛹・ｽｽ・ｻ鬯ｮ・ｱ繝ｻ・｢驍ｵ・ｺ繝ｻ・ｫ髫ｰ・ｰ陷諤懈・驍ｵ・ｺ陷ｷ・ｶ遶冗距・ｸ・ｺ陝雜｣・ｽ・ｦ遶擾ｽｫ繝ｻ・ｴ繝ｻ・ｰ驍ｵ・ｺ繝ｻ・ｮ鬩墓ｩｸ・ｽ・ｮ鬯ｯ菫ｶ・ｧ・ｭ遶雁､・ｹ譎｢・ｽ・ｬ驛｢・ｧ繝ｻ・､驛｢・ｧ繝ｻ・｢驛｢・ｧ繝ｻ・ｦ驛｢譎乗ｲｺ郢晢ｽ･髯懶ｽ｣繝ｻ・ｱ驛｢・ｧ髮区ｩｸ・ｽ・ｮ陞溘ｑ・ｽ・ｾ繝ｻ・ｩ驍ｵ・ｺ陷ｷ・ｶ繝ｻ闖穫um
 pub enum Renderable {
     Background {
         gradient: Gradient,
@@ -138,77 +153,63 @@ pub enum Renderable {
         font_size: FontSize,
         color: u32,
     },
-    /// 荳頑ｮｵ縺ｮ逶ｮ讓吶ユ繧ｭ繧ｹ繝郁｡悟・菴薙ｒ陦ｨ縺吝梛
+    /// 髣包ｽｳ鬯・汚・ｽ・ｮ繝ｻ・ｵ驍ｵ・ｺ繝ｻ・ｮ鬨ｾ・ｶ繝ｻ・ｮ髫ｶ轣倡函郢晢ｽｦ驛｢・ｧ繝ｻ・ｭ驛｢・ｧ繝ｻ・ｹ驛｢譎槭Γ繝ｻ・｡隰疲ｺ倥・髣厄ｽｴ髦ｮ蜻ｻ・ｽ蟶晏距繝ｻ・ｨ驍ｵ・ｺ陷ｷ譎・ｽ｢繝ｻ
     TypingUpper {
         segments: Vec<UpperTypingSegment>,
         anchor: Anchor,
         shift: Shift,
         align: Align,
-        font_size: FontSize, // 繝吶・繧ｹ繝・く繧ｹ繝医・繝輔か繝ｳ繝医し繧､繧ｺ
+        font_size: FontSize, // 驛｢譎冗函郢晢ｽｻ驛｢・ｧ繝ｻ・ｹ驛｢譏ｴ繝ｻ邵ｺ蜀暦ｽｹ・ｧ繝ｻ・ｹ驛｢譎冗樟郢晢ｽｻ驛｢譎・ｽｼ譁青ｰ驛｢譎｢・ｽ・ｳ驛｢譎冗樟邵ｺ遉ｼ・ｹ・ｧ繝ｻ・､驛｢・ｧ繝ｻ・ｺ
     },
-    /// 荳区ｮｵ縺ｮ蜈･蜉帙ユ繧ｭ繧ｹ繝郁｡悟・菴薙ｒ陦ｨ縺吝梛
+    /// 髣包ｽｳ陋ｹ・ｺ繝ｻ・ｮ繝ｻ・ｵ驍ｵ・ｺ繝ｻ・ｮ髯ｷ闌ｨ・ｽ・･髯ｷ迚呻ｽｸ蜷ｶﾎ倬Δ・ｧ繝ｻ・ｭ驛｢・ｧ繝ｻ・ｹ驛｢譎槭Γ繝ｻ・｡隰疲ｺ倥・髣厄ｽｴ髦ｮ蜻ｻ・ｽ蟶晏距繝ｻ・ｨ驍ｵ・ｺ陷ｷ譎・ｽ｢繝ｻ
     TypingLower {
         segments: Vec<LowerTypingSegment>,
         anchor: Anchor,
         shift: Shift,
         align: Align,
-        font_size: FontSize, // 蜈･蜉帙ユ繧ｭ繧ｹ繝医・繝輔か繝ｳ繝医し繧､繧ｺ
+        font_size: FontSize, // 髯ｷ闌ｨ・ｽ・･髯ｷ迚呻ｽｸ蜷ｶﾎ倬Δ・ｧ繝ｻ・ｭ驛｢・ｧ繝ｻ・ｹ驛｢譎冗樟郢晢ｽｻ驛｢譎・ｽｼ譁青ｰ驛｢譎｢・ｽ・ｳ驛｢譎冗樟邵ｺ遉ｼ・ｹ・ｧ繝ｻ・､驛｢・ｧ繝ｻ・ｺ
         target_line_total_width: u32,
     },
     ProgressBar {
         anchor: Anchor,
         shift: Shift,
-        width_ratio: f32, // 逕ｻ髱｢蟷・↓蟇ｾ縺吶ｋ豈皮紫
-        height_ratio: f32, // 逕ｻ髱｢鬮倥＆縺ｫ蟇ｾ縺吶ｋ豈皮紫
+        width_ratio: f32, // 鬨ｾ蛹・ｽｽ・ｻ鬯ｮ・ｱ繝ｻ・｢髯晢ｽｷ郢晢ｽｻ遶頑･｢豎槭・・ｾ驍ｵ・ｺ陷ｷ・ｶ繝ｻ邇厄ｽｱ閧ｲ蝮ｩ驍擾ｽｫ
+        height_ratio: f32, // 鬨ｾ蛹・ｽｽ・ｻ鬯ｮ・ｱ繝ｻ・｢鬯ｯ・ｮ陋滂ｽ･繝ｻ繝ｻ・ｸ・ｺ繝ｻ・ｫ髯昴・・ｽ・ｾ驍ｵ・ｺ陷ｷ・ｶ繝ｻ邇厄ｽｱ閧ｲ蝮ｩ驍擾ｽｫ
         progress: f32, // 0.0 to 1.0
         bg_color: u32,
         fg_color: u32,
     },
 }
 
-/// How to Use 逕ｻ髱｢縺ｫ陦ｨ遉ｺ縺吶ｋ蜷・｡・ (繝・く繧ｹ繝・ 濶ｲ) 縺ｮ螳夂ｾｩ縲・/// app.rs 縺九ｉ陦梧焚蜿ら・縺ｮ縺溘ａ縺ｫ pub(crate) 縺ｧ蜈ｬ髢九☆繧九・pub(crate) const HOW_TO_USE_CONTENT: &[(&str, u32)] = &[
-    // 笏笏笏 蝓ｺ譛ｬ謫堺ｽ・笏笏笏
-    ("[ 蝓ｺ譛ｬ謫堺ｽ・]",                              0xFF_FFDD88),
-    ("  竊・/ 竊・  : 鬆・岼繧帝∈謚・,                   0xFF_CCCCCC),
-    ("  Enter    : 驕ｸ謚・/ 豎ｺ螳・,                  0xFF_CCCCCC),
-    ("  Esc      : 蜑阪・逕ｻ髱｢縺ｫ謌ｻ繧・,               0xFF_CCCCCC),
+/// How to Use 鬨ｾ蛹・ｽｽ・ｻ鬯ｮ・ｱ繝ｻ・｢驍ｵ・ｺ繝ｻ・ｫ鬮ｯ・ｦ繝ｻ・ｨ鬩穂ｼ夲ｽｽ・ｺ驍ｵ・ｺ陷ｷ・ｶ繝ｻ邇匁・郢晢ｽｻ繝ｻ・｡郢晢ｽｻ (驛｢譏ｴ繝ｻ邵ｺ蜀暦ｽｹ・ｧ繝ｻ・ｹ驛｢譏ｴ繝ｻ 雎ｼ・ｶ繝ｻ・ｲ) 驍ｵ・ｺ繝ｻ・ｮ髯橸ｽｳ陞溘ｑ・ｽ・ｾ繝ｻ・ｩ驍ｵ・ｲ郢晢ｽｻ/// app.rs 驍ｵ・ｺ闕ｵ譎｢・ｽ陋ｾ蜍苓ｭｴ・ｧ霎溷､頑╂郢ｧ蟲ｨ繝ｻ驍ｵ・ｺ繝ｻ・ｮ驍ｵ・ｺ雋・∞・ｽ竏ｫ・ｸ・ｺ繝ｻ・ｫ pub(crate) 驍ｵ・ｺ繝ｻ・ｧ髯ｷ闌ｨ・ｽ・ｬ鬯ｮ・｢闕ｵ譏ｶ繝ｻ驛｢・ｧ闕ｵ謨鳴郢晢ｽｻ
+pub(crate) const HOW_TO_USE_CONTENT: &[(&str, u32)] = &[
+    // 髫ｨ貂可髫ｨ貂可髫ｨ貂可 髯憺屮・ｽ・ｺ髫ｴ蟷｢・ｽ・ｬ髫ｰ・ｫ陜｣・ｺ繝ｻ・ｽ郢晢ｽｻ髫ｨ貂可髫ｨ貂可髫ｨ貂可
+    ("[ 髯憺屮・ｽ・ｺ髫ｴ蟷｢・ｽ・ｬ髫ｰ・ｫ陜｣・ｺ繝ｻ・ｽ郢晢ｽｻ]",                              0xFF_FFDD88),
     ("",                                          0xFF_000000),
-    // 笏笏笏 繧ｿ繧､繝斐Φ繧ｰ 笏笏笏
-    ("[ 繧ｿ繧､繝斐Φ繧ｰ ]",                            0xFF_FFDD88),
-    ("  繝ｭ繝ｼ繝槫ｭ励〒縺ｲ繧峨′縺ｪ / 繧ｫ繧ｿ繧ｫ繝翫ｒ蜈･蜉・,     0xFF_CCCCCC),
-    ("  萓・ 縺銀・ka  縺坂・ki  縺娯・ga  縺ｯ竊檀a",        0xFF_888888),
-    ("  髱定牡 : 豁｣縺励￥繧ｿ繧､繝励＆繧後◆譁・ｭ・,           0xFF_9097FF),
-    ("  襍､濶ｲ : 髢馴＆縺・ｒ蜷ｫ繧薙□譁・ｭ・,              0xFF_FF9898),
-    ("  逋ｽ濶ｲ : 迴ｾ蝨ｨ縺ｮ蜈･蜉帑ｽ咲ｽｮ",                  0xFF_FFFFFF),
-    ("  Backspace : 譛ｪ遒ｺ螳壹Ο繝ｼ繝槫ｭ・/ 隱､繧雁・蜉帙ｒ豸医☆", 0xFF_CCCCCC),
+    // 髫ｨ貂可髫ｨ貂可髫ｨ貂可 驛｢・ｧ繝ｻ・ｿ驛｢・ｧ繝ｻ・､驛｢譎・ｱ抵ｾ趣ｽｦ驛｢・ｧ繝ｻ・ｰ 髫ｨ貂可髫ｨ貂可髫ｨ貂可
+    ("[ 驛｢・ｧ繝ｻ・ｿ驛｢・ｧ繝ｻ・､驛｢譎・ｱ抵ｾ趣ｽｦ驛｢・ｧ繝ｻ・ｰ ]",                            0xFF_FFDD88),
+    ("  髣懆侭繝ｻ 驍ｵ・ｺ鬩ｫﾂ郢晢ｽｻka  驍ｵ・ｺ陜ｮ繧・・ki  驍ｵ・ｺ陞ｽ・ｯ郢晢ｽｻga  驍ｵ・ｺ繝ｻ・ｯ驕ｶ鬆托ｽｪﾂa",        0xFF_888888),
+    ("  鬨ｾ蜈ｷ・ｽ・ｽ雎ｼ・ｶ繝ｻ・ｲ : 髴托ｽｴ繝ｻ・ｾ髯懶ｽｨ繝ｻ・ｨ驍ｵ・ｺ繝ｻ・ｮ髯ｷ闌ｨ・ｽ・･髯ｷ迚呻ｽｸ謇假ｽｽ・ｽ陷･・ｲ繝ｻ・ｽ繝ｻ・ｮ",                  0xFF_FFFFFF),
     ("",                                          0xFF_000000),
-    // 笏笏笏 蝠城｡碁∈謚・笏笏笏
-    ("[ 蝠城｡碁∈謚・]",                              0xFF_FFDD88),
-    ("  Enter : 繧ｿ繧､繝斐Φ繧ｰ髢句ｧ・,                  0xFF_CCCCCC),
-    ("  V     : 繧ｽ繝ｼ繧ｹ繝輔ぃ繧､繝ｫ繧堤｢ｺ隱・,            0xFF_CCCCCC),
-    ("  X     : 繧ｫ繧ｹ繧ｿ繝蝠城｡後ｒ蜑企勁",              0xFF_CCCCCC),
-    ("  U / D : 繧ｫ繧ｹ繧ｿ繝蝠城｡後・鬆・ｺ上ｒ螟画峩",        0xFF_CCCCCC),
+    // 髫ｨ貂可髫ｨ貂可髫ｨ貂可 髯懶｣ｰ陜楢ｶ｣・ｽ・｡驕停沖繝ｻ髫ｰ螢ｹ繝ｻ髫ｨ貂可髫ｨ貂可髫ｨ貂可
+    ("[ 髯懶｣ｰ陜楢ｶ｣・ｽ・｡驕停沖繝ｻ髫ｰ螢ｹ繝ｻ]",                              0xFF_FFDD88),
+    ("  X     : 驛｢・ｧ繝ｻ・ｫ驛｢・ｧ繝ｻ・ｹ驛｢・ｧ繝ｻ・ｿ驛｢譎｢・｣・ｰ髯懶｣ｰ陜楢ｶ｣・ｽ・｡陟暮ｯ会ｽｽ螳壽≧闔ｨ竏晄ｱ・",              0xFF_CCCCCC),
+    ("  U / D : 驛｢・ｧ繝ｻ・ｫ驛｢・ｧ繝ｻ・ｹ驛｢・ｧ繝ｻ・ｿ驛｢譎｢・｣・ｰ髯懶｣ｰ陜楢ｶ｣・ｽ・｡陟募ｾ後・鬯ｯ繝ｻ繝ｻ繝ｻ・ｺ闕ｳ螂・ｽｽ螳壽｣秘包ｽｻ陝ｲ・ｩ",        0xFF_CCCCCC),
     ("",                                          0xFF_000000),
-    // 笏笏笏 繝輔Μ繝・け蜈･蜉・笏笏笏
-    ("[ 繝輔Μ繝・け蜈･蜉・(繧ｿ繝・メ繝・ヰ繧､繧ｹ) ]",         0xFF_FFDD88),
-    ("  繧ｿ繧､繝斐Φ繧ｰ荳ｭ縺ｫ逕ｻ髱｢荳矩Κ縺ｫ繧ｭ繝ｼ繝懊・繝峨′陦ｨ遉ｺ", 0xFF_CCCCCC),
-    ("  荳ｭ螟ｮ繧ｿ繝・・ : 縺よｮｵ  (萓・ 縺・竊・縺・",        0xFF_CCCCCC),
-    ("  荳翫ヵ繝ｪ繝・け : 縺・ｮｵ  (萓・ 縺・竊・縺・",        0xFF_CCCCCC),
-    ("  蟾ｦ繝輔Μ繝・け : 縺・ｮｵ  (萓・ 縺・竊・縺・",        0xFF_CCCCCC),
-    ("  蜿ｳ繝輔Μ繝・け : 縺域ｮｵ  (萓・ 縺・竊・縺・",        0xFF_CCCCCC),
-    ("  荳九ヵ繝ｪ繝・け : 縺頑ｮｵ  (萓・ 縺・竊・縺・",        0xFF_CCCCCC),
-    ("  螟ｧ竍泌ｰ上く繝ｼ : 逶ｴ蜑阪・隱､繧雁・蜉帙ｒ螟画鋤",       0xFF_CCCCCC),
-    ("           縺銀・縺娯・縺・ 縺ｯ竊偵・竊偵・竊偵・  縺ｪ縺ｩ", 0xFF_888888),
-    ("           (逶ｴ蜑阪′隱､繧翫・縺ｨ縺阪・縺ｿ菴懷虚)",     0xFF_888888),
-    ("  繧・/ 繧・ : 縲後＞縲・縲後∴縲阪〒莉｣譖ｿ蜈･蜉帛庄",   0xFF_AAAAAA),
+    // 髫ｨ貂可髫ｨ貂可髫ｨ貂可 驛｢譎・ｽｼ驥・㏍・ｹ譏ｴ繝ｻ邵ｺ鬘梧ｦ繝ｻ・･髯ｷ蟲ｨ繝ｻ髫ｨ貂可髫ｨ貂可髫ｨ貂可
+    ("[ 驛｢譎・ｽｼ驥・㏍・ｹ譏ｴ繝ｻ邵ｺ鬘梧ｦ繝ｻ・･髯ｷ蟲ｨ繝ｻ(驛｢・ｧ繝ｻ・ｿ驛｢譏ｴ繝ｻ郢晢ｽ｡驛｢譏ｴ繝ｻ郢晢ｽｰ驛｢・ｧ繝ｻ・､驛｢・ｧ繝ｻ・ｹ) ]",         0xFF_FFDD88),
+    ("  驛｢・ｧ繝ｻ・ｿ驛｢・ｧ繝ｻ・､驛｢譎・ｱ抵ｾ趣ｽｦ驛｢・ｧ繝ｻ・ｰ髣包ｽｳ繝ｻ・ｭ驍ｵ・ｺ繝ｻ・ｫ鬨ｾ蛹・ｽｽ・ｻ鬯ｮ・ｱ繝ｻ・｢髣包ｽｳ驕擾ｽｩ・主､ゑｽｸ・ｺ繝ｻ・ｫ驛｢・ｧ繝ｻ・ｭ驛｢譎｢・ｽ・ｼ驛｢譎・鯵郢晢ｽｻ驛｢譎擾ｽｳ・ｨ遯ｶ・ｲ鬮ｯ・ｦ繝ｻ・ｨ鬩穂ｼ夲ｽｽ・ｺ", 0xFF_CCCCCC),
+    ("  髣包ｽｳ繝ｻ・ｭ髯樊ｻゑｽｽ・ｮ驛｢・ｧ繝ｻ・ｿ驛｢譏ｴ繝ｻ郢晢ｽｻ : 驍ｵ・ｺ郢ｧ闌ｨ・ｽ・ｮ繝ｻ・ｵ  (髣懆侭繝ｻ 驍ｵ・ｺ郢晢ｽｻ驕ｶ鄙ｫ繝ｻ驍ｵ・ｺ郢晢ｽｻ",        0xFF_CCCCCC),
+    ("  髣包ｽｳ驗呻ｽｫ郢晢ｽｵ驛｢譎｢・ｽ・ｪ驛｢譏ｴ繝ｻ邵ｺ繝ｻ: 驍ｵ・ｺ郢晢ｽｻ繝ｻ・ｮ繝ｻ・ｵ  (髣懆侭繝ｻ 驍ｵ・ｺ郢晢ｽｻ驕ｶ鄙ｫ繝ｻ驍ｵ・ｺ郢晢ｽｻ",        0xFF_CCCCCC),
+    ("  髯晢ｽｾ繝ｻ・ｦ驛｢譎・ｽｼ驥・㏍・ｹ譏ｴ繝ｻ邵ｺ繝ｻ: 驍ｵ・ｺ郢晢ｽｻ繝ｻ・ｮ繝ｻ・ｵ  (髣懆侭繝ｻ 驍ｵ・ｺ郢晢ｽｻ驕ｶ鄙ｫ繝ｻ驍ｵ・ｺ郢晢ｽｻ",        0xFF_CCCCCC),
+    ("  髯ｷ・ｿ繝ｻ・ｳ驛｢譎・ｽｼ驥・㏍・ｹ譏ｴ繝ｻ邵ｺ繝ｻ: 驍ｵ・ｺ陜捺ｻゑｽｽ・ｮ繝ｻ・ｵ  (髣懆侭繝ｻ 驍ｵ・ｺ郢晢ｽｻ驕ｶ鄙ｫ繝ｻ驍ｵ・ｺ郢晢ｽｻ",        0xFF_CCCCCC),
+    ("  髣包ｽｳ闕ｵ譏ｴﾎｨ驛｢譎｢・ｽ・ｪ驛｢譏ｴ繝ｻ邵ｺ繝ｻ: 驍ｵ・ｺ鬯・汚・ｽ・ｮ繝ｻ・ｵ  (髣懆侭繝ｻ 驍ｵ・ｺ郢晢ｽｻ驕ｶ鄙ｫ繝ｻ驍ｵ・ｺ郢晢ｽｻ",        0xFF_CCCCCC),
+    ("  髯樊ｻゑｽｽ・ｧ驕ｶ閧ｴ・ｳ魃会ｽｽ・ｰ闕ｳ鄙ｫ・･驛｢譎｢・ｽ・ｼ : 鬨ｾ・ｶ繝ｻ・ｴ髯ｷ鮃ｹ莠らｹ晢ｽｻ鬮ｫ・ｱ繝ｻ・､驛｢・ｧ鬮ｮ竏壹・髯ｷ迚呻ｽｸ蜻ｻ・ｽ螳壽｣秘包ｽｻ鬩ｪ・､",       0xFF_CCCCCC),
+    ("           驍ｵ・ｺ鬩ｫﾂ郢晢ｽｻ驍ｵ・ｺ陞ｽ・ｯ郢晢ｽｻ驍ｵ・ｺ郢晢ｽｻ 驍ｵ・ｺ繝ｻ・ｯ驕ｶ髮√・郢晢ｽｻ驕ｶ髮√・郢晢ｽｻ驕ｶ髮√・郢晢ｽｻ  驍ｵ・ｺ繝ｻ・ｪ驍ｵ・ｺ繝ｻ・ｩ", 0xFF_888888),
+    ("           (鬨ｾ・ｶ繝ｻ・ｴ髯ｷ鮃ｹ莠らｪｶ・ｲ鬮ｫ・ｱ繝ｻ・､驛｢・ｧ驗呻ｽｫ郢晢ｽｻ驍ｵ・ｺ繝ｻ・ｨ驍ｵ・ｺ鬮ｦ・ｪ郢晢ｽｻ驍ｵ・ｺ繝ｻ・ｿ髣厄ｽｴ隲幢ｽｷ髯後・",     0xFF_888888),
     ("",                                          0xFF_000000),
-    // 笏笏笏 繧ｫ繧ｹ繧ｿ繝蝠城｡・笏笏笏
-    ("[ 繧ｫ繧ｹ繧ｿ繝蝠城｡・(.ntq 蠖｢蠑・ ]",              0xFF_FFDD88),
-    ("  #title 繧ｿ繧､繝医Ν蜷・,                       0xFF_99DDAA),
-    ("  [貍｢蟄・繧医∩縺後↑]  : 繝ｫ繝謎ｻ倥″繝・く繧ｹ繝・,    0xFF_99DDAA),
-    ("  {蜀・ｮｹ/豕ｨ驥・      : 豕ｨ驥井ｻ倥″繝・く繧ｹ繝・,    0xFF_99DDAA),
-    ("  遨ｺ逋ｽ / 繧ｹ繝ｩ繝・す繝･ : 蜊倩ｪ槭・蛹ｺ蛻・ｊ",        0xFF_99DDAA),
-    ("  Web迚・ [Open File...] 縺九ｉ繧｢繝・・繝ｭ繝ｼ繝・,  0xFF_CCCCCC),
+    // 髫ｨ貂可髫ｨ貂可髫ｨ貂可 驛｢・ｧ繝ｻ・ｫ驛｢・ｧ繝ｻ・ｹ驛｢・ｧ繝ｻ・ｿ驛｢譎｢・｣・ｰ髯懶｣ｰ陜楢ｶ｣・ｽ・｡郢晢ｽｻ髫ｨ貂可髫ｨ貂可髫ｨ貂可
+    ("[ 驛｢・ｧ繝ｻ・ｫ驛｢・ｧ繝ｻ・ｹ驛｢・ｧ繝ｻ・ｿ驛｢譎｢・｣・ｰ髯懶｣ｰ陜楢ｶ｣・ｽ・｡郢晢ｽｻ(.ntq 髯溷私・ｽ・｢髯滉ｻ｣繝ｻ ]",              0xFF_FFDD88),
 ];
 
 #[cfg(target_arch = "wasm32")]
@@ -217,12 +218,12 @@ const MENU_ITEMS: [&str; 3] = ["Start Typing", "How to Use", "Settings"];
 #[cfg(not(target_arch = "wasm32"))]
 const MENU_ITEMS: [&str; 4] = ["Start Typing", "How to Use", "Settings", "Quit"];
 
-// --- 繧ｿ繧､繝斐Φ繧ｰ逕ｻ髱｢縺ｮ繝ｬ繧､繧｢繧ｦ繝亥ｮ壽焚 ---
+// --- 驛｢・ｧ繝ｻ・ｿ驛｢・ｧ繝ｻ・､驛｢譎・ｱ抵ｾ趣ｽｦ驛｢・ｧ繝ｻ・ｰ鬨ｾ蛹・ｽｽ・ｻ鬯ｮ・ｱ繝ｻ・｢驍ｵ・ｺ繝ｻ・ｮ驛｢譎｢・ｽ・ｬ驛｢・ｧ繝ｻ・､驛｢・ｧ繝ｻ・｢驛｢・ｧ繝ｻ・ｦ驛｢譏懶ｽｺ・･繝ｻ・ｮ陞｢・ｽ霎溘・---
 pub const BASE_FONT_SIZE_RATIO: f32 = 0.2;
 const UPPER_ROW_Y_OFFSET_FACTOR: f32 = 1.3;
 const LOWER_ROW_Y_OFFSET_FACTOR: f32 = 0.2;
 
-// --- 濶ｲ螳夂ｾｩ ---
+// --- 雎ｼ・ｶ繝ｻ・ｲ髯橸ｽｳ陞溘ｑ・ｽ・ｾ繝ｻ・ｩ ---
 pub const CORRECT_COLOR: u32 = 0xFF_9097FF;
 pub const INCORRECT_COLOR: u32 = 0xFF_FF9898;
 pub const PENDING_COLOR: u32 = 0xFF_999999;
@@ -231,7 +232,8 @@ pub const WRONG_KEY_COLOR: u32 = 0xFF_F55252;
 pub const CURSOR_COLOR: u32 = 0xFF_FFFFFF;
 pub const UNCONFIRMED_COLOR: u32 = 0xFF_CCCCCC;
 
-/// App縺ｮ迥ｶ諷九ｒ蜿励￠蜿悶ｊ縲∵緒逕ｻ繝ｪ繧ｹ繝茨ｼ・I繝ｬ繧､繧｢繧ｦ繝茨ｼ峨ｒ讒狗ｯ峨☆繧・pub fn build_ui(app: &App, font: &FontVec, width: usize, height: usize) -> Vec<Renderable> {
+/// App驍ｵ・ｺ繝ｻ・ｮ髴托ｽ･繝ｻ・ｶ髫ｲ・ｷ闕ｵ譎｢・ｽ螳壽╂陷会ｽｱ繝ｻ・ｰ髯ｷ・ｿ隰費ｽｶ繝ｻ鬘費ｽｸ・ｲ遶擾ｽｵ驍ｱ蟶敖蛹・ｽｽ・ｻ驛｢譎｢・ｽ・ｪ驛｢・ｧ繝ｻ・ｹ驛｢譎∬か繝ｻ・ｼ郢晢ｽｻI驛｢譎｢・ｽ・ｬ驛｢・ｧ繝ｻ・､驛｢・ｧ繝ｻ・｢驛｢・ｧ繝ｻ・ｦ驛｢譎∬か繝ｻ・ｼ陝ｲ・ｨ繝ｻ螳夲ｽｮ蝣､霍昴・・ｯ陝ｲ・ｨ隨倥・・ｹ・ｧ郢晢ｽｻ
+pub fn build_ui(app: &App, font: &FontVec, width: usize, height: usize) -> Vec<Renderable> {
     let mut render_list = Vec::new();
 
     let menu_gradient = Gradient { start_color: 0xFF_000010, end_color: 0xFF_000000 };
@@ -260,7 +262,7 @@ pub const UNCONFIRMED_COLOR: u32 = 0xFF_CCCCCC;
         });
     }
 
-    // --- 逕ｻ髱｢蜿ｳ荳翫・FPS陦ｨ遉ｺ ---
+    // --- 鬨ｾ蛹・ｽｽ・ｻ鬯ｮ・ｱ繝ｻ・｢髯ｷ・ｿ繝ｻ・ｳ髣包ｽｳ驗呻ｽｫ郢晢ｽｻFPS鬮ｯ・ｦ繝ｻ・ｨ鬩穂ｼ夲ｽｽ・ｺ ---
     let fps_text = format!("FPS: {:.1}", app.fps);
     render_list.push(Renderable::Text {
         text: fps_text,
@@ -268,10 +270,10 @@ pub const UNCONFIRMED_COLOR: u32 = 0xFF_CCCCCC;
         shift: Shift { x: -0.01, y: 0.01 },
         align: Align { horizontal: HorizontalAlign::Right, vertical: VerticalAlign::Top },
         font_size: FontSize::WindowHeight(0.04),
-        color: 0xFF_00FF00, // 邱題牡
+        color: 0xFF_00FF00, // 鬩搾ｽｱ鬯俶ｪ取ｨｪ
     });
 
-    // --- 逕ｻ髱｢荳矩Κ縺ｮ蜈ｱ騾啅I ---
+    // --- 鬨ｾ蛹・ｽｽ・ｻ鬯ｮ・ｱ繝ｻ・｢髣包ｽｳ驕擾ｽｩ・主､ゑｽｸ・ｺ繝ｻ・ｮ髯ｷ闌ｨ・ｽ・ｱ鬯ｨ・ｾ陜繝ｻ ---
     #[cfg(feature = "gui")]
     {
         render_list.push(Renderable::Text {
@@ -405,7 +407,7 @@ fn build_problem_selection_ui(app: &App, render_list: &mut Vec<Renderable>, grad
     for i in start_index..end_index {
         let item = app.problem_name_at(i);
         let is_open_file = app.is_open_file_entry(i);
-        // 繧ｽ繝ｼ繧ｹ遞ｮ蛻･繝舌ャ繧ｸ繧剃ｻ倅ｸ・ [B]=builtin, [W]=web(wasm), [F]=file(desktop), [+]=open-file
+        // 驛｢・ｧ繝ｻ・ｽ驛｢譎｢・ｽ・ｼ驛｢・ｧ繝ｻ・ｹ鬩墓ｩｸ・ｽ・ｮ髯具ｽｻ繝ｻ・･驛｢譎√・郢晢ｽ｣驛｢・ｧ繝ｻ・ｸ驛｢・ｧ陷代・・ｽ・ｻ陋溘・・ｽ・ｸ郢晢ｽｻ [B]=builtin, [W]=web(wasm), [F]=file(desktop), [+]=open-file
         let badge = if is_open_file { "+".to_string() } else { app.problem_source_label(i).to_string() };
         let selected = i == app.selected_problem_item;
         let (text, color) = if selected {
@@ -428,16 +430,16 @@ fn build_problem_selection_ui(app: &App, render_list: &mut Vec<Renderable>, grad
     }
 
     if start_index > 0 {
-        render_list.push(Renderable::Text { text: "笆ｲ".to_string(), anchor: Anchor::TopCenter, shift: Shift { x: 0.0, y: list_y_start - item_height },
+        render_list.push(Renderable::Text { text: "髫ｨ繝ｻ・ｽ・ｲ".to_string(), anchor: Anchor::TopCenter, shift: Shift { x: 0.0, y: list_y_start - item_height },
             align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center }, font_size: FontSize::WindowHeight(0.04), color: 0xFF_AAAAAA });
     }
     if end_index < app.problem_count() {
-        render_list.push(Renderable::Text { text: "笆ｼ".to_string(), anchor: Anchor::TopCenter, shift: Shift { x: 0.0, y: list_y_start + list_height },
+        render_list.push(Renderable::Text { text: "髫ｨ繝ｻ・ｽ・ｼ".to_string(), anchor: Anchor::TopCenter, shift: Shift { x: 0.0, y: list_y_start + list_height },
             align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center }, font_size: FontSize::WindowHeight(0.04), color: 0xFF_AAAAAA });
     }
 }
 
-/// 蝠城｡後ヵ繧｡繧､繝ｫ縺ｮ繧ｽ繝ｼ繧ｹ繧ｳ繝ｼ繝峨ｒ髢ｲ隕ｧ縺吶ｋ繧ｷ繝ｼ繝ｳ繧呈緒逕ｻ縺吶ｋ
+/// 髯懶｣ｰ陜楢ｶ｣・ｽ・｡陟募ｾ湖ｨ驛｢・ｧ繝ｻ・｡驛｢・ｧ繝ｻ・､驛｢譎｢・ｽ・ｫ驍ｵ・ｺ繝ｻ・ｮ驛｢・ｧ繝ｻ・ｽ驛｢譎｢・ｽ・ｼ驛｢・ｧ繝ｻ・ｹ驛｢・ｧ繝ｻ・ｳ驛｢譎｢・ｽ・ｼ驛｢譎擾ｽｳ・ｨ繝ｻ蟶晢ｽｫ・｢繝ｻ・ｲ鬮ｫ蛹・ｽｽ・ｧ驍ｵ・ｺ陷ｷ・ｶ繝ｻ迢暦ｽｹ・ｧ繝ｻ・ｷ驛｢譎｢・ｽ・ｼ驛｢譎｢・ｽ・ｳ驛｢・ｧ陷ｻ閧ｲ・ｷ蟶敖蛹・ｽｽ・ｻ驍ｵ・ｺ陷ｷ・ｶ繝ｻ繝ｻ
 fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient) {
     render_list.push(Renderable::Background { gradient });
 
@@ -445,7 +447,7 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
     let label = app.problem_source_label(idx);
     let name = app.problem_name_at(idx);
 
-    // 繝倥ャ繝繝ｼ: "[遞ｮ蛻･] 蝠城｡悟錐"
+    // [source] 現在選択中の問題情報を上部に表示する
     render_list.push(Renderable::BigText {
         text: format!("[{}] {}", label, name),
         anchor: Anchor::TopCenter,
@@ -455,18 +457,18 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
         color: 0xFF_AADDFF,
     });
 
-    // 繧ｽ繝ｼ繧ｹ繧ｳ繝ｳ繝・Φ繝・ｼ・陦後★縺､謠冗判・・    let line_h: f32 = 0.046;
+    let line_h: f32 = 0.046;
     let content_y: f32 = 0.21;
-    // 荳矩Κ縺ｮ status_text / instructions_text 鬆伜沺繧帝∩縺代ｋ縺溘ａ 0.12 繧剃ｽ咏區縺ｨ縺励※遒ｺ菫・    let max_lines = ((1.0f32 - content_y - 0.12) / line_h).floor() as usize;
+    let max_lines = ((1.0f32 - content_y - 0.12) / line_h).floor() as usize;
 
     if let Some(content) = app.get_problem_source(idx) {
         let total_lines = content.lines().count();
 
         for (i, line) in content.lines().skip(app.source_scroll).take(max_lines).enumerate() {
-            // 髟ｷ縺・｡後・60譁・ｭ励〒蛻・ｊ隧ｰ繧・ｼ医ヰ繧､繝亥｢・阜縺ｧ縺ｯ縺ｪ縺乗枚蟄怜｢・阜縺ｧ・・            let ch_count = line.chars().count();
+            let ch_count = line.chars().count();
             let display = if ch_count > 60 {
                 let truncated: String = line.chars().take(60).collect();
-                format!("{}窶ｦ", truncated)
+                format!("{}...", truncated)
             } else {
                 line.to_string()
             };
@@ -481,7 +483,6 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
             });
         }
 
-        // 繧ｹ繧ｯ繝ｭ繝ｼ繝ｫ菴咲ｽｮ繧､繝ｳ繧ｸ繧ｱ繝ｼ繧ｿ (蜿ｳ荳・
         let scroll_text = if total_lines == 0 {
             "0/0".to_string()
         } else {
@@ -496,10 +497,9 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
             color: 0xFF_666688,
         });
 
-        // 荳贋ｸ九せ繧ｯ繝ｭ繝ｼ繝ｫ蜿ｯ閭ｽ縺ｧ縺ゅｋ縺薙→繧堤､ｺ縺咏泙蜊ｰ
         if app.source_scroll > 0 {
             render_list.push(Renderable::Text {
-                text: "笆ｲ".to_string(),
+                text: "↑".to_string(),
                 anchor: Anchor::TopCenter,
                 shift: Shift { x: 0.45, y: content_y - line_h },
                 align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
@@ -509,7 +509,7 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
         }
         if app.source_scroll + max_lines < total_lines {
             render_list.push(Renderable::Text {
-                text: "笆ｼ".to_string(),
+                text: "↓".to_string(),
                 anchor: Anchor::TopCenter,
                 shift: Shift { x: 0.45, y: content_y + max_lines as f32 * line_h },
                 align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
@@ -519,8 +519,7 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
         }
     }
 }
-
-/// How to Use 逕ｻ髱｢繧呈緒逕ｻ縺吶ｋ縲・/// 繧ｳ繝ｳ繝・Φ繝・・ HOW_TO_USE_CONTENT 螳壽焚縺ｧ螳夂ｾｩ縺励√せ繧ｯ繝ｭ繝ｼ繝ｫ縺ｫ蟇ｾ蠢懊☆繧九・fn build_how_to_use_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient) {
+fn build_how_to_use_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient) {
     render_list.push(Renderable::Background { gradient });
 
     render_list.push(Renderable::BigText {
@@ -532,10 +531,10 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
         color: 0xFF_AADDFF,
     });
 
-    // ProblemSource 縺ｨ蜷後§繝ｬ繧､繧｢繧ｦ繝亥ｮ壽焚繧剃ｽｿ逕ｨ
+    // ProblemSource 驍ｵ・ｺ繝ｻ・ｨ髯ｷ・ｷ陟募具ｽｧ驛｢譎｢・ｽ・ｬ驛｢・ｧ繝ｻ・､驛｢・ｧ繝ｻ・｢驛｢・ｧ繝ｻ・ｦ驛｢譏懶ｽｺ・･繝ｻ・ｮ陞｢・ｽ霎溷､ゑｽｹ・ｧ陷代・・ｽ・ｽ繝ｻ・ｿ鬨ｾ蛹・ｽｽ・ｨ
     let line_h: f32 = 0.046;
     let content_y: f32 = 0.21;
-    // 荳矩Κ縺ｮ status_text / instructions_text 鬆伜沺 (0.12) 繧帝勁縺・◆譛螟ｧ陦ｨ遉ｺ陦梧焚
+    // 髣包ｽｳ驕擾ｽｩ・主､ゑｽｸ・ｺ繝ｻ・ｮ status_text / instructions_text 鬯ｯ繝ｻ・ｼ諛茨ｽｲ・ｺ (0.12) 驛｢・ｧ陝ｶ譎乗ｱるし・ｺ郢晢ｽｻ隨ｳ繝ｻ・ｭ蟠｢ﾂ髯樊ｻゑｽｽ・ｧ鬮ｯ・ｦ繝ｻ・ｨ鬩穂ｼ夲ｽｽ・ｺ鬮ｯ・ｦ隴ｴ・ｧ霎溘・
     let max_lines = ((1.0f32 - content_y - 0.12) / line_h).floor() as usize;
 
     let total_lines = HOW_TO_USE_CONTENT.len();
@@ -557,7 +556,7 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
         });
     }
 
-    // 繧ｹ繧ｯ繝ｭ繝ｼ繝ｫ菴咲ｽｮ繧､繝ｳ繧ｸ繧ｱ繝ｼ繧ｿ (蜿ｳ荳・
+    // 驛｢・ｧ繝ｻ・ｹ驛｢・ｧ繝ｻ・ｯ驛｢譎｢・ｽ・ｭ驛｢譎｢・ｽ・ｼ驛｢譎｢・ｽ・ｫ髣厄ｽｴ陷･・ｲ繝ｻ・ｽ繝ｻ・ｮ驛｢・ｧ繝ｻ・､驛｢譎｢・ｽ・ｳ驛｢・ｧ繝ｻ・ｸ驛｢・ｧ繝ｻ・ｱ驛｢譎｢・ｽ・ｼ驛｢・ｧ繝ｻ・ｿ (髯ｷ・ｿ繝ｻ・ｳ髣包ｽｳ郢晢ｽｻ
     let scroll_text = format!("{}/{}", scroll + 1, total_lines.max(1));
     render_list.push(Renderable::Text {
         text: scroll_text,
@@ -568,10 +567,10 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
         color: 0xFF_666688,
     });
 
-    // 荳翫せ繧ｯ繝ｭ繝ｼ繝ｫ蜿ｯ閭ｽ縺ｪ蝣ｴ蜷・笆ｲ 繧定｡ｨ遉ｺ
+    // 髣包ｽｳ驗呻ｽｫ邵ｺ蟶ｷ・ｹ・ｧ繝ｻ・ｯ驛｢譎｢・ｽ・ｭ驛｢譎｢・ｽ・ｼ驛｢譎｢・ｽ・ｫ髯ｷ・ｿ繝ｻ・ｯ鬮｢・ｭ繝ｻ・ｽ驍ｵ・ｺ繝ｻ・ｪ髯懶ｽ｣繝ｻ・ｴ髯ｷ・ｷ郢晢ｽｻ髫ｨ繝ｻ・ｽ・ｲ 驛｢・ｧ陞ｳ螟ｲ・ｽ・｡繝ｻ・ｨ鬩穂ｼ夲ｽｽ・ｺ
     if scroll > 0 {
         render_list.push(Renderable::Text {
-            text: "笆ｲ".to_string(),
+            text: "髫ｨ繝ｻ・ｽ・ｲ".to_string(),
             anchor: Anchor::TopCenter,
             shift: Shift { x: 0.45, y: content_y - line_h },
             align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
@@ -580,10 +579,10 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
         });
     }
 
-    // 荳九せ繧ｯ繝ｭ繝ｼ繝ｫ蜿ｯ閭ｽ縺ｪ蝣ｴ蜷・笆ｼ 繧定｡ｨ遉ｺ
+    // 髣包ｽｳ闕ｵ譏ｴ笳矩Δ・ｧ繝ｻ・ｯ驛｢譎｢・ｽ・ｭ驛｢譎｢・ｽ・ｼ驛｢譎｢・ｽ・ｫ髯ｷ・ｿ繝ｻ・ｯ鬮｢・ｭ繝ｻ・ｽ驍ｵ・ｺ繝ｻ・ｪ髯懶ｽ｣繝ｻ・ｴ髯ｷ・ｷ郢晢ｽｻ髫ｨ繝ｻ・ｽ・ｼ 驛｢・ｧ陞ｳ螟ｲ・ｽ・｡繝ｻ・ｨ鬩穂ｼ夲ｽｽ・ｺ
     if scroll + max_lines < total_lines {
         render_list.push(Renderable::Text {
-            text: "笆ｼ".to_string(),
+            text: "髫ｨ繝ｻ・ｽ・ｼ".to_string(),
             anchor: Anchor::TopCenter,
             shift: Shift { x: 0.45, y: content_y + max_lines as f32 * line_h },
             align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
@@ -593,7 +592,8 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
     }
 }
 
-// Segment 縺ｮ base 繝・く繧ｹ繝医ｒ譁・ｭ怜・縺ｨ縺励※霑斐☆・・nno 縺ｯ inner 縺ｮ base 繧帝｣邨撰ｼ・fn segment_base_text(seg: &Segment) -> String {
+// Segment 驍ｵ・ｺ繝ｻ・ｮ base 驛｢譏ｴ繝ｻ邵ｺ蜀暦ｽｹ・ｧ繝ｻ・ｹ驛｢譎冗樟繝ｻ螳夲ｽｭ竏壹・繝ｻ・ｭ隲､諛翫・驍ｵ・ｺ繝ｻ・ｨ驍ｵ・ｺ陷会ｽｱ遯ｶ・ｻ鬮ｴ隨ｬ魍堤ｬ倥・繝ｻ郢晢ｽｻnno 驍ｵ・ｺ繝ｻ・ｯ inner 驍ｵ・ｺ繝ｻ・ｮ base 驛｢・ｧ陝ｶ謨鳴繝ｻ・｣鬩搾ｽｨ隰ｦ・ｰ繝ｻ・ｼ郢晢ｽｻ
+fn segment_base_text(seg: &Segment) -> String {
     match seg {
         Segment::Plain { text } => text.clone(),
         Segment::Annotated { base, .. } => base.clone(),
@@ -601,7 +601,8 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
     }
 }
 
-// Segment 縺ｮ reading 繝・く繧ｹ繝医ｒ譁・ｭ怜・縺ｨ縺励※霑斐☆・・nno 縺ｯ inner 縺ｮ reading 繧帝｣邨撰ｼ・fn segment_reading_text(seg: &Segment) -> String {
+// Segment 驍ｵ・ｺ繝ｻ・ｮ reading 驛｢譏ｴ繝ｻ邵ｺ蜀暦ｽｹ・ｧ繝ｻ・ｹ驛｢譎冗樟繝ｻ螳夲ｽｭ竏壹・繝ｻ・ｭ隲､諛翫・驍ｵ・ｺ繝ｻ・ｨ驍ｵ・ｺ陷会ｽｱ遯ｶ・ｻ鬮ｴ隨ｬ魍堤ｬ倥・繝ｻ郢晢ｽｻnno 驍ｵ・ｺ繝ｻ・ｯ inner 驍ｵ・ｺ繝ｻ・ｮ reading 驛｢・ｧ陝ｶ謨鳴繝ｻ・｣鬩搾ｽｨ隰ｦ・ｰ繝ｻ・ｼ郢晢ｽｻ
+fn segment_reading_text(seg: &Segment) -> String {
     match seg {
         Segment::Plain { text } => text.clone(),
         Segment::Annotated { reading, .. } => reading.clone(),
@@ -609,7 +610,7 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
     }
 }
 
-// 陦ｨ遉ｺ逕ｨ縺ｮ (base_text, ruby_text, anno_text) 繧定ｿ斐☆
+// 鬮ｯ・ｦ繝ｻ・ｨ鬩穂ｼ夲ｽｽ・ｺ鬨ｾ蛹・ｽｽ・ｨ驍ｵ・ｺ繝ｻ・ｮ (base_text, ruby_text, anno_text) 驛｢・ｧ陞ｳ螟ｲ・ｽ・ｿ隴∫ｵｶ繝ｻ
 fn segment_display_parts(seg: &Segment) -> (String, Option<String>, Option<String>) {
     match seg {
         Segment::Plain { text } => (text.clone(), None, None),
@@ -635,9 +636,9 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
     render_list.push(Renderable::Background { gradient });
 
     if let Some(model) = &app.typing_model {
-        // --- 繝ｬ繧､繧｢繧ｦ繝郁ｪｿ謨ｴ蛟､ ---
-        let v_offset = 0.08; // UI蜈ｨ菴薙ｒ荳九↓縺壹ｉ縺吝牡蜷・
-        // --- 蝠城｡後ち繧､繝医Ν陦ｨ遉ｺ ---
+        // --- 驛｢譎｢・ｽ・ｬ驛｢・ｧ繝ｻ・､驛｢・ｧ繝ｻ・｢驛｢・ｧ繝ｻ・ｦ驛｢譎槭Γ繝ｻ・ｪ繝ｻ・ｿ髫ｰ・ｨ繝ｻ・ｴ髯区ｻゑｽｽ・､ ---
+        let v_offset = 0.08; // UI髯ｷ闌ｨ・ｽ・ｨ髣厄ｽｴ髦ｮ蜻ｻ・ｽ螳壼初闕ｵ譏ｶ繝ｻ驍ｵ・ｺ陞｢・ｹ繝ｻ閾･・ｸ・ｺ陷ｷ譎画ｨｪ髯ｷ・ｷ郢晢ｽｻ
+        // --- 髯懶｣ｰ陜楢ｶ｣・ｽ・｡陟募ｾ娯蔓驛｢・ｧ繝ｻ・､驛｢譎冗樟・取辨蜍励・・ｨ鬩穂ｼ夲ｽｽ・ｺ ---
         render_list.push(Renderable::BigText {
             text: model.content.title.to_string(),
             anchor: Anchor::TopCenter,
@@ -675,7 +676,7 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
         } else {
             model.scroll.scroll as f32
         };
-        // --- 荳頑ｮｵ・育岼讓吶ユ繧ｭ繧ｹ繝茨ｼ峨・讒狗ｯ・---
+        // --- 髣包ｽｳ鬯・汚・ｽ・ｮ繝ｻ・ｵ郢晢ｽｻ髢ｧ・ｲ陝ｯ・ｼ髫ｶ轣倡函郢晢ｽｦ驛｢・ｧ繝ｻ・ｭ驛｢・ｧ繝ｻ・ｹ驛｢譎∬か繝ｻ・ｼ陝ｲ・ｨ郢晢ｽｻ髫ｶ蝣､霍昴・・ｯ郢晢ｽｻ---
         let mut upper_segments = Vec::new();
         for (word_idx, word) in content_line.words.iter().enumerate() {
             for (seg_idx, seg) in word.segments.iter().enumerate() {
@@ -687,10 +688,12 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
                     }
                 } else if (word_idx as i32) == status.word {
                     if (seg_idx as i32) < status.segment {
-                        // 縺薙・繝ｯ繝ｼ繝牙・縺ｮ螳御ｺ・ｸ医∩繧ｻ繧ｰ繝｡繝ｳ繝・                        if correctness_line.words.get(word_idx)
+                        let is_current_segment_correct = correctness_line
+                            .words
+                            .get(word_idx)
                             .and_then(|w| w.segments.get(seg_idx))
-                            .map_or(false, is_segment_correct)
-                        {
+                            .map_or(false, is_segment_correct);
+                        if is_current_segment_correct {
                             UpperSegmentState::Correct
                         } else {
                             UpperSegmentState::Incorrect
@@ -718,7 +721,7 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
             font_size: base_font_size,
         });
 
-        // --- 荳区ｮｵ・亥・蜉帙ユ繧ｭ繧ｹ繝茨ｼ峨・讒狗ｯ・---
+        // --- 髣包ｽｳ陋ｹ・ｺ繝ｻ・ｮ繝ｻ・ｵ郢晢ｽｻ闔・･郢晢ｽｻ髯ｷ迚呻ｽｸ蜷ｶﾎ倬Δ・ｧ繝ｻ・ｭ驛｢・ｧ繝ｻ・ｹ驛｢譎∬か繝ｻ・ｼ陝ｲ・ｨ郢晢ｽｻ髫ｶ蝣､霍昴・・ｯ郢晢ｽｻ---
         let mut lower_segments = Vec::new();
             let status_word = usize::try_from(status.word).ok();
         let status_segment = usize::try_from(status.segment).ok().unwrap_or(0);
@@ -860,11 +863,12 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
                             .segments
                             .get(seg_idx)
                             .map_or(false, is_segment_correct);
+                        let width = gui_renderer::measure_text(font, &base_text, base_pixel_font_size).0;
                         lower_segments.push(LowerTypingSegment::Completed {
                             base_text,
                             ruby_text,
                             is_correct,
-                            width: gui_renderer::measure_text(font, &base_text, base_pixel_font_size).0,
+                            width,
                         });
                     }
                 }
@@ -904,7 +908,7 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
             target_line_total_width,
         });
 
-        // --- 繧ｳ繝ｳ繝・く繧ｹ繝郁｡鯉ｼ亥燕蠕後・陦鯉ｼ峨ｒ謠冗判 ---
+        // --- 驛｢・ｧ繝ｻ・ｳ驛｢譎｢・ｽ・ｳ驛｢譏ｴ繝ｻ邵ｺ蜀暦ｽｹ・ｧ繝ｻ・ｹ驛｢譎槭Γ繝ｻ・｡鬲・ｼ夲ｽｽ・ｼ闔・･霎ｯ謌奇｣ｰ蜍滂ｽｾ蠕後・鬮ｯ・ｦ鬲・ｼ夲ｽｽ・ｼ陝ｲ・ｨ繝ｻ螳夲ｽｬ・ｰ陷諤懈・ ---
         let line_count = model.content.lines.len();
         for &offset in &[-1, 1] {
             let line_to_display_signed = model.status.line + offset;
@@ -921,7 +925,7 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
             }
         }
         
-        // --- 繧ｹ繝・・繧ｿ繧ｹ繝代ロ繝ｫ ---
+        // --- 驛｢・ｧ繝ｻ・ｹ驛｢譏ｴ繝ｻ郢晢ｽｻ驛｢・ｧ繝ｻ・ｿ驛｢・ｧ繝ｻ・ｹ驛｢譏懶ｽｻ・｣郢晢ｽｭ驛｢譎｢・ｽ・ｫ ---
         let metrics = typing::calculate_total_metrics(model);
         let time = metrics.total_time / 1000.0;
         let status_items = vec![
@@ -946,7 +950,7 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
             });
         }
 
-        // --- 騾ｲ謐励ヰ繝ｼ ---
+        // --- 鬯ｨ・ｾ繝ｻ・ｲ髫ｰ莉吝ｹｲ郢晢ｽｰ驛｢譎｢・ｽ・ｼ ---
         let char_progress_in_line = model.status.word as f32 / content_line.words.len().max(1) as f32;
         let detailed_progress_ratio = if line_count > 0 {
             (model.status.line as f32 + char_progress_in_line) / (line_count as f32)
@@ -954,9 +958,10 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
             0.0
         };
 
-        render_list.push(Renderable::ProgressBar {
+                render_list.push(Renderable::ProgressBar {
             anchor: Anchor::BottomLeft,
-            shift: Shift { x: 0.0, y: -0.005 }, // 蟆代＠縺縺大ｺ輔°繧画ｵｮ縺九○繧・            width_ratio: 1.0,
+            shift: Shift { x: 0.0, y: -0.005 },
+            width_ratio: 1.0,
             height_ratio: progress_bar_height_ratio,
             progress: detailed_progress_ratio,
             bg_color: 0xFF_555555,
@@ -1000,7 +1005,8 @@ fn build_result_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
 }
 
 
-/// Anchor縺ｨShift縺九ｉ縲∝渕貅悶→縺ｪ繧句ｺｧ讓・x, y)繧定ｨ育ｮ励☆繧・pub fn calculate_anchor_position(
+/// Anchor驍ｵ・ｺ繝ｻ・ｨShift驍ｵ・ｺ闕ｵ譎｢・ｽ閾･・ｸ・ｲ遶乗刋・ｸ謌奇ｽｲ繝ｻ縺倡ｫ雁､・ｸ・ｺ繝ｻ・ｪ驛｢・ｧ陷ｿ・･繝ｻ・ｺ繝ｻ・ｧ髫ｶ阮吶・x, y)驛｢・ｧ陞ｳ螟ｲ・ｽ・ｨ髢ｧ・ｲ繝ｻ・ｮ陷会ｽｱ隨倥・・ｹ・ｧ郢晢ｽｻ
+pub fn calculate_anchor_position(
     anchor: Anchor, shift: Shift, width: usize, height: usize) -> (i32, i32) {
     let (w, h) = (width as i32, height as i32);
     let base_pos = match anchor {
@@ -1019,7 +1025,8 @@ fn build_result_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
     (base_pos.0 + shift_x, base_pos.1 + shift_y)
 }
 
-/// 蝓ｺ貅也せ縲√ユ繧ｭ繧ｹ繝医・蟇ｸ豕輔∵純縺域婿縺九ｉ縲∵怙邨ら噪縺ｪ謠冗判髢句ｧ句ｺｧ讓呻ｼ亥ｷｦ荳奇ｼ峨ｒ險育ｮ励☆繧・pub fn calculate_aligned_position(
+/// 髯憺屮・ｽ・ｺ髮九・・ｹ貅倪雷驍ｵ・ｲ遶丞｣ｹﾎ倬Δ・ｧ繝ｻ・ｭ驛｢・ｧ繝ｻ・ｹ驛｢譎冗樟郢晢ｽｻ髯昴・・ｽ・ｸ髮取・・ｼ譚ｿﾂ遶擾ｽｵ驍冗坩・ｸ・ｺ陜捺ｺｷ・ｩ・ｿ驍ｵ・ｺ闕ｵ譎｢・ｽ閾･・ｸ・ｲ遶擾ｽｵ隲､蜥弱♀郢ｧ迚咎｣ｭ驍ｵ・ｺ繝ｻ・ｪ髫ｰ・ｰ陷諤懈・鬯ｮ・｢陷ｿ・･繝ｻ・ｧ陷ｿ・･繝ｻ・ｺ繝ｻ・ｧ髫ｶ轣倬●繝ｻ・ｼ闔・･繝ｻ・ｷ繝ｻ・ｦ髣包ｽｳ陞ゅ・・ｽ・ｼ陝ｲ・ｨ繝ｻ蟶晏搦髢ｧ・ｲ繝ｻ・ｮ陷会ｽｱ隨倥・・ｹ・ｧ郢晢ｽｻ
+pub fn calculate_aligned_position(
     anchor_pos: (i32, i32), text_width: u32, text_height: u32, align: Align) -> (i32, i32) {
     let (tw, th) = (text_width as i32, text_height as i32);
     let (ax, ay) = anchor_pos;
@@ -1038,4 +1045,7 @@ fn build_result_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
 
     (x, y)
 }
+
+
+
 

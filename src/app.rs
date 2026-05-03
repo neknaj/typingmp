@@ -250,6 +250,7 @@ fn build_scroll_line_cache(line: &crate::model::Line, font: &FontVec, font_pixel
             let reading_text = seg_reading_text_owned(segment);
             let ruby_text = seg_ruby_text_owned(segment);
             let base_width = gui_renderer::measure_text(font, &base_text, font_pixel_size).0 as f32;
+            let reading_width_prefix = build_reading_width_prefix(font, &reading_text, font_pixel_size);
             total_width += base_width;
             segment_prefix_width.push(total_width);
             segments.push(ScrollLineSegmentCache {
@@ -257,18 +258,18 @@ fn build_scroll_line_cache(line: &crate::model::Line, font: &FontVec, font_pixel
                 ruby_text,
                 reading_text,
                 base_width,
-                reading_width_prefix: build_reading_width_prefix(font, &reading_text, font_pixel_size),
+                reading_width_prefix,
                 word_index: 0,
                 segment_index: 0,
             });
         }
     }
 
-    for (word_index, word) in line.words.iter().enumerate() {
-        let start = word_segment_starts.get(word_index).copied().unwrap_or(0);
-        let end = word_segment_starts
-            .get(word_index + 1)
-            .copied()
+        for (word_index, word) in line.words.iter().enumerate() {
+            let start = word_segment_starts.get(word_index).copied().unwrap_or(0);
+            let end = word_segment_starts
+                .get(word_index + 1)
+                .copied()
             .unwrap_or(segments.len());
         for segment_index in start..end {
             if let Some(item) = segments.get_mut(segment_index) {
@@ -809,7 +810,7 @@ impl App {
                 );
                 let cursor_world = line_origin + cursor_in_line;
 
-                let mut target_scroll = cursor_world - (gap_width * 0.5) as f64;
+                let mut target_scroll = f64::from(cursor_world) - (f64::from(gap_width) * 0.5);
                 if let Some(ScrollCache::Ready(previous_cache)) = &self.scroll_cache {
                     let previous_target = previous_cache.cursor_world as f64 - (previous_cache.gap_width as f64 * 0.5);
                     if cursor_world >= previous_cache.cursor_world && target_scroll < previous_target {
