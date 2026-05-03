@@ -573,7 +573,7 @@ fn build_how_to_use_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: G
             text: "髫ｨ繝ｻ・ｽ・ｲ".to_string(),
             anchor: Anchor::TopCenter,
             shift: Shift { x: 0.45, y: content_y - line_h },
-            align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
+            align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
             font_size: FontSize::WindowHeight(0.035),
             color: 0xFF_888888,
         });
