@@ -45,6 +45,27 @@ fn seg_reading_text_owned(seg: &Segment) -> String {
         Segment::Anno { inner, .. } => inner.iter().map(|s| seg_reading_text_owned(s)).collect(),
     }
 }
+
+fn seg_ruby_text_owned(seg: &Segment) -> Option<String> {
+    match seg {
+        Segment::Plain { .. } => None,
+        Segment::Annotated { reading, .. } => {
+            if reading.is_empty() {
+                None
+            } else {
+                Some(reading.clone())
+            }
+        }
+        Segment::Anno { inner, .. } => {
+            let reading = inner.iter().map(seg_reading_text_owned).collect::<String>();
+            if reading.is_empty() {
+                None
+            } else {
+                Some(reading)
+            }
+        }
+    }
+}
 use crate::parser;
 use crate::typing;
 use crate::ui; // typing_rendererの代わりにuiをインポート
@@ -153,15 +174,223 @@ pub enum AppEvent {
 
 /// スクロール計算結果のキャッシュ。毎フレームの全セグメント計測を回避する。
 /// カーソル位置・ウィンドウサイズが変わった場合のみ再計算する。
-pub struct ScrollCache {
+/// スクロール計算結果のキャッシュ。毎フレームの全セグメント計測を回避する。
+#[derive(Clone)]
+pub(crate) struct ScrollLineSegmentCache {
+    pub base_text: String,
+    pub ruby_text: Option<String>,
+    pub reading_text: String,
+    pub base_width: f32,
+    pub reading_width_prefix: Vec<f32>,
+    pub word_index: usize,
+    pub segment_index: usize,
+}
+
+#[derive(Clone)]
+pub(crate) struct ScrollLineCache {
+    pub line: i32,
+    pub total_width: f32,
+    /// セグメントの累積幅（長さ = segments.len()+1）
+    pub segment_prefix_width: Vec<f32>,
+    pub word_segment_starts: Vec<usize>,
+    pub segments: Vec<ScrollLineSegmentCache>,
+}
+
+#[derive(Clone)]
+struct ScrollCursorState {
     pub line: i32,
     pub word: i32,
     pub segment: i32,
     pub char_: i32,
+}
+
+#[derive(Clone)]
+pub(crate) struct ScrollCacheState {
     pub width: usize,
     pub height: usize,
-    pub total_width: f32,
-    pub cursor_x_offset: f32,
+    pub font_pixel_size: f32,
+    pub gap_width: f32,
+    pub line_origin: f32,
+    pub cursor_in_line: f32,
+    pub cursor_world: f32,
+    pub cursor_state: ScrollCursorState,
+    pub current: ScrollLineCache,
+}
+
+#[derive(Clone)]
+pub(crate) enum ScrollCache {
+    Empty,
+    Ready(ScrollCacheState),
+}
+
+fn build_reading_width_prefix(font: &FontVec, text: &str, font_pixel_size: f32) -> Vec<f32> {
+    let mut prefix = Vec::with_capacity(text.chars().count() + 1);
+    prefix.push(0.0);
+    let mut total = 0.0f32;
+    for character in text.chars() {
+        let mut buf = [0u8; 4];
+        let ch = character.encode_utf8(&mut buf);
+        total += gui_renderer::measure_text(font, ch, font_pixel_size).0 as f32;
+        prefix.push(total);
+    }
+    prefix
+}
+
+fn build_scroll_line_cache(line: &crate::model::Line, font: &FontVec, font_pixel_size: f32, line_index: i32) -> ScrollLineCache {
+    let mut segments = Vec::new();
+    let mut segment_prefix_width = Vec::new();
+    segment_prefix_width.push(0.0);
+    let mut word_segment_starts = Vec::with_capacity(line.words.len());
+    let mut total_width = 0.0f32;
+
+    for word in &line.words {
+        word_segment_starts.push(segments.len());
+        for segment in &word.segments {
+            let base_text = seg_base_text_owned(segment);
+            let reading_text = seg_reading_text_owned(segment);
+            let ruby_text = seg_ruby_text_owned(segment);
+            let base_width = gui_renderer::measure_text(font, &base_text, font_pixel_size).0 as f32;
+            total_width += base_width;
+            segment_prefix_width.push(total_width);
+            segments.push(ScrollLineSegmentCache {
+                base_text,
+                ruby_text,
+                reading_text,
+                base_width,
+                reading_width_prefix: build_reading_width_prefix(font, &reading_text, font_pixel_size),
+                word_index: 0,
+                segment_index: 0,
+            });
+        }
+    }
+
+    for (word_index, word) in line.words.iter().enumerate() {
+        let start = word_segment_starts.get(word_index).copied().unwrap_or(0);
+        let end = word_segment_starts
+            .get(word_index + 1)
+            .copied()
+            .unwrap_or(segments.len());
+        for segment_index in start..end {
+            if let Some(item) = segments.get_mut(segment_index) {
+                item.word_index = word_index;
+                item.segment_index = segment_index - start;
+            }
+        }
+    }
+
+    ScrollLineCache {
+        line: line_index,
+        total_width,
+        segment_prefix_width,
+        word_segment_starts,
+        segments,
+    }
+}
+
+fn line_total_width(line: &crate::model::Line, font: &FontVec, font_pixel_size: f32) -> f32 {
+    let mut total = 0.0f32;
+    for word in &line.words {
+        for segment in &word.segments {
+            total += gui_renderer::measure_text(font, &seg_base_text_owned(segment), font_pixel_size).0 as f32;
+        }
+    }
+    total
+}
+
+fn line_origin_from_start(target_line: usize, lines: &[crate::model::Line], font: &FontVec, font_pixel_size: f32, gap_width: f32) -> f32 {
+    let mut origin = 0.0f32;
+    let max_line = target_line.min(lines.len());
+    for line_idx in 0..max_line {
+        let line = if let Some(line) = lines.get(line_idx) {
+            line
+        } else {
+            return origin;
+        };
+        origin += line_total_width(line, font, font_pixel_size) + gap_width;
+    }
+    origin
+}
+
+fn line_origin_from_previous(previous: &ScrollCacheState, target_line: usize, lines: &[crate::model::Line], font: &FontVec, font_pixel_size: f32, gap_width: f32) -> f32 {
+    let Some(previous_line) = usize::try_from(previous.current.line).ok() else {
+        return line_origin_from_start(target_line, lines, font, font_pixel_size, gap_width);
+    };
+
+    if target_line == previous_line {
+        return previous.line_origin;
+    }
+
+    let mut origin = previous.line_origin;
+    if target_line > previous_line {
+        for line_idx in previous_line..target_line {
+            let line = if let Some(line) = lines.get(line_idx) {
+                line
+            } else {
+                return line_origin_from_start(target_line, lines, font, font_pixel_size, gap_width);
+            };
+            let width = if line_idx == previous_line {
+                previous.current.total_width
+            } else {
+                line_total_width(line, font, font_pixel_size)
+            };
+            origin += width + gap_width;
+        }
+    } else {
+        for line_idx in target_line..previous_line {
+            let line = if let Some(line) = lines.get(line_idx) {
+                line
+            } else {
+                return line_origin_from_start(target_line, lines, font, font_pixel_size, gap_width);
+            };
+            let width = line_total_width(line, font, font_pixel_size);
+            origin -= width + gap_width;
+        }
+    }
+
+    origin
+}
+
+fn cursor_position_from_status(cache: &ScrollLineCache, status_line: i32, status_word: i32, status_segment: i32, status_char: i32) -> (f32, ScrollCursorState) {
+    let status_word_usize = usize::try_from(status_word).ok();
+    let status_segment_usize = usize::try_from(status_segment).ok();
+    let status_char_usize = usize::try_from(status_char).ok().unwrap_or(0);
+    let mut cursor_in_line = cache.segment_prefix_width.last().copied().unwrap_or(0.0);
+
+    if let Some(word_idx) = status_word_usize {
+        if word_idx < cache.word_segment_starts.len() {
+            let segment_start = cache.word_segment_starts[word_idx];
+            let segment_end = cache
+                .word_segment_starts
+                .get(word_idx + 1)
+                .copied()
+                .unwrap_or(cache.segments.len());
+            let segment_count = segment_end.saturating_sub(segment_start);
+            let segment_idx = if segment_count == 0 {
+                segment_start
+            } else {
+                segment_start + status_segment_usize.unwrap_or(0).min(segment_count - 1)
+            };
+            let base = cache.segment_prefix_width.get(segment_idx).copied().unwrap_or(0.0);
+            let mut typed_width = 0.0f32;
+            if let Some(seg_cache) = cache.segments.get(segment_idx) {
+                let typed_len = status_char_usize.min(seg_cache.reading_width_prefix.len().saturating_sub(1));
+                typed_width = seg_cache.reading_width_prefix.get(typed_len).copied().unwrap_or(0.0);
+            }
+            cursor_in_line = (base + typed_width).min(cache.total_width);
+        } else {
+            cursor_in_line = cache.total_width;
+        }
+    }
+
+    (
+        cursor_in_line,
+        ScrollCursorState {
+            line: status_line,
+            word: status_word,
+            segment: status_segment,
+            char_: status_char,
+        },
+    )
 }
 
 /// アプリケーション全体で共有される状態を保持する構造体
@@ -501,6 +730,7 @@ impl App {
     }
 
     /// 毎フレームの状態更新（スクロール計算など）
+    /// 毎フレームの状態更新（スクロール計算など）
     pub fn update(&mut self, width: usize, height: usize, delta_time: f64) {
         // FPSを計算して保存
         if delta_time > 0.0 {
@@ -515,78 +745,99 @@ impl App {
         let clamped_delta_time = delta_time.min(100.0);
 
         if let Some(model) = self.typing_model.as_mut() {
+        let font = self.fonts.get_for_script(self.settings_script);
+        let base_font_size_enum = crate::ui::FontSize::WindowHeight(ui::BASE_FONT_SIZE_RATIO);
+        let base_pixel_font_size = crate::renderer::calculate_pixel_font_size(base_font_size_enum, width, height);
+        let gap_width = width as f32;
 
-            let font = self.fonts.primary();
-
-            let base_font_size_enum = crate::ui::FontSize::WindowHeight(ui::BASE_FONT_SIZE_RATIO);
-            let base_pixel_font_size = crate::renderer::calculate_pixel_font_size(base_font_size_enum, width, height);
-
-            if let Some(current_line_content) = model.content.lines.get(model.status.line as usize) {
-                // カーソル位置・ウィンドウサイズが変わった場合のみ全セグメント計測を実行する。
+            let line_idx = match usize::try_from(model.status.line) {
+                Ok(line_idx) => line_idx,
+                Err(_) => return,
+            };
+            if let Some(current_line_content) = model.content.lines.get(line_idx) {
                 let status = &model.status;
-                let need_recompute = self.scroll_cache.as_ref().map_or(true, |c| {
-                    c.line != status.line
-                        || c.word != status.word
-                        || c.segment != status.segment
-                        || c.char_ != status.char_
-                        || c.width != width
-                        || c.height != height
+
+                let rebuild_cache = self.scroll_cache.as_ref().map_or(true, |cache| {
+                    match cache {
+                        ScrollCache::Empty => true,
+                        ScrollCache::Ready(ready) => {
+                            ready.width != width
+                                || ready.height != height
+                                || (ready.font_pixel_size - base_pixel_font_size).abs() > f32::EPSILON
+                                || ready.current.line != status.line
+                        }
+                    }
                 });
 
-                let (total_width, cursor_x_offset) = if need_recompute {
-                    let cursor_word = status.word as usize;
-                    let cursor_seg = status.segment as usize;
-                    let mut tw = 0.0f32;
-                    let mut cx = 0.0f32;
-
-                    for (word_idx, word) in current_line_content.words.iter().enumerate() {
-                        for (seg_idx, seg) in word.segments.iter().enumerate() {
-                            let text = seg_base_text_owned(seg);
-                            let seg_w = gui_renderer::measure_text(font, &text, base_pixel_font_size).0 as f32;
-                            tw += seg_w;
-                            if word_idx < cursor_word
-                                || (word_idx == cursor_word && seg_idx < cursor_seg)
-                            {
-                                cx += seg_w;
-                            }
-                        }
-                    }
-                    if let Some(current_word) = current_line_content.words.get(cursor_word) {
-                        if let Some(seg) = current_word.segments.get(cursor_seg) {
-                            let reading_text = seg_reading_text_owned(seg);
-                            let typed_part = reading_text.chars().take(status.char_ as usize).collect::<String>();
-                            cx += gui_renderer::measure_text(font, &typed_part, base_pixel_font_size).0 as f32;
-                        }
-                    }
-
-                    self.scroll_cache = Some(ScrollCache {
-                        line: status.line, word: status.word,
-                        segment: status.segment, char_: status.char_,
-                        width, height,
-                        total_width: tw, cursor_x_offset: cx,
-                    });
-                    (tw, cx)
+                let current_cache = if rebuild_cache {
+                    build_scroll_line_cache(current_line_content, font, base_pixel_font_size, status.line)
                 } else {
-                    let c = self.scroll_cache.as_ref().unwrap();
-                    (c.total_width, c.cursor_x_offset)
+                    match &self.scroll_cache {
+                        Some(ScrollCache::Ready(ready)) => ready.current.clone(),
+                        _ => build_scroll_line_cache(current_line_content, font, base_pixel_font_size, status.line),
+                    }
                 };
 
-                if model.user_input.is_empty() && model.scroll.scroll == 0.0 {
-                    model.scroll.scroll = (-(width as f32 / 2.0) - (total_width / 2.0)) as f64;
+                let line_origin = match &self.scroll_cache {
+                    Some(ScrollCache::Ready(previous_cache))
+                        if (previous_cache.font_pixel_size - base_pixel_font_size).abs() <= f32::EPSILON =>
+                    {
+                        line_origin_from_previous(
+                            previous_cache,
+                            line_idx,
+                            &model.content.lines,
+                            font,
+                            base_pixel_font_size,
+                            gap_width,
+                        )
+                    }
+                    _ => line_origin_from_start(
+                        line_idx,
+                        &model.content.lines,
+                        font,
+                        base_pixel_font_size,
+                        gap_width,
+                    ),
+                };
+
+                let (cursor_in_line, cursor_state) = cursor_position_from_status(
+                    &current_cache,
+                    status.line,
+                    status.word,
+                    status.segment,
+                    status.char_,
+                );
+                let cursor_world = line_origin + cursor_in_line;
+
+                let mut target_scroll = cursor_world - (gap_width * 0.5) as f64;
+                if let Some(ScrollCache::Ready(previous_cache)) = &self.scroll_cache {
+                    let previous_target = previous_cache.cursor_world as f64 - (previous_cache.gap_width as f64 * 0.5);
+                    if cursor_world >= previous_cache.cursor_world && target_scroll < previous_target {
+                        target_scroll = previous_target;
+                    } else if cursor_world < previous_cache.cursor_world && target_scroll > previous_target {
+                        target_scroll = previous_target;
+                    }
                 }
 
-                let target_scroll = cursor_x_offset - total_width / 2.0;
+                if model.user_input.is_empty() && model.scroll.scroll == 0.0 {
+                    model.scroll.scroll = target_scroll;
+                }
 
                 let now = model.scroll.scroll;
-                let diff = target_scroll as f64 - now;
-                let abs_diff = diff.abs();
-                let exp_bonus = (abs_diff / 150.0).powf(1.5);
-                let scroll_speed_factor = if diff > 0.0 {
-                    5.0 + exp_bonus
-                } else {
-                    1.2 + exp_bonus * 0.4
-                };
-                model.scroll.scroll += diff * scroll_speed_factor * (clamped_delta_time / 1000.0);
+                let diff = target_scroll - now;
+                model.scroll.scroll += diff * 7.5 * (clamped_delta_time / 1000.0);
+
+                self.scroll_cache = Some(ScrollCache::Ready(ScrollCacheState {
+                    width,
+                    height,
+                    font_pixel_size: base_pixel_font_size,
+                    gap_width,
+                    line_origin,
+                    cursor_in_line,
+                    cursor_world,
+                    cursor_state,
+                    current: current_cache,
+                }));
             }
         }
     }

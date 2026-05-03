@@ -1,21 +1,23 @@
-[package]
+﻿[package]
 name = "rust_multibackend_app"
 version = "0.1.1"
 edition = "2021"
 
-# wasm-bindgenがライブラリとしてクレートをコンパイルするために必要
+# wasm-bindgen縺後Λ繧､繝悶Λ繝ｪ縺ｨ縺励※繧ｯ繝ｬ繝ｼ繝医ｒ繧ｳ繝ｳ繝代う繝ｫ縺吶ｋ縺溘ａ縺ｫ蠢・ｦ・
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [features]
-# デフォルトでgui featureを有効にする
+# 繝・ヵ繧ｩ繝ｫ繝医〒gui feature繧呈怏蜉ｹ縺ｫ縺吶ｋ
 default = []
-# gui featureが有効な場合に、minifb、raw-window-handle、winapiを有効にする
+# gui feature縺梧怏蜉ｹ縺ｪ蝣ｴ蜷医↓縲［inifb縲〉aw-window-handle縲『inapi繧呈怏蜉ｹ縺ｫ縺吶ｋ
 gui = [
-    "dep:minifb",
-    "dep:raw-window-handle", # minifbがRawWindowHandleトレイトを実装するために必要
-    "dep:winapi",           # Windows APIを直接呼び出すために必要
-    "dep:rfd",              # ネイティブファイルダイアログ
+    "dep:winit",
+    "dep:pixels",
+]
+gui-file = [
+    "gui",
+    "dep:rfd",              # 繝阪う繝・ぅ繝悶ヵ繧｡繧､繝ｫ繝繧､繧｢繝ｭ繧ｰ
 ]
 tui = ["dep:crossterm"]
 wasm = [
@@ -33,25 +35,24 @@ ab_glyph = { version = "0.2.31", default-features = false, features = ["libm"] }
 slint = { version = "1", optional = true }
 phf = { version = "0.13", features = ["macros"], default-features = false }
 
-# バックエンドごとのオプショナルな依存関係
-minifb = { version = "0.28.0", optional = true }
-rfd = { version = "0.15", optional = true }
+# 繝舌ャ繧ｯ繧ｨ繝ｳ繝峨＃縺ｨ縺ｮ繧ｪ繝励す繝ｧ繝翫Ν縺ｪ萓晏ｭ倬未菫・
+rfd = { version = "0.15", optional = true, default-features = false, features = ["xdg-portal", "async-std"] }
 crossterm = { version = "0.29.0", optional = true }
 core_maths = { version = "0.1.1", optional = true }
 
-# Windows GUIカスタマイズのためのオプショナルな依存関係
-# gui featureが有効な場合にのみビルドされる
-raw-window-handle = { version = "0.6", optional = true } # ここを 0.6 に修正
-winapi = { version = "0.3", features = ["dwmapi", "windef", "minwindef"], optional = true }
+
+# GUI backend
+winit = { version = "0.28", optional = true, default-features = false, features = ["x11"] }
+pixels = { version = "0.14", optional = true }
 
 
-# WASM用のオプショナルな依存関係
+# WASM逕ｨ縺ｮ繧ｪ繝励す繝ｧ繝翫Ν縺ｪ萓晏ｭ倬未菫・
 wasm-bindgen = { version = "0.2.87", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
 console_error_panic_hook = { version = "0.1.7", optional = true }
 getrandom = { version = "0.2", optional = true, features = ["js"] }
 
-# UEFI用のオプショナルな依存関係
+# UEFI逕ｨ縺ｮ繧ｪ繝励す繝ｧ繝翫Ν縺ｪ萓晏ｭ倬未菫・
 uefi = { version = "0.35.0", optional = true, features = ["alloc", "panic_handler", "logger" ] }
 log = { version = "0.4", optional = true }
 
@@ -92,8 +93,8 @@ features = [
 ]
 
 
-# UEFIターゲット用のリリースプロファイル設定
-# パニックした際にスタックを巻き戻すのではなく、即座に停止させる
+# UEFI繧ｿ繝ｼ繧ｲ繝・ヨ逕ｨ縺ｮ繝ｪ繝ｪ繝ｼ繧ｹ繝励Ο繝輔ぃ繧､繝ｫ險ｭ螳・
+# 繝代ル繝・け縺励◆髫帙↓繧ｹ繧ｿ繝・け繧貞ｷｻ縺肴綾縺吶・縺ｧ縺ｯ縺ｪ縺上∝叉蠎ｧ縺ｫ蛛懈ｭ｢縺輔○繧・
 [profile.release]
 panic = "abort"
 
@@ -104,7 +105,7 @@ panic = "abort"
 [build-dependencies]
 slint-build = { version = "1" }
 
-# WASMターゲットのビルド時にのみ必要となる依存関係
+# WASM繧ｿ繝ｼ繧ｲ繝・ヨ縺ｮ繝薙Ν繝画凾縺ｫ縺ｮ縺ｿ蠢・ｦ√→縺ｪ繧倶ｾ晏ｭ倬未菫・
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys = "0.3"
 web-sys = { version = "0.3", features = ["console"] }

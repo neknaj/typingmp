@@ -77,18 +77,24 @@ fn render_frame(app: &App, width: usize, height: usize, pixel_buf: &mut Vec<u32>
                 let (mut pen_x, y) = ui::calculate_aligned_position(ap, target_line_total_width, total_height, align);
                 for seg in segments {
                     match seg {
-                        LowerTypingSegment::Completed { base_text, ruby_text, is_correct } => {
-                            let color = if is_correct { ui::CORRECT_COLOR } else { ui::INCORRECT_COLOR };
-                            gui_renderer::draw_text(pixel_buf, width, font, &base_text, (pen_x as f32, y as f32), pfs, color);
-                            if let Some(ruby) = ruby_text {
-                                let (bw, ..) = gui_renderer::measure_text(font, &base_text, pfs);
-                                let (rw, ..) = gui_renderer::measure_text(font, &ruby, ruby_pfs);
-                                let rx = pen_x as f32 + (bw as f32 - rw as f32) / 2.0;
-                                let ry = y as f32 - ruby_pfs * 0.5;
-                                gui_renderer::draw_text(pixel_buf, width, font, &ruby, (rx, ry), ruby_pfs, color);
-                            }
-                            pen_x += gui_renderer::measure_text(font, &base_text, pfs).0 as i32;
+                    LowerTypingSegment::Completed {
+                        base_text,
+                        ruby_text,
+                        is_correct,
+                        width: seg_width,
+                        ..
+                    } => {
+                        let color = if is_correct { ui::CORRECT_COLOR } else { ui::INCORRECT_COLOR };
+                        gui_renderer::draw_text(pixel_buf, width, font, &base_text, (pen_x as f32, y as f32), pfs, color);
+                        if let Some(ruby) = ruby_text {
+                            let bw = seg_width;
+                            let (rw, ..) = gui_renderer::measure_text(font, &ruby, ruby_pfs);
+                            let rx = pen_x as f32 + (bw as f32 - rw as f32) / 2.0;
+                            let ry = y as f32 - ruby_pfs * 0.5;
+                            gui_renderer::draw_text(pixel_buf, width, font, &ruby, (rx, ry), ruby_pfs, color);
                         }
+                        pen_x += seg_width as i32;
+                    }
                         LowerTypingSegment::Active { elements } => {
                             for el in elements {
                                 let (text, color) = match el {

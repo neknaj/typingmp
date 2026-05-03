@@ -635,10 +635,16 @@ async fn start_async() -> Result<(), JsValue> {
 
                             for seg in segments {
                                 match seg {
-                                    LowerTypingSegment::Completed { base_text, ruby_text, is_correct } => {
+                                    LowerTypingSegment::Completed {
+                                        base_text,
+                                        ruby_text,
+                                        is_correct,
+                                        width: seg_width,
+                                        ..
+                                    } => {
                                         let color = if is_correct { ui::CORRECT_COLOR } else { ui::INCORRECT_COLOR };
                                         // base_w を一度だけ計測してルビ位置と pen 進行の両方に使う
-                                        let base_w = gui_renderer::measure_text(current_font, &base_text, pixel_font_size).0;
+                                            let base_w = seg_width;
                                         gui_renderer::draw_text(&mut pb, width, current_font, &base_text, (pen_x as f32, y as f32), pixel_font_size, color);
 
                                         if let Some(ruby) = ruby_text {
