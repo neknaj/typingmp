@@ -16,6 +16,8 @@ use std::{
     string::{String, ToString},
     vec::Vec,
 };
+#[cfg(feature = "uefi")]
+use core_maths::CoreFloat;
 
 use crate::model::{Model, ResultModel, Scroll, Segment, TypingModel, TypingStatus};
 
@@ -431,6 +433,7 @@ impl App {
     }
 
     /// 選択中のスクリプトに対してフォントファイルをロードして適用する
+    #[cfg(not(feature = "uefi"))]
     pub fn load_font_for_script(&mut self, script: Script, path: &std::path::Path) {
         if let Ok(data) = std::fs::read(path) {
             if let Ok(font) = FontVec::try_from_vec(data) {
@@ -443,6 +446,11 @@ impl App {
                 self.scroll_cache = None;
             }
         }
+    }
+
+    #[cfg(feature = "uefi")]
+    pub fn load_font_for_script(&mut self, _script: Script, _path: &str) {
+        self.scroll_cache = None;
     }
 
     /// 新しいタイピングセッションを開始する

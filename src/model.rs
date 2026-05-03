@@ -5,7 +5,7 @@
 extern crate alloc;
 
 #[cfg(feature = "uefi")]
-use alloc::{string::String, vec::Vec};
+use alloc::{string::String, vec, vec::Vec};
 #[cfg(not(feature = "uefi"))]
 use std::string::String;
 #[cfg(not(feature = "uefi"))]
@@ -172,8 +172,8 @@ pub struct Scroll {
 
 impl Default for Layout {
     fn default() -> Self {
-        let mapping = layout_data::get_layout();
-        let normalized_mapping = mapping
+        let mapping: Vec<(String, Vec<String>)> = layout_data::get_layout();
+        let normalized_mapping: Vec<(String, Vec<String>)> = mapping
             .iter()
             .map(|(key, values)| {
                 (
@@ -187,7 +187,7 @@ impl Default for Layout {
             .collect();
         let normalized_mapping_max_key_len = normalized_mapping
             .iter()
-            .map(|(key, _)| key.chars().count())
+            .map(|(key, _): &(String, Vec<String>)| key.chars().count())
             .max()
             .unwrap_or(1);
         let mut normalized_mapping_by_first_char = vec![Vec::new(); 256];

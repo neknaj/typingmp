@@ -4,11 +4,10 @@
 extern crate alloc;
 
 #[cfg(feature = "uefi")]
-use alloc::{string::{String, ToString}, vec::Vec};
+use alloc::{string::{String, ToString}, vec, vec::Vec};
 #[cfg(not(feature = "uefi"))]
-use std::string::{String, ToString};
-#[cfg(not(feature = "uefi"))]
-use std::vec::Vec;
+use std::{string::{String, ToString}, vec, vec::Vec};
+use core::mem;
 
 use crate::model::{Content, Line, Segment, Word};
 
@@ -31,7 +30,7 @@ fn tokenize_line(line: &str) -> Vec<Token> {
 
     let flush_plain = |plain: &mut String, tokens: &mut Vec<Token>| {
         if !plain.is_empty() {
-            tokens.push(Token::Segment(Segment::Plain { text: std::mem::take(plain) }));
+            tokens.push(Token::Segment(Segment::Plain { text: mem::take(plain) }));
         }
     };
 
@@ -130,7 +129,7 @@ fn parse_anno(chars: &Vec<char>, start: usize) -> (Segment, usize) {
 
     let flush_plain_buf = |buf: &mut String, inner: &mut Vec<Segment>| {
         if !buf.is_empty() {
-            inner.push(Segment::Plain { text: std::mem::take(buf) });
+            inner.push(Segment::Plain { text: mem::take(buf) });
         }
     };
 
@@ -197,7 +196,7 @@ fn group_tokens_into_words(tokens: Vec<Token>) -> Vec<Word> {
 
     let finalize_current_word = |segments: &mut Vec<Segment>, words: &mut Vec<Word>| {
         if !segments.is_empty() {
-            words.push(Word { segments: std::mem::take(segments) });
+            words.push(Word { segments: mem::take(segments) });
         }
     };
 

@@ -20,7 +20,7 @@ use alloc::{format, string::{String, ToString}};
 #[cfg(not(feature = "uefi"))]
 use std::string::{String, ToString};
 
-use crate::app::{App, AppState, FontChoice, ScrollCache}; // ProblemSource は AppState に含まれる
+use crate::app::{App, AppState, ScrollCache, Script};
 use crate::model::{Segment, TypingCorrectnessChar, TypingCorrectnessSegment, TypingCorrectnessWord};
 use crate::renderer::{calculate_pixel_font_size, gui_renderer};
 use crate::typing; // For calculate_total_metrics
@@ -365,13 +365,14 @@ fn build_settings_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gra
     });
 
     let fonts = [
-        (FontChoice::YujiSyuku, "Yuji Syuku"),
-        (FontChoice::NotoSerifJP, "Noto Serif JP"),
+        (Script::Japanese, "Japanese"),
+        (Script::TraditionalChinese, "Traditional Chinese"),
+        (Script::SimplifiedChinese, "Simplified Chinese"),
     ];
 
     for (i, (font_choice, name)) in fonts.iter().enumerate() {
         let is_selected = i == app.selected_settings_item;
-        let is_active = *font_choice == app.font_choice;
+        let is_active = *font_choice == app.settings_script;
 
         let mut display_text = if is_selected {
             format!("> {}", name)
