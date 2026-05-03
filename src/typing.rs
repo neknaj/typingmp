@@ -113,19 +113,19 @@ fn segment_prefix_chars(
 }
 
 fn starts_with_case_insensitive(text: &str, prefix: &str) -> bool {
-    let mut text_chars = text.chars();
     let mut prefix_chars = prefix.chars();
-    loop {
-        match (prefix_chars.next(), text_chars.next()) {
-            (Some(prefix_char), Some(text_char)) => {
-                if text_char.to_lowercase().to_string() != prefix_char.to_lowercase().to_string() {
-                    return false;
-                }
+
+    for text_char in text.chars() {
+        if let Some(prefix_char) = prefix_chars.next() {
+            if !text_char.eq_ignore_ascii_case(&prefix_char) {
+                return false;
             }
-            (None, _) => return true,
-            (_, None) => return false,
+        } else {
+            return true;
         }
     }
+
+    prefix_chars.next().is_none()
 }
 
 fn equals_case_insensitive(left: &str, right: &str) -> bool {
@@ -134,7 +134,7 @@ fn equals_case_insensitive(left: &str, right: &str) -> bool {
     loop {
         match (left_chars.next(), right_chars.next()) {
             (Some(a), Some(b)) => {
-                if a.to_lowercase().to_string() != b.to_lowercase().to_string() {
+                if !a.eq_ignore_ascii_case(&b) {
                     return false;
                 }
             }
