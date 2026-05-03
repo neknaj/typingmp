@@ -1,62 +1,36 @@
-// src/gui.rs
-
-#[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
-use crate::app::{App, AppEvent, Fonts}; // Fontsをインポート
-#[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
-use crate::renderer::{calculate_pixel_font_size, draw_linear_gradient, gui_renderer};
-#[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
-use crate::ui::{self, ActiveLowerElement, LowerTypingSegment, Renderable, UpperSegmentState};
-#[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
-use ab_glyph::FontVec;
-#[cfg(not(feature = "uefi"))] // Only compile if uefi feature is NOT enabled
-use minifb::{Key, KeyRepeat, MouseButton, Window, WindowOptions};
 #[cfg(not(feature = "uefi"))]
-use std::time::Instant;
-#[cfg(feature = "gui")]
+use crate::app::{App, AppEvent, Fonts};
+#[cfg(not(feature = "uefi"))]
+use crate::renderer::{calculate_pixel_font_size, draw_linear_gradient, gui_renderer};
+#[cfg(not(feature = "uefi"))]
+use crate::ui::{self, ActiveLowerElement, LowerTypingSegment, Renderable, UpperSegmentState};
+#[cfg(not(feature = "uefi"))]
+use ab_glyph::FontVec;
+#[cfg(not(feature = "uefi"))]
+use pixels::{Pixels, SurfaceTexture};
+#[cfg(not(feature = "uefi"))]
+use std::error::Error;
+#[cfg(not(feature = "uefi"))]
+use std::time::{Duration, Instant};
+
+#[cfg(feature = "gui-file")]
 use rfd::FileDialog;
 
-#[cfg(all(target_os = "windows", not(feature = "uefi")))]
-use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-#[cfg(all(target_os = "windows", not(feature = "uefi")))]
-use winapi::ctypes::c_void;
-#[cfg(all(target_os = "windows", not(feature = "uefi")))]
-use winapi::shared::windef::HWND;
-#[cfg(all(target_os = "windows", not(feature = "uefi")))]
-use winapi::um::dwmapi::DwmSetWindowAttribute;
-
-#[cfg(all(target_os = "windows", not(feature = "uefi")))]
-const DWMWA_CAPTION_COLOR: u32 = 35;
-#[cfg(all(target_os = "windows", not(feature = "uefi")))]
-const DWMWA_TEXT_COLOR: u32 = 36;
-#[cfg(all(target_os = "windows", not(feature = "uefi")))]
-const DWMWA_BORDER_COLOR: u32 = 37;
-
-#[cfg(all(target_os = "windows", not(feature = "uefi")))]
-fn rgb_to_colorref(r: u8, g: u8, b: u8) -> u32 {
-    ((b as u32) << 16) | ((g as u32) << 8) | (r as u32)
-}
-
-/// 実行バイナリのディレクトリまたはカレントディレクトリの `fonts/` からフォントファイルを読み込む
 #[cfg(not(feature = "uefi"))]
-fn load_font_file(name: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    // 1. 実行ファイルのあるディレクトリの fonts/ を試みる
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let path = dir.join("fonts").join(name);
-            if let Ok(data) = std::fs::read(&path) {
-                return Ok(data);
-            }
-        }
-    }
-    // 2. カレントディレクトリの fonts/ にフォールバック
-    let path = std::path::PathBuf::from("fonts").join(name);
-    Ok(std::fs::read(&path)?)
-}
+use winit::{
+    event::{
+        ElementState, Event, KeyboardInput, MouseButton, MouseScrollDelta, VirtualKeyCode,
+        WindowEvent,
+    },
+    event_loop::{ControlFlow, EventLoop},
+    window::WindowBuilder,
+};
 
-/// GUIアプリケーションのメイン関数
 #[cfg(not(feature = "uefi"))]
-pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-    // フォントを実行時にファイルシステムから読み込む
+const FRAME_DURATION: Duration = Duration::from_millis(16);
+
+#[cfg(not(feature = "uefi"))]
+pub fn run() -> Result<(), Box<dyn Error>> {
     let japanese_font = FontVec::try_from_vec(load_font_file("YujiSyuku-Regular.ttf")?)
         .map_err(|_| "Failed to parse Yuji Syuku font")?;
     let traditional_chinese_font = FontVec::try_from_vec(load_font_file("NotoSerifJP-Regular.ttf")?)
@@ -70,284 +44,452 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         simplified_chinese: Some(simplified_chinese_font),
     };
 
-    let mut width = 800;
-    let mut height = 500;
+    let event_loop = EventLoop::new();
+    let mut window = WindowBuilder::new()
+        .with_title("Neknaj Typing Multi-Platform")
+        .with_inner_size(winit::dpi::LogicalSize::new(800.0, 500.0))
+        .build(&event_loop)?;
 
-    let mut window = Window::new(
-        "Neknaj Typing Multi-Platform",
-        width, height,
-        WindowOptions { resize: true, ..WindowOptions::default() },
+    let size = window.inner_size();
+    let mut width = size.width as usize;
+    let mut height = size.height as usize;
+    let mut pixel_buffer = vec![0u32; width * height];
+    let mut pixels = Pixels::new(
+        width as u32,
+        height as u32,
+        SurfaceTexture::new(width as u32, height as u32, &window),
     )?;
-    window.set_target_fps(60);
 
-    #[cfg(all(target_os = "windows", not(feature = "uefi")))]
-    {
-        let caption_color = rgb_to_colorref(0, 0, 0);
-        let text_color = rgb_to_colorref(255, 255, 255);
-        let border_color = rgb_to_colorref(10, 10, 10);
-
-        if let Ok(raw_handle) = window.window_handle() {
-                if let RawWindowHandle::Win32(handle) = raw_handle.as_raw() {
-                let hwnd = handle.hwnd.get() as HWND;
-                unsafe {
-                    DwmSetWindowAttribute(
-                        hwnd,
-                        DWMWA_CAPTION_COLOR,
-                        &caption_color as *const _ as *const c_void,
-                        std::mem::size_of_val(&caption_color) as u32,
-                    );
-                    DwmSetWindowAttribute(
-                        hwnd,
-                        DWMWA_TEXT_COLOR,
-                        &text_color as *const _ as *const c_void,
-                        std::mem::size_of_val(&text_color) as u32,
-                    );
-                    DwmSetWindowAttribute(
-                        hwnd,
-                        DWMWA_BORDER_COLOR,
-                        &border_color as *const _ as *const c_void,
-                        std::mem::size_of_val(&border_color) as u32,
-                    );
-                }
-            }
-        }
-    }
-
-    let mut app = App::new(fonts); // Appにフォントを渡す
+    let mut app = App::new(fonts);
     app.on_event(AppEvent::Start);
 
     let mut last_frame_time = Instant::now();
-    let mut prev_mouse_down = false;
+    let mut next_frame = last_frame_time + FRAME_DURATION;
 
-    while window.is_open() && !app.should_quit {
-        let (new_width, new_height) = window.get_size();
-        if new_width != width || new_height != height {
-            width = new_width;
-            height = new_height;
-        }
+    event_loop.run(move |event, _, control_flow| {
+        *control_flow = ControlFlow::WaitUntil(next_frame);
+        match event {
+            Event::WindowEvent { event, .. } => {
+                match event {
+                    WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
 
-        let now_time = Instant::now();
-        let delta_time = now_time.duration_since(last_frame_time).as_millis() as f64;
-        last_frame_time = now_time;
+                    WindowEvent::Resized(new_size) => {
+                        if new_size.width > 0 && new_size.height > 0 {
+                            width = new_size.width as usize;
+                            height = new_size.height as usize;
+                            pixel_buffer.resize(width * height, 0);
+                            if let Err(err) = pixels.resize_surface(new_size.width, new_size.height) {
+                                eprintln!("Failed to resize window surface: {err}");
+                                *control_flow = ControlFlow::Exit;
+                            }
+                            if let Err(err) = pixels.resize_buffer(new_size.width, new_size.height) {
+                                eprintln!("Failed to resize pixel buffer: {err}");
+                                *control_flow = ControlFlow::Exit;
+                            }
+                        }
+                    }
 
-        handle_input(&mut window, &mut app);
+                    WindowEvent::MouseInput {
+                        state: ElementState::Pressed,
+                        button: MouseButton::Left,
+                        ..
+                    } => {
+                        app.on_event(AppEvent::Enter);
+                    }
 
-        // マウスクリック → Enter（押下の立ち上がりエッジのみ）
-        let mouse_down = window.get_mouse_down(MouseButton::Left);
-        if mouse_down && !prev_mouse_down {
-            app.on_event(AppEvent::Enter);
-        }
-        prev_mouse_down = mouse_down;
-
-        // スクロールホイール → Up/Down
-        if let Some((_scroll_x, scroll_y)) = window.get_scroll_wheel() {
-            if scroll_y > 0.0 {
-                app.on_event(AppEvent::Up);
-            } else if scroll_y < 0.0 {
-                app.on_event(AppEvent::Down);
-            }
-        }
-
-        // ファイルオープンダイアログ処理（ブロッキング、modal なので二重起動なし）
-        #[cfg(feature = "gui")]
-        if app.should_open_file_dialog {
-            app.should_open_file_dialog = false; // ダイアログを開く前にリセット
-            if let Some(path) = FileDialog::new()
-                .add_filter("ntq問題ファイル", &["ntq"])
-                .pick_file()
-            {
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    let name = path.file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("unknown.ntq")
-                        .to_string();
-                    app.add_custom_problem(name, content, 0);
-                }
-            }
-        }
-
-        app.update(width, height, delta_time);
-
-        let mut pixel_buffer = vec![0u32; width * height];
-        let current_font = app.get_current_font(); // 現在のフォントを取得
-        let render_list = ui::build_ui(&app, current_font, width, height);
-
-        for item in render_list {
-            match item {
-                Renderable::Background { gradient } => {
-                    draw_linear_gradient(&mut pixel_buffer, width, height, gradient.start_color, gradient.end_color, (0.0, 0.0), (width as f32, height as f32));
-                }
-                Renderable::BigText { text, anchor, shift, align, font_size, color } |
-                Renderable::Text { text, anchor, shift, align, font_size, color } => {
-                    let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
-                    let (text_width, text_height, _) = gui_renderer::measure_text(current_font, &text, pixel_font_size);
-                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
-                    let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
-                    gui_renderer::draw_text(&mut pixel_buffer, width, current_font, &text, (x as f32, y as f32), pixel_font_size, color);
-                }
-                Renderable::TypingUpper { segments, anchor, shift, align, font_size } => {
-                    let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
-                    let ruby_pixel_font_size = pixel_font_size * 0.4;
-                    
-                    let total_width = segments.iter().map(|seg| {
-                        gui_renderer::measure_text(current_font, &seg.base_text, pixel_font_size).0
-                    }).sum::<u32>();
-                    let total_height = gui_renderer::measure_text(current_font, " ", pixel_font_size).1;
-
-                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
-                    let (mut pen_x, y) = ui::calculate_aligned_position(anchor_pos, total_width, total_height, align);
-
-                    for seg in segments {
-                        let color = match seg.state {
-                            UpperSegmentState::Correct => ui::CORRECT_COLOR,
-                            UpperSegmentState::Incorrect => ui::INCORRECT_COLOR,
-                            UpperSegmentState::Active => ui::ACTIVE_COLOR,
-                            UpperSegmentState::Pending => ui::PENDING_COLOR,
+                    WindowEvent::MouseWheel { delta, .. } => {
+                        let scroll_y = match delta {
+                            MouseScrollDelta::LineDelta(_, y) => y,
+                            MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
                         };
-                        gui_renderer::draw_text(&mut pixel_buffer, width, current_font, &seg.base_text, (pen_x as f32, y as f32), pixel_font_size, color);
-                        
-                        if let Some(ruby) = &seg.ruby_text {
-                            let (base_w, ..) = gui_renderer::measure_text(current_font, &seg.base_text, pixel_font_size);
-                            let (ruby_w, ..) = gui_renderer::measure_text(current_font, ruby, ruby_pixel_font_size);
-                            let ruby_x = pen_x as f32 + (base_w as f32 - ruby_w as f32) / 2.0;
-                            let ruby_y = y as f32 - ruby_pixel_font_size*0.5;
-                            gui_renderer::draw_text(&mut pixel_buffer, width, current_font, ruby, (ruby_x, ruby_y), ruby_pixel_font_size, color);
+                        if scroll_y > 0.0 {
+                            app.on_event(AppEvent::Up);
+                        } else if scroll_y < 0.0 {
+                            app.on_event(AppEvent::Down);
                         }
-                        
-                        let (seg_width, _, _) = gui_renderer::measure_text(current_font, &seg.base_text, pixel_font_size);
-                        pen_x += seg_width as i32;
+                    }
+
+                    WindowEvent::KeyboardInput {
+                        input:
+                            KeyboardInput {
+                                state: ElementState::Pressed,
+                                virtual_keycode: Some(keycode),
+                                ..
+                            },
+                        ..
+                    } => {
+                        match keycode {
+                            VirtualKeyCode::Up => app.on_event(AppEvent::Up),
+                            VirtualKeyCode::Down => app.on_event(AppEvent::Down),
+                            VirtualKeyCode::Back => app.on_event(AppEvent::Backspace),
+                            VirtualKeyCode::Return => app.on_event(AppEvent::Enter),
+                            VirtualKeyCode::Escape => app.on_event(AppEvent::Escape),
+                            VirtualKeyCode::Tab => app.on_event(AppEvent::CycleTuiMode),
+                            _ => {}
+                        }
+                    }
+
+                    WindowEvent::ReceivedCharacter(c) => {
+                        if !c.is_control() {
+                            app.on_event(AppEvent::Char { c, timestamp: crate::timestamp::now() });
+                        }
+                    }
+
+                    _ => {}
+                }
+            }
+
+            Event::MainEventsCleared => {
+                let now = Instant::now();
+                if now < next_frame {
+                    return;
+                }
+
+                let delta_time = now.duration_since(last_frame_time).as_millis() as f64;
+                last_frame_time = now;
+                next_frame = now + FRAME_DURATION;
+
+                #[cfg(feature = "gui-file")]
+                if app.should_open_file_dialog {
+                    app.should_open_file_dialog = false;
+                    if let Some(path) = FileDialog::new()
+                        .add_filter("Typing Problem", &["ntq"])
+                        .pick_file()
+                    {
+                        if let Ok(content) = std::fs::read_to_string(&path) {
+                            let name = path
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                .unwrap_or("unknown.ntq")
+                                .to_string();
+                            app.add_custom_problem(name, content, 0);
+                        }
                     }
                 }
-                Renderable::ProgressBar { anchor, shift, width_ratio, height_ratio, progress, bg_color, fg_color } => {
-                    let bar_width = (width as f32 * width_ratio) as u32;
-                    let bar_height = (height as f32 * height_ratio) as u32;
 
-                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
-                    // anchor_posが左下を指すので、描画開始Y座標を調整
-                    let start_x = anchor_pos.0 as usize;
-                    let start_y = (anchor_pos.1 - bar_height as i32).max(0) as usize;
-
-                    // 背景を描画
-                    gui_renderer::draw_rect(&mut pixel_buffer, width, start_x, start_y, bar_width as usize, bar_height as usize, bg_color);
-
-                    // 前景（進捗）を描画
-                    let fg_width = (bar_width as f32 * progress) as usize;
-                    if fg_width > 0 {
-                        gui_renderer::draw_rect(&mut pixel_buffer, width, start_x, start_y, fg_width, bar_height as usize, fg_color);
-                    }
+                if app.should_quit {
+                    *control_flow = ControlFlow::Exit;
+                    return;
                 }
-                Renderable::TypingLower { segments, anchor, shift, align, font_size, target_line_total_width } => {
-                    let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
-                    let ruby_pixel_font_size = pixel_font_size * 0.3;
-                    let total_height = gui_renderer::measure_text(current_font, " ", pixel_font_size).1;
 
-                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
-                    let (mut pen_x, y) = ui::calculate_aligned_position(anchor_pos, target_line_total_width, total_height, align);
+                render_frame(&mut app, width, height, &mut pixel_buffer, &mut pixels);
 
-                    for seg in segments {
-                        match seg {
-                            LowerTypingSegment::Completed { base_text, ruby_text, is_correct } => {
-                                let color = if is_correct { ui::CORRECT_COLOR } else { ui::INCORRECT_COLOR };
-                                gui_renderer::draw_text(&mut pixel_buffer, width, current_font, &base_text, (pen_x as f32, y as f32), pixel_font_size, color);
-                                
-                                if let Some(ruby) = ruby_text {
-                                    let (base_w, ..) = gui_renderer::measure_text(current_font, &base_text, pixel_font_size);
-                                    let (ruby_w, ..) = gui_renderer::measure_text(current_font, &ruby, ruby_pixel_font_size);
-                                    let ruby_x = pen_x as f32 + (base_w as f32 - ruby_w as f32) / 2.0;
-                                    let ruby_y = y as f32 - ruby_pixel_font_size*0.5;
-                                    gui_renderer::draw_text(&mut pixel_buffer, width, current_font, &ruby, (ruby_x, ruby_y), ruby_pixel_font_size, color);
-                                }
+                if app.should_quit {
+                    *control_flow = ControlFlow::Exit;
+                }
 
-                                pen_x += gui_renderer::measure_text(current_font, &base_text, pixel_font_size).0 as i32;
+                app.update(width, height, delta_time.min(100.0));
+
+                if let Err(err) = present_frame(width, height, &app, &mut pixel_buffer, &mut pixels) {
+                    eprintln!("Failed to draw frame: {err}");
+                    *control_flow = ControlFlow::Exit;
+                }
+            }
+
+            _ => {}
+        }
+    });
+    unreachable!()
+}
+
+#[cfg(not(feature = "uefi"))]
+fn render_frame(
+    app: &mut App,
+    width: usize,
+    height: usize,
+    pixel_buffer: &mut [u32],
+    pixels: &mut Pixels,
+) {
+    if pixel_buffer.len() != width * height {
+        pixel_buffer.fill(0);
+    }
+
+    let current_font = app.get_current_font();
+    let render_list = ui::build_ui(&app, current_font, width, height);
+
+    for item in render_list {
+        match item {
+            Renderable::Background { gradient } => {
+                draw_linear_gradient(
+                    pixel_buffer,
+                    width,
+                    height,
+                    gradient.start_color,
+                    gradient.end_color,
+                    (0.0, 0.0),
+                    (width as f32, height as f32),
+                );
+            }
+            Renderable::BigText {
+                text,
+                anchor,
+                shift,
+                align,
+                font_size,
+                color,
+            }
+            | Renderable::Text {
+                text,
+                anchor,
+                shift,
+                align,
+                font_size,
+                color,
+            } => {
+                let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
+                let (text_width, text_height, _) =
+                    gui_renderer::measure_text(current_font, &text, pixel_font_size);
+                let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
+                let (x, y) =
+                    ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
+                gui_renderer::draw_text(
+                    pixel_buffer,
+                    width,
+                    current_font,
+                    &text,
+                    (x as f32, y as f32),
+                    pixel_font_size,
+                    color,
+                );
+            }
+            Renderable::TypingUpper {
+                segments,
+                anchor,
+                shift,
+                align,
+                font_size,
+            } => {
+                let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
+                let ruby_pixel_font_size = pixel_font_size * 0.4;
+                let total_width = segments
+                    .iter()
+                    .map(|seg| gui_renderer::measure_text(current_font, &seg.base_text, pixel_font_size).0)
+                    .sum::<u32>();
+                let total_height = gui_renderer::measure_text(current_font, " ", pixel_font_size).1;
+
+                let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
+                let (mut pen_x, y) =
+                    ui::calculate_aligned_position(anchor_pos, total_width, total_height, align);
+
+                for seg in segments {
+                    let color = match seg.state {
+                        UpperSegmentState::Correct => ui::CORRECT_COLOR,
+                        UpperSegmentState::Incorrect => ui::INCORRECT_COLOR,
+                        UpperSegmentState::Active => ui::ACTIVE_COLOR,
+                        UpperSegmentState::Pending => ui::PENDING_COLOR,
+                    };
+
+                    gui_renderer::draw_text(
+                        pixel_buffer,
+                        width,
+                        current_font,
+                        &seg.base_text,
+                        (pen_x as f32, y as f32),
+                        pixel_font_size,
+                        color,
+                    );
+
+                    if let Some(ruby) = &seg.ruby_text {
+                        let (base_w, ..) =
+                            gui_renderer::measure_text(current_font, &seg.base_text, pixel_font_size);
+                        let (ruby_w, ..) =
+                            gui_renderer::measure_text(current_font, ruby, ruby_pixel_font_size);
+                        let ruby_x = pen_x as f32 + (base_w as f32 - ruby_w as f32) / 2.0;
+                        let ruby_y = y as f32 - ruby_pixel_font_size * 0.5;
+                        gui_renderer::draw_text(
+                            pixel_buffer,
+                            width,
+                            current_font,
+                            ruby,
+                            (ruby_x, ruby_y),
+                            ruby_pixel_font_size,
+                            color,
+                        );
+                    }
+
+                    let (seg_width, _, _) =
+                        gui_renderer::measure_text(current_font, &seg.base_text, pixel_font_size);
+                    pen_x += seg_width as i32;
+                }
+            }
+            Renderable::ProgressBar {
+                anchor,
+                shift,
+                width_ratio,
+                height_ratio,
+                progress,
+                bg_color,
+                fg_color,
+            } => {
+                let bar_width = (width as f32 * width_ratio) as u32;
+                let bar_height = (height as f32 * height_ratio) as u32;
+
+                let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
+                let start_x = anchor_pos.0 as usize;
+                let start_y = (anchor_pos.1 - bar_height as i32).max(0) as usize;
+
+                gui_renderer::draw_rect(
+                    pixel_buffer,
+                    width,
+                    start_x,
+                    start_y,
+                    bar_width as usize,
+                    bar_height as usize,
+                    bg_color,
+                );
+
+                let fg_width = (bar_width as f32 * progress) as usize;
+                if fg_width > 0 {
+                    gui_renderer::draw_rect(
+                        pixel_buffer,
+                        width,
+                        start_x,
+                        start_y,
+                        fg_width,
+                        bar_height as usize,
+                        fg_color,
+                    );
+                }
+            }
+            Renderable::TypingLower {
+                segments,
+                anchor,
+                shift,
+                align,
+                font_size,
+                target_line_total_width,
+            } => {
+                let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
+                let ruby_pixel_font_size = pixel_font_size * 0.3;
+                let total_height = gui_renderer::measure_text(current_font, " ", pixel_font_size).1;
+
+                let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
+                let (mut pen_x, y) = ui::calculate_aligned_position(
+                    anchor_pos,
+                    target_line_total_width,
+                    total_height,
+                    align,
+                );
+
+                for seg in segments {
+                    match seg {
+                        LowerTypingSegment::Completed { base_text, ruby_text, is_correct } => {
+                            let color = if is_correct {
+                                ui::CORRECT_COLOR
+                            } else {
+                                ui::INCORRECT_COLOR
+                            };
+                            gui_renderer::draw_text(
+                                pixel_buffer,
+                                width,
+                                current_font,
+                                &base_text,
+                                (pen_x as f32, y as f32),
+                                pixel_font_size,
+                                color,
+                            );
+
+                            if let Some(ruby) = ruby_text {
+                                let (base_w, ..) =
+                                    gui_renderer::measure_text(current_font, &base_text, pixel_font_size);
+                                let (ruby_w, ..) =
+                                    gui_renderer::measure_text(current_font, &ruby, ruby_pixel_font_size);
+                                let ruby_x = pen_x as f32 + (base_w as f32 - ruby_w as f32) / 2.0;
+                                let ruby_y = y as f32 - ruby_pixel_font_size * 0.5;
+                                gui_renderer::draw_text(
+                                    pixel_buffer,
+                                    width,
+                                    current_font,
+                                    &ruby,
+                                    (ruby_x, ruby_y),
+                                    ruby_pixel_font_size,
+                                    color,
+                                );
                             }
-                            LowerTypingSegment::Active { elements } => {
-                                for el in elements {
-                                    let (text, color) = match el {
-                                        ActiveLowerElement::Typed { character, is_correct } => (character.to_string(), if is_correct { ui::CORRECT_COLOR } else { ui::INCORRECT_COLOR }),
-                                        ActiveLowerElement::Cursor => ("|".to_string(), ui::CURSOR_COLOR),
-                                        ActiveLowerElement::UnconfirmedInput(s) => (s.clone(), ui::UNCONFIRMED_COLOR),
-                                        ActiveLowerElement::LastIncorrectInput(c) => (c.to_string(), ui::WRONG_KEY_COLOR),
-                                    };
-                                    gui_renderer::draw_text(&mut pixel_buffer, width, current_font, &text, (pen_x as f32, y as f32), pixel_font_size, color);
-                                    pen_x += gui_renderer::measure_text(current_font, &text, pixel_font_size).0 as i32;
-                                }
+
+                            pen_x += gui_renderer::measure_text(current_font, &base_text, pixel_font_size).0 as i32;
+                        }
+                        LowerTypingSegment::Active { elements } => {
+                            for el in elements {
+                                let (text, color) = match el {
+                                    ActiveLowerElement::Typed { character, is_correct } => (
+                                        character.to_string(),
+                                        if is_correct {
+                                            ui::CORRECT_COLOR
+                                        } else {
+                                            ui::INCORRECT_COLOR
+                                        },
+                                    ),
+                                    ActiveLowerElement::Cursor => ("|".to_string(), ui::CURSOR_COLOR),
+                                    ActiveLowerElement::UnconfirmedInput(s) => {
+                                        (s.clone(), ui::UNCONFIRMED_COLOR)
+                                    }
+                                    ActiveLowerElement::LastIncorrectInput(c) => {
+                                        (c.to_string(), ui::WRONG_KEY_COLOR)
+                                    }
+                                };
+                                gui_renderer::draw_text(
+                                    pixel_buffer,
+                                    width,
+                                    current_font,
+                                    &text,
+                                    (pen_x as f32, y as f32),
+                                    pixel_font_size,
+                                    color,
+                                );
+                                pen_x +=
+                                    gui_renderer::measure_text(current_font, &text, pixel_font_size).0 as i32;
                             }
                         }
                     }
                 }
             }
         }
-        window.update_with_buffer(&pixel_buffer, width, height)?;
     }
+
+    let clear_color = crate::renderer::BG_COLOR;
+    for pixel in pixel_buffer.iter_mut() {
+        if *pixel == 0 {
+            *pixel = clear_color;
+        }
+    }
+}
+
+#[cfg(not(feature = "uefi"))]
+fn present_frame(
+    width: usize,
+    height: usize,
+    _app: &App,
+    pixel_buffer: &mut [u32],
+    pixels: &mut Pixels,
+) -> Result<(), Box<dyn Error>> {
+    if width * height > 0 && pixel_buffer.len() != width * height {
+        return Ok(());
+    }
+    let frame = pixels.frame_mut();
+    for (i, color) in pixel_buffer.iter().enumerate() {
+        let base = i * 4;
+        frame[base] = ((color >> 16) & 0xff) as u8;
+        frame[base + 1] = ((color >> 8) & 0xff) as u8;
+        frame[base + 2] = (color & 0xff) as u8;
+        frame[base + 3] = ((color >> 24) & 0xff) as u8;
+    }
+    pixels.render().map_err(|err| -> Box<dyn Error> { format!("{err}").into() })?;
     Ok(())
 }
 
 #[cfg(not(feature = "uefi"))]
-fn handle_input(window: &mut Window, app: &mut App) {  // App は 'a を持たなくなった
-    for key in window.get_keys_pressed(KeyRepeat::No) {
-        match key {
-            Key::Up => app.on_event(AppEvent::Up),
-            Key::Down => app.on_event(AppEvent::Down),
-            Key::Backspace => app.on_event(AppEvent::Backspace),
-            Key::Enter => app.on_event(AppEvent::Enter),
-            Key::Escape => app.on_event(AppEvent::Escape),
-            _ => {
-                if let Some(char_key) = key_to_char(key, window.is_key_down(Key::LeftShift) || window.is_key_down(Key::RightShift)) {
-                    app.on_event(AppEvent::Char { c: char_key, timestamp: crate::timestamp::now() });
-                }
+fn load_font_file(name: &str) -> Result<Vec<u8>, Box<dyn Error>> {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let path = dir.join("fonts").join(name);
+            if let Ok(data) = std::fs::read(&path) {
+                return Ok(data);
             }
         }
     }
-}
-
-#[cfg(not(feature = "uefi"))]
-fn key_to_char(key: Key, is_shift: bool) -> Option<char> {
-    match (key, is_shift) {
-        (Key::A, false) => Some('a'), (Key::A, true) => Some('A'),
-        (Key::B, false) => Some('b'), (Key::B, true) => Some('B'),
-        (Key::C, false) => Some('c'), (Key::C, true) => Some('C'),
-        (Key::D, false) => Some('d'), (Key::D, true) => Some('D'),
-        (Key::E, false) => Some('e'), (Key::E, true) => Some('E'),
-        (Key::F, false) => Some('f'), (Key::F, true) => Some('F'),
-        (Key::G, false) => Some('g'), (Key::G, true) => Some('G'),
-        (Key::H, false) => Some('h'), (Key::H, true) => Some('H'),
-        (Key::I, false) => Some('i'), (Key::I, true) => Some('I'),
-        (Key::J, false) => Some('j'), (Key::J, true) => Some('J'),
-        (Key::K, false) => Some('k'), (Key::K, true) => Some('K'),
-        (Key::L, false) => Some('l'), (Key::L, true) => Some('L'),
-        (Key::M, false) => Some('m'), (Key::M, true) => Some('M'),
-        (Key::N, false) => Some('n'), (Key::N, true) => Some('N'),
-        (Key::O, false) => Some('o'), (Key::O, true) => Some('O'),
-        (Key::P, false) => Some('p'), (Key::P, true) => Some('P'),
-        (Key::Q, false) => Some('q'), (Key::Q, true) => Some('Q'),
-        (Key::R, false) => Some('r'), (Key::R, true) => Some('R'),
-        (Key::S, false) => Some('s'), (Key::S, true) => Some('S'),
-        (Key::T, false) => Some('t'), (Key::T, true) => Some('T'),
-        (Key::U, false) => Some('u'), (Key::U, true) => Some('U'),
-        (Key::V, false) => Some('v'), (Key::V, true) => Some('V'),
-        (Key::W, false) => Some('w'), (Key::W, true) => Some('W'),
-        (Key::X, false) => Some('x'), (Key::X, true) => Some('X'),
-        (Key::Y, false) => Some('y'), (Key::Y, true) => Some('Y'),
-        (Key::Z, false) => Some('z'), (Key::Z, true) => Some('Z'),
-        (Key::Key0, false) => Some('0'), (Key::Key0, true) => None,
-        (Key::Key1, false) => Some('1'), (Key::Key1, true) => Some('!'),
-        (Key::Key2, false) => Some('2'), (Key::Key2, true) => Some('"'),
-        (Key::Key3, false) => Some('3'), (Key::Key3, true) => Some('#'),
-        (Key::Key4, false) => Some('4'), (Key::Key4, true) => Some('$'),
-        (Key::Key5, false) => Some('5'), (Key::Key5, true) => Some('%'),
-        (Key::Key6, false) => Some('6'), (Key::Key6, true) => Some('&'),
-        (Key::Key7, false) => Some('7'), (Key::Key7, true) => Some('\''),
-        (Key::Key8, false) => Some('8'), (Key::Key8, true) => Some('('),
-        (Key::Key9, false) => Some('9'), (Key::Key9, true) => Some(')'),
-        (Key::Space, _) => Some(' '),
-        (Key::Comma, false) => Some(','), (Key::Comma, true) => Some('<'),
-        (Key::Period, false) => Some('.'), (Key::Period, true) => Some('>'),
-        (Key::Slash, false) => Some('/'), (Key::Slash, true) => Some('?'),
-        (Key::Semicolon, false) => Some(';'), (Key::Semicolon, true) => Some(':'),
-        (Key::Equal, false) => Some('='), (Key::Equal, true) => Some('+'),
-        (Key::Minus, false) => Some('-'), (Key::Minus, true) => Some('_'),
-        _ => None,
-    }
+    let path = std::path::PathBuf::from("fonts").join(name);
+    Ok(std::fs::read(&path)?)
 }
 
 #[cfg(feature = "uefi")]
