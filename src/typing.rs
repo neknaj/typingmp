@@ -59,14 +59,6 @@ fn normalize_typing_char(c: char) -> char {
     }
 }
 
-fn segment_target_text(seg: &Segment) -> String {
-    match seg {
-        Segment::Plain { text } => text.clone(),
-        Segment::Annotated { reading, .. } => reading.clone(),
-        Segment::Anno { inner, .. } => inner.iter().map(|s| segment_target_text(s)).collect(),
-    }
-}
-
 fn segment_prefix_chars(
     segments: &[Segment],
     start_segment: usize,
@@ -77,7 +69,7 @@ fn segment_prefix_chars(
         return String::new();
     }
 
-    let mut result = String::new();
+    let mut result = String::with_capacity(max_chars);
     let mut skipped = start_char;
     let mut remaining = max_chars;
 
@@ -85,31 +77,49 @@ fn segment_prefix_chars(
         if remaining == 0 {
             break;
         }
+        skipped = segment_prefix_chars_inner(seg, skipped, &mut remaining, &mut result);
+    }
 
-        let seg_text = segment_target_text(seg);
-        if seg_text.is_empty() {
-            continue;
+    result
+}
+
+fn segment_prefix_chars_inner(
+    segment: &Segment,
+    mut skipped: usize,
+    remaining: &mut usize,
+    output: &mut String,
+) -> usize {
+    if *remaining == 0 {
+        return skipped;
+    }
+
+    match segment {
+        Segment::Plain { text } | Segment::Annotated { reading: text, .. } => {
+            for c in text.chars() {
+                if skipped > 0 {
+                    skipped -= 1;
+                    continue;
+                }
+
+                if *remaining == 0 {
+                    break;
+                }
+
+                output.push(c);
+                *remaining -= 1;
+            }
         }
-
-        let seg_len = seg_text.chars().count();
-        if skipped >= seg_len {
-            skipped -= seg_len;
-            continue;
-        }
-
-        let mut chars = seg_text.chars().skip(skipped);
-        skipped = 0;
-
-        for ch in chars.by_ref().take(remaining) {
-            result.push(ch);
-            remaining -= 1;
-            if remaining == 0 {
-                break;
+        Segment::Anno { inner, .. } => {
+            for seg in inner {
+                skipped = segment_prefix_chars_inner(seg, skipped, remaining, output);
+                if *remaining == 0 {
+                    break;
+                }
             }
         }
     }
 
-    result
+    skipped
 }
 
 pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
