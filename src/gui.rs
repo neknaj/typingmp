@@ -66,7 +66,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     let mut last_frame_time = Instant::now();
     let mut next_frame = last_frame_time + FRAME_DURATION;
 
-    event_loop.run(move |event, _, control_flow| {
+    return event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::WaitUntil(next_frame);
         match event {
             Event::WindowEvent { event, .. } => {
@@ -189,7 +189,6 @@ pub fn run() -> Result<(), Box<dyn Error>> {
             _ => {}
         }
     });
-    unreachable!()
 }
 
 #[cfg(not(feature = "uefi"))]
