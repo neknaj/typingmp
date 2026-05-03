@@ -112,10 +112,6 @@ fn segment_prefix_chars(
     result
 }
 
-fn max_mapping_key_len(mapping: &[(String, Vec<String>)]) -> usize {
-    mapping.iter().map(|(key, _)| key.chars().count()).max().unwrap_or(0)
-}
-
 pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     log(&format!("\n--- key_input: '{}' --- typing.rs", input));
     log(&format!(
@@ -139,7 +135,7 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
 
     let current_segment = model.status.segment as usize;
     let current_char = model.status.char_ as usize;
-    let max_key_len = max_mapping_key_len(&model.layout.normalized_mapping).max(1);
+    let max_key_len = model.layout.normalized_mapping_max_key_len.max(1);
     let target_slice = segment_prefix_chars(
         &word_content.segments,
         current_segment,
@@ -204,11 +200,18 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
         }
         current_input_str.push(input_lower);
 
-        for (key, values) in model.layout.normalized_mapping.iter() {
+        let mut candidate_indexes: &[usize] = &[];
+        if let Some(first_byte) = target_slice.as_bytes().first().copied() {
+            let bucket = first_byte.to_ascii_lowercase() as usize;
+            candidate_indexes = &model.layout.normalized_mapping_by_first_char[bucket];
+        }
+
+        for mapping_index in candidate_indexes {
+            let (key, values) = &model.layout.normalized_mapping[*mapping_index];
             if !target_slice.starts_with(key) {
                 continue;
             }
-            let key_chars_count = key.chars().count();
+            let key_chars_count = key.len();
 
             for value in values {
                 if value == &current_input_str {

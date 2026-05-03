@@ -160,6 +160,8 @@ pub struct TypingMetrics {
 pub struct Layout {
     pub mapping: Vec<(String, Vec<String>)>,
     pub normalized_mapping: Vec<(String, Vec<String>)>,
+    pub normalized_mapping_max_key_len: usize,
+    pub normalized_mapping_by_first_char: Vec<Vec<usize>>,
 }
 
 #[derive(Debug, Clone)]
@@ -183,10 +185,26 @@ impl Default for Layout {
                 )
             })
             .collect();
+        let normalized_mapping_max_key_len = normalized_mapping
+            .iter()
+            .map(|(key, _)| key.chars().count())
+            .max()
+            .unwrap_or(1);
+        let mut normalized_mapping_by_first_char = vec![Vec::new(); 256];
+        for (index, (key, _)) in normalized_mapping.iter().enumerate() {
+            match key.as_bytes().first().copied() {
+                Some(first_byte) => {
+                    normalized_mapping_by_first_char[first_byte as usize].push(index);
+                }
+                None => normalized_mapping_by_first_char[0].push(index),
+            }
+        }
 
         Layout {
             mapping,
             normalized_mapping,
+            normalized_mapping_max_key_len,
+            normalized_mapping_by_first_char,
         }
     }
 }
