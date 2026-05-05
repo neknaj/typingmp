@@ -7,7 +7,7 @@ resolved: false
 priority: P1
 type: architecture
 created: 2026-05-05
-updated: 2026-05-05
+updated: 2026-05-06
 target: "src/lib.rs, src/parser.rs, src/typing.rs, src/model.rs, src/layout_data.rs, src/app.rs"
 legacy_id: TP-ARCH-004
 source: "doc/fullreview20260505/architecture/core-ui-boundary.md"
@@ -37,3 +37,20 @@ desktop / web の都合で core に `std` や platform I/O が入り込むと、
 
 - no_std core-only check
 - `cargo check --no-default-features --features uefi --target x86_64-unknown-uefi`
+
+## 進捗: T04
+
+`parser.rs`、`typing.rs`、`model.rs`、`layout_data.rs` の production import を `core + alloc` に統一した。`typing.rs` の key input logging から stdout / UEFI console / web console / WASM debug logger の直接参照を外し、core 候補 module が host I/O を知らない状態にした。
+
+検証:
+
+- `cargo fmt --check`: pass
+- `cargo test --no-default-features`: pass
+- `cargo check --no-default-features --features uefi --target x86_64-unknown-uefi`: pass
+- `cargo check --no-default-features --features wasm --target wasm32-unknown-unknown`: pass
+- `cargo check --no-default-features --features tui`: pass
+
+残作業:
+
+- CI の no_std core-only gate は T19 で追加する。
+- App / backend 側の I/O provider 境界は T05 / T11 で続けて扱う。

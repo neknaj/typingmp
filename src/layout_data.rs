@@ -1,12 +1,8 @@
 // src/layout_data.rs
 
-#[cfg(feature = "uefi")]
 extern crate alloc;
 
-#[cfg(feature = "uefi")]
 use alloc::{string::String, vec::Vec};
-#[cfg(not(feature = "uefi"))]
-use std::{string::String, vec::Vec};
 
 use phf::phf_map;
 

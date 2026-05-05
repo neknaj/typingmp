@@ -1,12 +1,8 @@
 // ./src/typing.rs
 
-#[cfg(feature = "uefi")]
 extern crate alloc;
 
-#[cfg(feature = "uefi")]
 use alloc::{format, string::String, vec::Vec};
-#[cfg(not(feature = "uefi"))]
-use std::{string::String, vec::Vec};
 
 use crate::model::{
     Content, Model, ResultModel, Segment, TypingCorrectnessChar, TypingCorrectnessContent,
@@ -28,26 +24,7 @@ enum TypingCompletion {
     Finished,
 }
 
-// Helper function for logging to handle both native and wasm targets.
-fn log(_message: &str) {
-    #[cfg(any(not(feature = "tui"), feature = "gui"))]
-    {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            #[cfg(not(feature = "uefi"))]
-            println!("{}", _message);
-            #[cfg(feature = "uefi")]
-            uefi::println!("{}", _message);
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            #[cfg(debug_assertions)]
-            crate::wasm_debug_logger::log(_message);
-            #[cfg(not(debug_assertions))]
-            web_sys::console::log_1(&_message.into());
-        }
-    }
-}
+fn log(_message: &str) {}
 
 fn normalize_typing_char(c: char) -> char {
     // 古典かなの代替入力: ゐ・ヰ は「い」、ゑ・ヱ は「え」として扱う。

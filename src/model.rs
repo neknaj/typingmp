@@ -1,20 +1,8 @@
 // src/model.rs
 
-// uefi featureが有効な場合、no_stdとno_mainでコンパイルする
-#[cfg(feature = "uefi")]
 extern crate alloc;
 
-#[cfg(feature = "uefi")]
 use alloc::{string::String, vec, vec::Vec};
-#[cfg(not(feature = "uefi"))]
-use std::string::String;
-#[cfg(not(feature = "uefi"))]
-use std::vec::Vec; // Vecはstringではなくvecクレートから
-
-#[cfg(not(feature = "uefi"))]
-use std::fmt;
-
-#[cfg(feature = "uefi")]
 use core::fmt;
 
 use crate::layout_data;

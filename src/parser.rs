@@ -1,21 +1,13 @@
 // src/parser.rs
 
-#[cfg(feature = "uefi")]
 extern crate alloc;
 
-#[cfg(feature = "uefi")]
 use alloc::{
     string::{String, ToString},
     vec,
     vec::Vec,
 };
 use core::mem;
-#[cfg(not(feature = "uefi"))]
-use std::{
-    string::{String, ToString},
-    vec,
-    vec::Vec,
-};
 
 use crate::model::{Content, Line, Segment, Word};
 
