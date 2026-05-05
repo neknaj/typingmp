@@ -33,3 +33,9 @@ input polling は 100ms cadence で、typing application としては反応が�
 
 - `TP-TUI-001`
 - `TP-ERR-001`
+
+## 実装進捗: T12
+
+backend 共通の `BackendError` を導入し、TUI の font parse failure は typed error として `run()` から返すようにした。runtime font load failure は `App::report_visible_error()` 経由で画面 status へ流す。
+
+typing scene の render path で `typing_model().unwrap()` していた箇所は、model がない場合に該当 frame を描画しない形へ変更した。terminal raw mode / alternate screen の RAII guard は T13 で実装する。

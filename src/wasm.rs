@@ -1,6 +1,7 @@
 // src/wasm.rs
 
 use crate::app::{App, AppEvent, CustomProblem, Fonts, UiCommand};
+use crate::backend::BackendError;
 use crate::io::{PersistentStore, ProviderError, ProviderErrorKind};
 use crate::renderer::{calculate_pixel_font_size, gui_renderer};
 use crate::ui::{self, ActiveLowerElement, LowerTypingSegment, Renderable, UpperSegmentState};
@@ -258,9 +259,14 @@ pub fn start() {
 #[cfg(feature = "wasm")]
 async fn start_async() -> Result<(), JsValue> {
     debug_log("Application starting (async).");
-    let window = web_sys::window().unwrap();
-    let document = window.document().unwrap();
-    let body = document.body().unwrap();
+    let window = web_sys::window()
+        .ok_or_else(|| js_backend_error(BackendError::dom("missing browser window")))?;
+    let document = window
+        .document()
+        .ok_or_else(|| js_backend_error(BackendError::dom("missing browser document")))?;
+    let body = document
+        .body()
+        .ok_or_else(|| js_backend_error(BackendError::dom("missing document body")))?;
 
     let input_element = document
         .create_element("input")?
@@ -297,7 +303,7 @@ async fn start_async() -> Result<(), JsValue> {
 
     let context = canvas
         .get_context("2d")?
-        .unwrap()
+        .ok_or_else(|| js_backend_error(BackendError::dom("2D canvas context is unavailable")))?
         .dyn_into::<CanvasRenderingContext2d>()?;
 
     // フォントをサーバーから非同期 fetch する（WASM バイナリへの埋め込みを回避）
@@ -505,8 +511,7 @@ async fn start_async() -> Result<(), JsValue> {
         resize_closure
             .as_ref()
             .unchecked_ref::<js_sys::Function>()
-            .call0(&JsValue::NULL)
-            .unwrap();
+            .call0(&JsValue::NULL)?;
         resize_closure.forget();
     }
 
@@ -586,7 +591,7 @@ async fn start_async() -> Result<(), JsValue> {
         let (width, height) = *size.borrow();
 
         if width == 0 || height == 0 {
-            request_animation_frame(f.borrow().as_ref().unwrap());
+            schedule_next_frame(&f);
             return;
         }
 
@@ -632,8 +637,9 @@ async fn start_async() -> Result<(), JsValue> {
                                         && *gh == height
                                 });
                                 if matches {
-                                    let cached = &gc.as_ref().unwrap().4;
-                                    pb.copy_from_slice(cached);
+                                    if let Some((_, _, _, _, cached)) = gc.as_ref() {
+                                        pb.copy_from_slice(cached);
+                                    }
                                 } else {
                                     crate::renderer::draw_linear_gradient(
                                         &mut pb,
@@ -941,13 +947,20 @@ async fn start_async() -> Result<(), JsValue> {
                         ub[base + 2] = (*pixel & 0xFF) as u8;
                         ub[base + 3] = 255;
                     }
-                    let image_data = ImageData::new_with_u8_clamped_array_and_sh(
+                    let image_data = match ImageData::new_with_u8_clamped_array_and_sh(
                         Clamped(&ub),
                         width as u32,
                         height as u32,
-                    )
-                    .unwrap();
-                    context.put_image_data(&image_data, 0.0, 0.0).unwrap();
+                    ) {
+                        Ok(image_data) => image_data,
+                        Err(err) => {
+                            web_sys::console::error_1(&err);
+                            return;
+                        }
+                    };
+                    if let Err(err) = context.put_image_data(&image_data, 0.0, 0.0) {
+                        web_sys::console::error_1(&err);
+                    }
                 });
             });
         }
@@ -959,16 +972,40 @@ async fn start_async() -> Result<(), JsValue> {
             let _ = ime_input_element.focus();
         }
 
-        request_animation_frame(f.borrow().as_ref().unwrap());
+        schedule_next_frame(&f);
     }));
-    request_animation_frame(g.borrow().as_ref().unwrap());
+    {
+        let borrowed = g.borrow();
+        let callback = borrowed.as_ref().ok_or_else(|| {
+            js_backend_error(BackendError::state(
+                "animation frame callback was not initialized",
+            ))
+        })?;
+        request_animation_frame(callback)?;
+    }
 
     Ok(())
 }
 
-fn request_animation_frame(f: &Closure<dyn FnMut()>) {
-    web_sys::window()
-        .unwrap()
-        .request_animation_frame(f.as_ref().unchecked_ref())
-        .unwrap();
+fn js_backend_error(error: BackendError) -> JsValue {
+    JsValue::from_str(&error.to_string())
+}
+
+fn schedule_next_frame(callback: &Rc<RefCell<Option<Closure<dyn FnMut()>>>>) {
+    let borrowed = callback.borrow();
+    let Some(callback) = borrowed.as_ref() else {
+        web_sys::console::error_1(&js_backend_error(BackendError::state(
+            "animation frame callback is missing",
+        )));
+        return;
+    };
+    if let Err(err) = request_animation_frame(callback) {
+        web_sys::console::error_1(&err);
+    }
+}
+
+fn request_animation_frame(f: &Closure<dyn FnMut()>) -> Result<i32, JsValue> {
+    let window = web_sys::window()
+        .ok_or_else(|| js_backend_error(BackendError::dom("missing browser window")))?;
+    window.request_animation_frame(f.as_ref().unchecked_ref())
 }

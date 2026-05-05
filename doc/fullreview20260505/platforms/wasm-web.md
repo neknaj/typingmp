@@ -50,3 +50,9 @@ WASM/web は機能量が多い一方で、build-time env、DOM unwrap、storage 
 - `TP-WASM-001`
 - `TP-WEB-001`
 - `TP-SEC-002`
+
+## 実装進捗: T12
+
+`src/backend.rs` に backend 共通の `BackendError` / `BackendErrorKind` を追加した。WASM startup は `window`、`document`、`body`、canvas 2D context、初回 resize callback、`ImageData`、RAF の失敗を `JsValue` / console-visible error に変換し、host page 欠落時に `unwrap()` で落ちない形へ寄せた。
+
+localStorage の user-facing diagnostic と clipboard side effect は T14 の対象として残す。

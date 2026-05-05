@@ -219,7 +219,7 @@
       "priority": "P1",
       "type": "bug",
       "created": "2026-05-05",
-      "updated": "2026-05-05",
+      "updated": "2026-05-06",
       "target": "src/wasm.rs, src/mobile.rs, src/uefi.rs, src/tui.rs",
       "legacy_id": "TP-ERR-001",
       "source": "doc/fullreview20260505/platforms/wasm-web.md",

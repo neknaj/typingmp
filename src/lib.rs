@@ -17,6 +17,7 @@ extern crate alloc;
 
 // アプリケーションの共通モジュールを宣言
 pub mod app;
+pub mod backend;
 pub mod io;
 pub mod layout_data;
 pub mod model;

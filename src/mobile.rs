@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::app::{App, AppEvent, Fonts, UiCommand};
+use crate::backend::BackendError;
 use crate::io::{AssetProvider, BundledFont, DesktopAssetProvider};
 use crate::renderer::{calculate_pixel_font_size, gui_renderer};
 use crate::ui::{self, ActiveLowerElement, LowerTypingSegment, Renderable, UpperSegmentState};
@@ -276,13 +277,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let asset_provider = DesktopAssetProvider::discover();
     let japanese_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::YujiSyukuRegular)?)
-            .map_err(|e| e.to_string())?;
+            .map_err(|_| BackendError::asset("failed to parse Yuji Syuku font"))?;
     let traditional_chinese_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::NotoSerifJpRegular)?)
-            .map_err(|e| e.to_string())?;
+            .map_err(|_| BackendError::asset("failed to parse Noto Serif JP font"))?;
     let simplified_chinese_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::NotoSerifJpRegular)?)
-            .map_err(|e| e.to_string())?;
+            .map_err(|_| BackendError::asset("failed to parse Noto Serif JP font"))?;
 
     let fonts = Fonts {
         japanese: japanese_font,
@@ -293,7 +294,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     app.set_available_fonts(asset_provider.list_fonts());
     let app_state = Arc::new(Mutex::new(app));
     {
-        let mut a = app_state.lock().unwrap();
+        let mut a = app_state
+            .lock()
+            .map_err(|_| BackendError::state("mobile app state mutex is poisoned"))?;
         a.on_event(AppEvent::ChangeScene);
     }
 
@@ -305,12 +308,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         let win = window.as_weak();
         window.on_char_input(move |c| {
             let timestamp = crate::timestamp::now();
-            let mut a = app.lock().unwrap();
+            let Ok(mut a) = app.lock() else {
+                return;
+            };
             for ch in c.chars() {
                 a.on_event(AppEvent::Char { c: ch, timestamp });
             }
             if let Some(w) = win.upgrade() {
-                w.set_keyboard_visible(a.state == crate::app::AppState::Typing);
+                w.set_keyboard_visible(a.is_typing_active());
             }
         });
     }
@@ -320,12 +325,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         let app = Arc::clone(&app_state);
         let win = window.as_weak();
         window.on_special_input(move |action| {
-            let mut a = app.lock().unwrap();
+            let Ok(mut a) = app.lock() else {
+                return;
+            };
             if let Some(command) = UiCommand::from_bridge_label(action.as_str()) {
                 a.on_event(command.app_event());
             }
             if let Some(w) = win.upgrade() {
-                w.set_keyboard_visible(a.state == crate::app::AppState::Typing);
+                w.set_keyboard_visible(a.is_typing_active());
             }
         });
     }
@@ -361,19 +368,23 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             {
-                let mut a = app.lock().unwrap();
+                let Ok(mut a) = app.lock() else {
+                    return;
+                };
                 // 実測 delta_ms を渡すことで app.fps が正確な値になる
                 a.update(w, h, delta_ms);
                 if let Some(request) = a.take_font_load_request() {
                     match asset_provider.load_font(request.font_id) {
                         Ok(bytes) => {
-                            let _ = a.apply_font_bytes(request.script, bytes);
+                            if let Err(err) = a.apply_font_bytes(request.script, bytes) {
+                                a.report_visible_error(format!("failed to apply font: {err:?}"));
+                            }
                         }
-                        Err(err) => eprintln!("{err}"),
+                        Err(err) => a.report_visible_error(err.to_string()),
                     }
                 }
                 render_frame(&a, w, h, &mut pixel_buf);
-                win.set_keyboard_visible(a.state == crate::app::AppState::Typing);
+                win.set_keyboard_visible(a.is_typing_active());
             }
 
             // ピクセルバッファ → Slint Image（物理ピクセル等倍）
@@ -392,6 +403,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 fn android_main(android_app: slint::android::AndroidApp) {
-    slint::android::init(android_app).unwrap();
-    run().unwrap();
+    if let Err(err) = slint::android::init(android_app) {
+        eprintln!("failed to initialize Android Slint backend: {err}");
+        return;
+    }
+    if let Err(err) = run() {
+        eprintln!("mobile backend failed: {err}");
+    }
 }

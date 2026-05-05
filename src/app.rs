@@ -361,6 +361,10 @@ impl App {
         })
     }
 
+    pub fn report_visible_error(&mut self, message: impl Into<String>) {
+        self.status_text = format!("Error: {}", message.into());
+    }
+
     pub fn take_file_open_request(&mut self) -> bool {
         let should_open = self.should_open_file_dialog;
         self.should_open_file_dialog = false;

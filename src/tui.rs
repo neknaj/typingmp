@@ -3,6 +3,8 @@
 #[cfg(not(feature = "uefi"))]
 use crate::app::{App, AppEvent, Fonts, TuiDisplayMode};
 #[cfg(not(feature = "uefi"))]
+use crate::backend::BackendError;
+#[cfg(not(feature = "uefi"))]
 use crate::io::{AssetProvider, BundledFont, DesktopAssetProvider};
 #[cfg(not(feature = "uefi"))]
 use crate::model::Segment;
@@ -65,13 +67,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let asset_provider = DesktopAssetProvider::discover();
     let japanese_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::YujiSyukuRegular)?)
-            .map_err(|_| "Failed to parse Yuji Syuku font")?;
+            .map_err(|_| BackendError::asset("failed to parse Yuji Syuku font"))?;
     let traditional_chinese_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::NotoSerifJpRegular)?)
-            .map_err(|_| "Failed to parse Noto Serif JP font")?;
+            .map_err(|_| BackendError::asset("failed to parse Noto Serif JP font"))?;
     let simplified_chinese_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::NotoSerifJpRegular)?)
-            .map_err(|_| "Failed to parse Noto Serif JP font")?;
+            .map_err(|_| BackendError::asset("failed to parse Noto Serif JP font"))?;
 
     let fonts = Fonts {
         japanese: japanese_font,
@@ -114,10 +116,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             match asset_provider.load_font(request.font_id) {
                 Ok(bytes) => {
                     if let Err(err) = app.apply_font_bytes(request.script, bytes) {
-                        eprintln!("Failed to apply font: {err:?}");
+                        app.report_visible_error(format!("failed to apply font: {err:?}"));
                     }
                 }
-                Err(err) => eprintln!("{err}"),
+                Err(err) => app.report_visible_error(err.to_string()),
             }
         }
 
@@ -250,7 +252,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             } else {
                                 1.0
                             };
-                            let typing_model = app.typing_model().unwrap();
+                            let Some(typing_model) = app.typing_model() else {
+                                continue;
+                            };
                             let scroll_offset_cells =
                                 (typing_model.scroll.scroll / pixels_per_cell).round() as i32;
 
@@ -411,7 +415,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 tui_renderer::render_text_to_art
                             };
 
-                            let typing_model = app.typing_model().unwrap();
+                            let Some(typing_model) = app.typing_model() else {
+                                continue;
+                            };
                             let full_line_words =
                                 &typing_model.content.lines[typing_model.status.line.get()].words;
 
@@ -636,7 +642,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         TuiDisplayMode::SimpleText => {
                             // First, calculate the total width of the line in characters for centering.
-                            let typing_model = app.typing_model().unwrap();
+                            let Some(typing_model) = app.typing_model() else {
+                                continue;
+                            };
                             let full_line_words =
                                 &typing_model.content.lines[typing_model.status.line.get()].words;
                             let total_width_chars = full_line_words

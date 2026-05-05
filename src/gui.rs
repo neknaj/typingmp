@@ -1,5 +1,7 @@
 #[cfg(not(feature = "uefi"))]
 use crate::app::{App, AppEvent, Fonts};
+#[cfg(not(feature = "uefi"))]
+use crate::backend::BackendError;
 #[cfg(all(not(feature = "uefi"), feature = "gui-file"))]
 use crate::io::DesktopProblemSourceProvider;
 #[cfg(not(feature = "uefi"))]
@@ -38,13 +40,13 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     let asset_provider = DesktopAssetProvider::discover();
     let japanese_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::YujiSyukuRegular)?)
-            .map_err(|_| "Failed to parse Yuji Syuku font")?;
+            .map_err(|_| BackendError::asset("failed to parse Yuji Syuku font"))?;
     let traditional_chinese_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::NotoSerifJpRegular)?)
-            .map_err(|_| "Failed to parse Noto Serif JP font")?;
+            .map_err(|_| BackendError::asset("failed to parse Noto Serif JP font"))?;
     let simplified_chinese_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::NotoSerifJpRegular)?)
-            .map_err(|_| "Failed to parse Noto Serif JP font")?;
+            .map_err(|_| BackendError::asset("failed to parse Noto Serif JP font"))?;
 
     let fonts = Fonts {
         japanese: japanese_font,
@@ -171,7 +173,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                                     problem.timestamp_ms,
                                 );
                             }
-                            Err(err) => eprintln!("{err}"),
+                            Err(err) => app.report_visible_error(err.to_string()),
                         }
                     }
                 }
@@ -180,10 +182,10 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                     match asset_provider.load_font(request.font_id) {
                         Ok(bytes) => {
                             if let Err(err) = app.apply_font_bytes(request.script, bytes) {
-                                eprintln!("Failed to apply font: {err:?}");
+                                app.report_visible_error(format!("failed to apply font: {err:?}"));
                             }
                         }
-                        Err(err) => eprintln!("{err}"),
+                        Err(err) => app.report_visible_error(err.to_string()),
                     }
                 }
 
