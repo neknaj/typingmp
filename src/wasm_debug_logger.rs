@@ -28,12 +28,18 @@ pub fn init() {
     let id = buf.iter().map(|b| format!("{:02x}", b)).collect::<String>();
     CONNECTION_ID.with(|cell| *cell.borrow_mut() = id.clone());
     console_log(&format!("[WASM Logger] Generated Connection ID: {}", id));
-    
+
     // env!マクロを使い、ビルド時に環境変数 WEBSOCKET_ADDRESS を読み込む
     // もし環境変数が設定されていない場合、ビルドはエラーで失敗する
-    let server_address = env!("WEBSOCKET_ADDRESS", "Build-time environment variable WEBSOCKET_ADDRESS is not set.");
-    
-    console_log(&format!("[WASM Logger] Attempting to connect to: {}", server_address));
+    let server_address = env!(
+        "WEBSOCKET_ADDRESS",
+        "Build-time environment variable WEBSOCKET_ADDRESS is not set."
+    );
+
+    console_log(&format!(
+        "[WASM Logger] Attempting to connect to: {}",
+        server_address
+    ));
 
     match WebSocket::new(server_address) {
         Ok(ws) => {
@@ -41,7 +47,10 @@ pub fn init() {
 
             // 接続成功時のコールバック
             let onopen_callback = Closure::<dyn FnMut()>::new(|| {
-                console_log_styled("[WASM Logger] WebSocket connection opened successfully! (onopen)", "color: green; font-weight: bold;");
+                console_log_styled(
+                    "[WASM Logger] WebSocket connection opened successfully! (onopen)",
+                    "color: green; font-weight: bold;",
+                );
                 log_internal("Connection established.");
             });
             ws.set_onopen(Some(onopen_callback.as_ref().unchecked_ref()));
@@ -50,26 +59,35 @@ pub fn init() {
             // エラー発生時のコールバック
             let onerror_callback = Closure::<dyn FnMut(_)>::new(|_e: Event| {
                 // ErrorEventは詳細情報を持たないので、基本的なEventとしてログ出力
-                console_log_styled("[WASM Logger] WebSocket error occurred. See browser devtools for details.", "color: red; font-weight: bold;");
+                console_log_styled(
+                    "[WASM Logger] WebSocket error occurred. See browser devtools for details.",
+                    "color: red; font-weight: bold;",
+                );
             });
             ws.set_onerror(Some(onerror_callback.as_ref().unchecked_ref()));
             onerror_callback.forget();
-            
+
             // 切断時のコールバック
             let onclose_callback = Closure::<dyn FnMut(_)>::new(|e: CloseEvent| {
-                console_log_styled(&format!(
-                    "[WASM Logger] WebSocket connection closed. Code: {}, Reason: '{}'",
-                    e.code(),
-                    e.reason(),
-                ), "color: orange;");
+                console_log_styled(
+                    &format!(
+                        "[WASM Logger] WebSocket connection closed. Code: {}, Reason: '{}'",
+                        e.code(),
+                        e.reason(),
+                    ),
+                    "color: orange;",
+                );
             });
             ws.set_onclose(Some(onclose_callback.as_ref().unchecked_ref()));
             onclose_callback.forget();
-            
+
             WS_CONNECTION.with(|cell| *cell.borrow_mut() = Some(ws));
         }
         Err(e) => {
-            console_log_styled(&format!("[WASM Logger] WebSocket::new() failed: {:?}", e), "color: red; font-weight: bold;");
+            console_log_styled(
+                &format!("[WASM Logger] WebSocket::new() failed: {:?}", e),
+                "color: red; font-weight: bold;",
+            );
         }
     }
 }
@@ -89,13 +107,19 @@ fn log_internal(message: &str) {
                     let id = id_cell.borrow();
                     let escaped_message = message.replace('\\', "\\\\").replace('"', "\\\"");
                     let payload = format!(r#"{{"id":"{}","message":"{}"}}"#, id, escaped_message);
-                    
+
                     match ws.send_with_str(&payload) {
                         Ok(_) => {
-                            console_log_styled(&format!("[WASM Logger] Log sent to server: {}", message), "color: blue;");
+                            console_log_styled(
+                                &format!("[WASM Logger] Log sent to server: {}", message),
+                                "color: blue;",
+                            );
                         }
                         Err(e) => {
-                            console_log_styled(&format!("[WASM Logger] Failed to send log: {:?}", e), "color: red;");
+                            console_log_styled(
+                                &format!("[WASM Logger] Failed to send log: {:?}", e),
+                                "color: red;",
+                            );
                         }
                     }
                 });

@@ -11,13 +11,13 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
+#[cfg(feature = "uefi")]
+use core_maths::CoreFloat;
 #[cfg(not(feature = "uefi"))]
 use std::{
     string::{String, ToString},
     vec::Vec,
 };
-#[cfg(feature = "uefi")]
-use core_maths::CoreFloat;
 
 use crate::model::{Model, ResultModel, Scroll, Segment, TypingModel, TypingStatus};
 
@@ -67,9 +67,9 @@ fn seg_ruby_text_owned(seg: &Segment) -> Option<String> {
     }
 }
 use crate::parser;
+use crate::renderer::gui_renderer;
 use crate::typing;
 use crate::ui; // typing_rendererの代わりにuiをインポート
-use crate::renderer::gui_renderer;
 use ab_glyph::FontVec;
 
 // ビルドスクリプトによってOUT_DIRに生成されたファイルを取り込む
@@ -141,7 +141,9 @@ impl Fonts {
     pub fn get_for_script(&self, script: Script) -> &FontVec {
         match script {
             Script::Japanese => &self.japanese,
-            Script::TraditionalChinese => self.traditional_chinese.as_ref().unwrap_or(&self.japanese),
+            Script::TraditionalChinese => {
+                self.traditional_chinese.as_ref().unwrap_or(&self.japanese)
+            }
             Script::SimplifiedChinese => self.simplified_chinese.as_ref().unwrap_or(&self.japanese),
         }
     }
@@ -236,7 +238,12 @@ fn build_reading_width_prefix(font: &FontVec, text: &str, font_pixel_size: f32) 
     prefix
 }
 
-fn build_scroll_line_cache(line: &crate::model::Line, font: &FontVec, font_pixel_size: f32, line_index: i32) -> ScrollLineCache {
+fn build_scroll_line_cache(
+    line: &crate::model::Line,
+    font: &FontVec,
+    font_pixel_size: f32,
+    line_index: i32,
+) -> ScrollLineCache {
     let mut segments = Vec::new();
     let mut segment_prefix_width = Vec::new();
     segment_prefix_width.push(0.0);
@@ -250,7 +257,8 @@ fn build_scroll_line_cache(line: &crate::model::Line, font: &FontVec, font_pixel
             let reading_text = seg_reading_text_owned(segment);
             let ruby_text = seg_ruby_text_owned(segment);
             let base_width = gui_renderer::measure_text(font, &base_text, font_pixel_size).0 as f32;
-            let reading_width_prefix = build_reading_width_prefix(font, &reading_text, font_pixel_size);
+            let reading_width_prefix =
+                build_reading_width_prefix(font, &reading_text, font_pixel_size);
             total_width += base_width;
             segment_prefix_width.push(total_width);
             segments.push(ScrollLineSegmentCache {
@@ -265,11 +273,11 @@ fn build_scroll_line_cache(line: &crate::model::Line, font: &FontVec, font_pixel
         }
     }
 
-        for (word_index, word) in line.words.iter().enumerate() {
-            let start = word_segment_starts.get(word_index).copied().unwrap_or(0);
-            let end = word_segment_starts
-                .get(word_index + 1)
-                .copied()
+    for (word_index, word) in line.words.iter().enumerate() {
+        let start = word_segment_starts.get(word_index).copied().unwrap_or(0);
+        let end = word_segment_starts
+            .get(word_index + 1)
+            .copied()
             .unwrap_or(segments.len());
         for segment_index in start..end {
             if let Some(item) = segments.get_mut(segment_index) {
@@ -292,13 +300,21 @@ fn line_total_width(line: &crate::model::Line, font: &FontVec, font_pixel_size: 
     let mut total = 0.0f32;
     for word in &line.words {
         for segment in &word.segments {
-            total += gui_renderer::measure_text(font, &seg_base_text_owned(segment), font_pixel_size).0 as f32;
+            total +=
+                gui_renderer::measure_text(font, &seg_base_text_owned(segment), font_pixel_size).0
+                    as f32;
         }
     }
     total
 }
 
-fn line_origin_from_start(target_line: usize, lines: &[crate::model::Line], font: &FontVec, font_pixel_size: f32, gap_width: f32) -> f32 {
+fn line_origin_from_start(
+    target_line: usize,
+    lines: &[crate::model::Line],
+    font: &FontVec,
+    font_pixel_size: f32,
+    gap_width: f32,
+) -> f32 {
     let mut origin = 0.0f32;
     let max_line = target_line.min(lines.len());
     for line_idx in 0..max_line {
@@ -312,7 +328,14 @@ fn line_origin_from_start(target_line: usize, lines: &[crate::model::Line], font
     origin
 }
 
-fn line_origin_from_previous(previous: &ScrollCacheState, target_line: usize, lines: &[crate::model::Line], font: &FontVec, font_pixel_size: f32, gap_width: f32) -> f32 {
+fn line_origin_from_previous(
+    previous: &ScrollCacheState,
+    target_line: usize,
+    lines: &[crate::model::Line],
+    font: &FontVec,
+    font_pixel_size: f32,
+    gap_width: f32,
+) -> f32 {
     let Some(previous_line) = usize::try_from(previous.current.line).ok() else {
         return line_origin_from_start(target_line, lines, font, font_pixel_size, gap_width);
     };
@@ -327,7 +350,13 @@ fn line_origin_from_previous(previous: &ScrollCacheState, target_line: usize, li
             let line = if let Some(line) = lines.get(line_idx) {
                 line
             } else {
-                return line_origin_from_start(target_line, lines, font, font_pixel_size, gap_width);
+                return line_origin_from_start(
+                    target_line,
+                    lines,
+                    font,
+                    font_pixel_size,
+                    gap_width,
+                );
             };
             let width = if line_idx == previous_line {
                 previous.current.total_width
@@ -341,7 +370,13 @@ fn line_origin_from_previous(previous: &ScrollCacheState, target_line: usize, li
             let line = if let Some(line) = lines.get(line_idx) {
                 line
             } else {
-                return line_origin_from_start(target_line, lines, font, font_pixel_size, gap_width);
+                return line_origin_from_start(
+                    target_line,
+                    lines,
+                    font,
+                    font_pixel_size,
+                    gap_width,
+                );
             };
             let width = line_total_width(line, font, font_pixel_size);
             origin -= width + gap_width;
@@ -351,7 +386,13 @@ fn line_origin_from_previous(previous: &ScrollCacheState, target_line: usize, li
     origin
 }
 
-fn cursor_position_from_status(cache: &ScrollLineCache, status_line: i32, status_word: i32, status_segment: i32, status_char: i32) -> (f32, ScrollCursorState) {
+fn cursor_position_from_status(
+    cache: &ScrollLineCache,
+    status_line: i32,
+    status_word: i32,
+    status_segment: i32,
+    status_char: i32,
+) -> (f32, ScrollCursorState) {
     let status_word_usize = usize::try_from(status_word).ok();
     let status_segment_usize = usize::try_from(status_segment).ok();
     let status_char_usize = usize::try_from(status_char).ok().unwrap_or(0);
@@ -371,11 +412,20 @@ fn cursor_position_from_status(cache: &ScrollLineCache, status_line: i32, status
             } else {
                 segment_start + status_segment_usize.unwrap_or(0).min(segment_count - 1)
             };
-            let base = cache.segment_prefix_width.get(segment_idx).copied().unwrap_or(0.0);
+            let base = cache
+                .segment_prefix_width
+                .get(segment_idx)
+                .copied()
+                .unwrap_or(0.0);
             let mut typed_width = 0.0f32;
             if let Some(seg_cache) = cache.segments.get(segment_idx) {
-                let typed_len = status_char_usize.min(seg_cache.reading_width_prefix.len().saturating_sub(1));
-                typed_width = seg_cache.reading_width_prefix.get(typed_len).copied().unwrap_or(0.0);
+                let typed_len =
+                    status_char_usize.min(seg_cache.reading_width_prefix.len().saturating_sub(1));
+                typed_width = seg_cache
+                    .reading_width_prefix
+                    .get(typed_len)
+                    .copied()
+                    .unwrap_or(0.0);
             }
             cursor_in_line = (base + typed_width).min(cache.total_width);
         } else {
@@ -420,7 +470,7 @@ pub struct App {
     #[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
     pub available_fonts: Vec<FontEntry>,
     pub fps: f64,
-    pub source_scroll: usize, // ProblemSource でのスクロール行数
+    pub source_scroll: usize,     // ProblemSource でのスクロール行数
     pub how_to_use_scroll: usize, // HowToUse でのスクロール行数
     pub scroll_cache: Option<ScrollCache>,
     #[cfg(target_arch = "wasm32")]
@@ -447,22 +497,43 @@ pub fn discover_available_fonts() -> Vec<FontEntry> {
     // OS 別のシステムフォントディレクトリ
     #[cfg(target_os = "windows")]
     {
-        search_dirs.push((std::path::PathBuf::from(r"C:\Windows\Fonts"), FontSource::System));
+        search_dirs.push((
+            std::path::PathBuf::from(r"C:\Windows\Fonts"),
+            FontSource::System,
+        ));
     }
     #[cfg(target_os = "macos")]
     {
-        search_dirs.push((std::path::PathBuf::from("/System/Library/Fonts"), FontSource::System));
-        search_dirs.push((std::path::PathBuf::from("/Library/Fonts"), FontSource::System));
+        search_dirs.push((
+            std::path::PathBuf::from("/System/Library/Fonts"),
+            FontSource::System,
+        ));
+        search_dirs.push((
+            std::path::PathBuf::from("/Library/Fonts"),
+            FontSource::System,
+        ));
         if let Ok(home) = std::env::var("HOME") {
-            search_dirs.push((std::path::PathBuf::from(home).join("Library/Fonts"), FontSource::System));
+            search_dirs.push((
+                std::path::PathBuf::from(home).join("Library/Fonts"),
+                FontSource::System,
+            ));
         }
     }
     #[cfg(target_os = "linux")]
     {
-        search_dirs.push((std::path::PathBuf::from("/usr/share/fonts"), FontSource::System));
-        search_dirs.push((std::path::PathBuf::from("/usr/local/share/fonts"), FontSource::System));
+        search_dirs.push((
+            std::path::PathBuf::from("/usr/share/fonts"),
+            FontSource::System,
+        ));
+        search_dirs.push((
+            std::path::PathBuf::from("/usr/local/share/fonts"),
+            FontSource::System,
+        ));
         if let Ok(home) = std::env::var("HOME") {
-            search_dirs.push((std::path::PathBuf::from(home).join(".local/share/fonts"), FontSource::System));
+            search_dirs.push((
+                std::path::PathBuf::from(home).join(".local/share/fonts"),
+                FontSource::System,
+            ));
         }
     }
 
@@ -537,9 +608,13 @@ impl App {
     pub fn problem_count(&self) -> usize {
         let base = PROBLEM_FILES_NAMES.len() + self.custom_problems.len();
         #[cfg(any(feature = "gui", target_arch = "wasm32"))]
-        { base + 1 }
+        {
+            base + 1
+        }
         #[cfg(not(any(feature = "gui", target_arch = "wasm32")))]
-        { base }
+        {
+            base
+        }
     }
 
     /// インデックスに対応する表示名を返す
@@ -557,14 +632,23 @@ impl App {
     /// そのインデックスが「Open File」エントリかどうか
     pub fn is_open_file_entry(&self, idx: usize) -> bool {
         #[cfg(any(feature = "gui", target_arch = "wasm32"))]
-        { idx == PROBLEM_FILES_NAMES.len() + self.custom_problems.len() }
+        {
+            idx == PROBLEM_FILES_NAMES.len() + self.custom_problems.len()
+        }
         #[cfg(not(any(feature = "gui", target_arch = "wasm32")))]
-        { let _ = idx; false }
+        {
+            let _ = idx;
+            false
+        }
     }
 
     /// カスタム問題を追加し、そのインデックスを選択状態にする
     pub fn add_custom_problem(&mut self, name: String, content: String, timestamp_ms: u64) {
-        self.custom_problems.push(CustomProblem { name, content, timestamp_ms });
+        self.custom_problems.push(CustomProblem {
+            name,
+            content,
+            timestamp_ms,
+        });
         // 追加された問題のインデックスを選択
         self.selected_problem_item = PROBLEM_FILES_NAMES.len() + self.custom_problems.len() - 1;
         if self.state != AppState::ProblemSelection {
@@ -590,9 +674,13 @@ impl App {
             "B"
         } else if idx < PROBLEM_FILES_NAMES.len() + self.custom_problems.len() {
             #[cfg(target_arch = "wasm32")]
-            { "W" }
+            {
+                "W"
+            }
             #[cfg(not(target_arch = "wasm32"))]
-            { "F" }
+            {
+                "F"
+            }
         } else {
             "+"
         }
@@ -622,7 +710,9 @@ impl App {
                 self.selected_problem_item = count - 1;
             }
             #[cfg(target_arch = "wasm32")]
-            { self.should_save_custom_problems = true; }
+            {
+                self.should_save_custom_problems = true;
+            }
         }
     }
 
@@ -634,7 +724,9 @@ impl App {
             self.custom_problems.swap(custom_idx, custom_idx - 1);
             self.selected_problem_item -= 1;
             #[cfg(target_arch = "wasm32")]
-            { self.should_save_custom_problems = true; }
+            {
+                self.should_save_custom_problems = true;
+            }
         }
     }
 
@@ -646,7 +738,9 @@ impl App {
             self.custom_problems.swap(custom_idx, custom_idx + 1);
             self.selected_problem_item += 1;
             #[cfg(target_arch = "wasm32")]
-            { self.should_save_custom_problems = true; }
+            {
+                self.should_save_custom_problems = true;
+            }
         }
     }
 
@@ -691,7 +785,9 @@ impl App {
         let problem_text: &str = if problem_index < builtin_count {
             get_problem_content(problem_index)
         } else {
-            problem_text_owned = self.custom_problems[problem_index - builtin_count].content.clone();
+            problem_text_owned = self.custom_problems[problem_index - builtin_count]
+                .content
+                .clone();
             &problem_text_owned
         };
         let content = parser::parse_problem(problem_text);
@@ -736,7 +832,11 @@ impl App {
         // FPSを計算して保存
         if delta_time > 0.0 {
             let new_fps = 1000.0 / delta_time;
-            self.fps = if self.fps == 0.0 { new_fps } else { self.fps * 0.9 + new_fps * 0.1 };
+            self.fps = if self.fps == 0.0 {
+                new_fps
+            } else {
+                self.fps * 0.9 + new_fps * 0.1
+            };
         }
 
         if self.state != AppState::Typing {
@@ -746,10 +846,11 @@ impl App {
         let clamped_delta_time = delta_time.min(100.0);
 
         if let Some(model) = self.typing_model.as_mut() {
-        let font = self.fonts.get_for_script(self.settings_script);
-        let base_font_size_enum = crate::ui::FontSize::WindowHeight(ui::BASE_FONT_SIZE_RATIO);
-        let base_pixel_font_size = crate::renderer::calculate_pixel_font_size(base_font_size_enum, width, height);
-        let gap_width = width as f32;
+            let font = self.fonts.get_for_script(self.settings_script);
+            let base_font_size_enum = crate::ui::FontSize::WindowHeight(ui::BASE_FONT_SIZE_RATIO);
+            let base_pixel_font_size =
+                crate::renderer::calculate_pixel_font_size(base_font_size_enum, width, height);
+            let gap_width = width as f32;
 
             let line_idx = match usize::try_from(model.status.line) {
                 Ok(line_idx) => line_idx,
@@ -758,30 +859,43 @@ impl App {
             if let Some(current_line_content) = model.content.lines.get(line_idx) {
                 let status = &model.status;
 
-                let rebuild_cache = self.scroll_cache.as_ref().map_or(true, |cache| {
-                    match cache {
+                let rebuild_cache = self
+                    .scroll_cache
+                    .as_ref()
+                    .map_or(true, |cache| match cache {
                         ScrollCache::Empty => true,
                         ScrollCache::Ready(ready) => {
                             ready.width != width
                                 || ready.height != height
-                                || (ready.font_pixel_size - base_pixel_font_size).abs() > f32::EPSILON
+                                || (ready.font_pixel_size - base_pixel_font_size).abs()
+                                    > f32::EPSILON
                                 || ready.current.line != status.line
                         }
-                    }
-                });
+                    });
 
                 let current_cache = if rebuild_cache {
-                    build_scroll_line_cache(current_line_content, font, base_pixel_font_size, status.line)
+                    build_scroll_line_cache(
+                        current_line_content,
+                        font,
+                        base_pixel_font_size,
+                        status.line,
+                    )
                 } else {
                     match &self.scroll_cache {
                         Some(ScrollCache::Ready(ready)) => ready.current.clone(),
-                        _ => build_scroll_line_cache(current_line_content, font, base_pixel_font_size, status.line),
+                        _ => build_scroll_line_cache(
+                            current_line_content,
+                            font,
+                            base_pixel_font_size,
+                            status.line,
+                        ),
                     }
                 };
 
                 let line_origin = match &self.scroll_cache {
                     Some(ScrollCache::Ready(previous_cache))
-                        if (previous_cache.font_pixel_size - base_pixel_font_size).abs() <= f32::EPSILON =>
+                        if (previous_cache.font_pixel_size - base_pixel_font_size).abs()
+                            <= f32::EPSILON =>
                     {
                         line_origin_from_previous(
                             previous_cache,
@@ -812,10 +926,15 @@ impl App {
 
                 let mut target_scroll = f64::from(cursor_world) - (f64::from(gap_width) * 0.5);
                 if let Some(ScrollCache::Ready(previous_cache)) = &self.scroll_cache {
-                    let previous_target = previous_cache.cursor_world as f64 - (previous_cache.gap_width as f64 * 0.5);
-                    if cursor_world >= previous_cache.cursor_world && target_scroll < previous_target {
+                    let previous_target = previous_cache.cursor_world as f64
+                        - (previous_cache.gap_width as f64 * 0.5);
+                    if cursor_world >= previous_cache.cursor_world
+                        && target_scroll < previous_target
+                    {
                         target_scroll = previous_target;
-                    } else if cursor_world < previous_cache.cursor_world && target_scroll > previous_target {
+                    } else if cursor_world < previous_cache.cursor_world
+                        && target_scroll > previous_target
+                    {
                         target_scroll = previous_target;
                     }
                 }
@@ -859,13 +978,26 @@ impl App {
         // --- シーンごとのイベント処理 ---
         if let AppEvent::ChangeScene = event {
             match self.state {
-                AppState::MainMenu => self.instructions_text = "Up/Down: Navigate | Enter: Select".to_string(),
-                AppState::ProblemSelection => self.instructions_text = self.problem_selection_instructions(),
-                AppState::ProblemSource => self.instructions_text = "Up/Down: Scroll | Enter/ESC: Back".to_string(),
-                AppState::Typing => self.instructions_text = "ESC: Back to Menu | Tab: Cycle Mode".to_string(),
+                AppState::MainMenu => {
+                    self.instructions_text = "Up/Down: Navigate | Enter: Select".to_string()
+                }
+                AppState::ProblemSelection => {
+                    self.instructions_text = self.problem_selection_instructions()
+                }
+                AppState::ProblemSource => {
+                    self.instructions_text = "Up/Down: Scroll | Enter/ESC: Back".to_string()
+                }
+                AppState::Typing => {
+                    self.instructions_text = "ESC: Back to Menu | Tab: Cycle Mode".to_string()
+                }
                 AppState::Result => self.instructions_text = "Enter/ESC: Back to Menu".to_string(),
-                AppState::Settings => self.instructions_text = "Up/Down: Select | Enter: Apply | ESC: Back".to_string(),
-                AppState::HowToUse => self.instructions_text = "Up/Down: Scroll | Enter/ESC: Back".to_string(),
+                AppState::Settings => {
+                    self.instructions_text =
+                        "Up/Down: Select | Enter: Apply | ESC: Back".to_string()
+                }
+                AppState::HowToUse => {
+                    self.instructions_text = "Up/Down: Scroll | Enter/ESC: Back".to_string()
+                }
             }
         }
 
@@ -873,8 +1005,16 @@ impl App {
             AppState::MainMenu => {
                 self.status_text = "Welcome to Neknaj Typing Multi-Platform".to_string();
                 match event {
-                    AppEvent::Up => if self.selected_main_menu_item > 0 { self.selected_main_menu_item -= 1; },
-                    AppEvent::Down => if self.selected_main_menu_item < MENU_ITEM_COUNT - 1 { self.selected_main_menu_item += 1; },
+                    AppEvent::Up => {
+                        if self.selected_main_menu_item > 0 {
+                            self.selected_main_menu_item -= 1;
+                        }
+                    }
+                    AppEvent::Down => {
+                        if self.selected_main_menu_item < MENU_ITEM_COUNT - 1 {
+                            self.selected_main_menu_item += 1;
+                        }
+                    }
                     AppEvent::Enter => match self.selected_main_menu_item {
                         0 => {
                             self.state = AppState::ProblemSelection;
@@ -891,7 +1031,9 @@ impl App {
                         }
                         3 => {
                             #[cfg(not(target_arch = "wasm32"))]
-                            { self.should_quit = true; }
+                            {
+                                self.should_quit = true;
+                            }
                         }
                         _ => {}
                     },
@@ -953,7 +1095,8 @@ impl App {
                             }
                             AppEvent::Enter => {
                                 if self.selected_font_item < font_count {
-                                    let path = self.available_fonts[self.selected_font_item].path.clone();
+                                    let path =
+                                        self.available_fonts[self.selected_font_item].path.clone();
                                     let script = self.settings_script;
                                     self.load_font_for_script(script, &path);
                                 }
@@ -980,12 +1123,18 @@ impl App {
             AppState::ProblemSelection => {
                 self.status_text = "Select a problem to type.".to_string();
                 match event {
-                    AppEvent::Up => if self.selected_problem_item > 0 { self.selected_problem_item -= 1; },
+                    AppEvent::Up => {
+                        if self.selected_problem_item > 0 {
+                            self.selected_problem_item -= 1;
+                        }
+                    }
                     AppEvent::Down => {
-                        if self.problem_count() > 0 && self.selected_problem_item < self.problem_count() - 1 {
+                        if self.problem_count() > 0
+                            && self.selected_problem_item < self.problem_count() - 1
+                        {
                             self.selected_problem_item += 1;
                         }
-                    },
+                    }
                     AppEvent::Enter => {
                         let idx = self.selected_problem_item;
                         if self.is_open_file_entry(idx) {
@@ -993,7 +1142,7 @@ impl App {
                         } else {
                             self.start_typing_session(idx);
                         }
-                    },
+                    }
                     AppEvent::Escape => {
                         self.state = AppState::MainMenu;
                         self.on_event(AppEvent::ChangeScene);
@@ -1032,31 +1181,34 @@ impl App {
                     self.instructions_text = self.problem_selection_instructions();
                 }
             }
-            AppState::ProblemSource => {
-                match event {
-                    AppEvent::Up => {
-                        if self.source_scroll > 0 { self.source_scroll -= 1; }
+            AppState::ProblemSource => match event {
+                AppEvent::Up => {
+                    if self.source_scroll > 0 {
+                        self.source_scroll -= 1;
                     }
-                    AppEvent::Down => {
-                        let total = self.get_problem_source(self.selected_problem_item)
-                            .map(|s| s.lines().count())
-                            .unwrap_or(0);
-                        if self.source_scroll + 1 < total {
-                            self.source_scroll += 1;
-                        }
-                    }
-                    AppEvent::Enter | AppEvent::Escape => {
-                        self.state = AppState::ProblemSelection;
-                        self.on_event(AppEvent::ChangeScene);
-                    }
-                    _ => {}
                 }
-            }
+                AppEvent::Down => {
+                    let total = self
+                        .get_problem_source(self.selected_problem_item)
+                        .map(|s| s.lines().count())
+                        .unwrap_or(0);
+                    if self.source_scroll + 1 < total {
+                        self.source_scroll += 1;
+                    }
+                }
+                AppEvent::Enter | AppEvent::Escape => {
+                    self.state = AppState::ProblemSelection;
+                    self.on_event(AppEvent::ChangeScene);
+                }
+                _ => {}
+            },
             AppState::HowToUse => {
                 self.status_text = "How to Use".to_string();
                 match event {
                     AppEvent::Up => {
-                        if self.how_to_use_scroll > 0 { self.how_to_use_scroll -= 1; }
+                        if self.how_to_use_scroll > 0 {
+                            self.how_to_use_scroll -= 1;
+                        }
                     }
                     AppEvent::Down => {
                         let total = crate::ui::HOW_TO_USE_CONTENT.len();
@@ -1083,12 +1235,14 @@ impl App {
                                 Model::Typing(new_model) => {
                                     #[cfg(target_arch = "wasm32")]
                                     {
-                                        if new_model.status.line != old_line || new_model.status.word != old_word {
+                                        if new_model.status.line != old_line
+                                            || new_model.status.word != old_word
+                                        {
                                             self.should_reset_ime = true;
                                         }
                                     }
                                     self.typing_model = Some(new_model)
-                                },
+                                }
                                 Model::Result(result_model) => {
                                     self.result_model = Some(result_model);
                                     self.state = AppState::Result;
@@ -1104,7 +1258,9 @@ impl App {
                                 let word = model.status.word as usize;
                                 let seg = model.status.segment as usize;
                                 let char_i = model.status.char_ as usize;
-                                if let Some(c) = model.typing_correctness.lines
+                                if let Some(c) = model
+                                    .typing_correctness
+                                    .lines
                                     .get_mut(line)
                                     .and_then(|l| l.words.get_mut(word))
                                     .and_then(|w| w.segments.get_mut(seg))

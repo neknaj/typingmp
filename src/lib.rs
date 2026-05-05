@@ -17,13 +17,13 @@ extern crate alloc;
 
 // アプリケーションの共通モジュールを宣言
 pub mod app;
-pub mod renderer;
-pub mod ui;
-pub mod parser;
-pub mod model;
 pub mod layout_data;
-pub mod typing;
+pub mod model;
+pub mod parser;
+pub mod renderer;
 pub mod timestamp;
+pub mod typing;
+pub mod ui;
 
 // "gui" featureが有効な時だけコンパイルされるGUIバックエンドモジュール
 #[cfg(feature = "gui")]

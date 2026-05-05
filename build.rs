@@ -24,13 +24,18 @@ fn main() {
             if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("ntq") {
                 if let Some(file_stem) = path.file_stem().and_then(|s| s.to_str()) {
                     // プロジェクトルートからの相対パスを保存
-                    let relative_path = path.strip_prefix(&manifest_dir).unwrap().to_str().unwrap().replace('\\', "/");
+                    let relative_path = path
+                        .strip_prefix(&manifest_dir)
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .replace('\\', "/");
                     problem_files.push((file_stem.to_string(), relative_path.to_string()));
                 }
             }
         }
     }
-    
+
     // ファイル名でソート
     problem_files.sort_by(|a, b| a.0.cmp(&b.0));
 
@@ -42,11 +47,20 @@ fn main() {
     writeln!(f, "];\n").unwrap();
 
     // 問題ファイルの内容を動的に取得するための関数を生成
-    writeln!(f, "pub fn get_problem_content(index: usize) -> &'static str {{").unwrap();
+    writeln!(
+        f,
+        "pub fn get_problem_content(index: usize) -> &'static str {{"
+    )
+    .unwrap();
     writeln!(f, "    match index {{").unwrap();
     for (i, (_, path)) in problem_files.iter().enumerate() {
         // include_str! にはプロジェクトルートからの相対パスを渡す
-        writeln!(f, "        {} => include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/{}\")),", i, path).unwrap();
+        writeln!(
+            f,
+            "        {} => include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/{}\")),",
+            i, path
+        )
+        .unwrap();
     }
     writeln!(f, "        _ => \"#title Error\\nFile not found.\",").unwrap();
     writeln!(f, "    }}").unwrap();

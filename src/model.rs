@@ -43,7 +43,10 @@ pub enum Segment {
     Annotated { base: String, reading: String },
     /// アノテーション付きテキスト（{inner/annotation} 記法）
     /// inner が入力対象、annotation は表示専用
-    Anno { inner: Vec<Segment>, annotation: String },
+    Anno {
+        inner: Vec<Segment>,
+        annotation: String,
+    },
 }
 
 impl fmt::Display for Line {

@@ -33,8 +33,9 @@ const FRAME_DURATION: Duration = Duration::from_millis(16);
 pub fn run() -> Result<(), Box<dyn Error>> {
     let japanese_font = FontVec::try_from_vec(load_font_file("YujiSyuku-Regular.ttf")?)
         .map_err(|_| "Failed to parse Yuji Syuku font")?;
-    let traditional_chinese_font = FontVec::try_from_vec(load_font_file("NotoSerifJP-Regular.ttf")?)
-        .map_err(|_| "Failed to parse Noto Serif JP font")?;
+    let traditional_chinese_font =
+        FontVec::try_from_vec(load_font_file("NotoSerifJP-Regular.ttf")?)
+            .map_err(|_| "Failed to parse Noto Serif JP font")?;
     let simplified_chinese_font = FontVec::try_from_vec(load_font_file("NotoSerifJP-Regular.ttf")?)
         .map_err(|_| "Failed to parse Noto Serif JP font")?;
 
@@ -69,75 +70,74 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     return event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::WaitUntil(next_frame);
         match event {
-            Event::WindowEvent { event, .. } => {
-                match event {
-                    WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+            Event::WindowEvent { event, .. } => match event {
+                WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
 
-                    WindowEvent::Resized(new_size) => {
-                        if new_size.width > 0 && new_size.height > 0 {
-                            width = new_size.width as usize;
-                            height = new_size.height as usize;
-                            pixel_buffer.resize(width * height, 0);
-                            if let Err(err) = pixels.resize_surface(new_size.width, new_size.height) {
-                                eprintln!("Failed to resize window surface: {err}");
-                                *control_flow = ControlFlow::Exit;
-                            }
-                            if let Err(err) = pixels.resize_buffer(new_size.width, new_size.height) {
-                                eprintln!("Failed to resize pixel buffer: {err}");
-                                *control_flow = ControlFlow::Exit;
-                            }
+                WindowEvent::Resized(new_size) => {
+                    if new_size.width > 0 && new_size.height > 0 {
+                        width = new_size.width as usize;
+                        height = new_size.height as usize;
+                        pixel_buffer.resize(width * height, 0);
+                        if let Err(err) = pixels.resize_surface(new_size.width, new_size.height) {
+                            eprintln!("Failed to resize window surface: {err}");
+                            *control_flow = ControlFlow::Exit;
+                        }
+                        if let Err(err) = pixels.resize_buffer(new_size.width, new_size.height) {
+                            eprintln!("Failed to resize pixel buffer: {err}");
+                            *control_flow = ControlFlow::Exit;
                         }
                     }
-
-                    WindowEvent::MouseInput {
-                        state: ElementState::Pressed,
-                        button: MouseButton::Left,
-                        ..
-                    } => {
-                        app.on_event(AppEvent::Enter);
-                    }
-
-                    WindowEvent::MouseWheel { delta, .. } => {
-                        let scroll_y = match delta {
-                            MouseScrollDelta::LineDelta(_, y) => y,
-                            MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
-                        };
-                        if scroll_y > 0.0 {
-                            app.on_event(AppEvent::Up);
-                        } else if scroll_y < 0.0 {
-                            app.on_event(AppEvent::Down);
-                        }
-                    }
-
-                    WindowEvent::KeyboardInput {
-                        input:
-                            KeyboardInput {
-                                state: ElementState::Pressed,
-                                virtual_keycode: Some(keycode),
-                                ..
-                            },
-                        ..
-                    } => {
-                        match keycode {
-                            VirtualKeyCode::Up => app.on_event(AppEvent::Up),
-                            VirtualKeyCode::Down => app.on_event(AppEvent::Down),
-                            VirtualKeyCode::Back => app.on_event(AppEvent::Backspace),
-                            VirtualKeyCode::Return => app.on_event(AppEvent::Enter),
-                            VirtualKeyCode::Escape => app.on_event(AppEvent::Escape),
-                            VirtualKeyCode::Tab => app.on_event(AppEvent::CycleTuiMode),
-                            _ => {}
-                        }
-                    }
-
-                    WindowEvent::ReceivedCharacter(c) => {
-                        if !c.is_control() {
-                            app.on_event(AppEvent::Char { c, timestamp: crate::timestamp::now() });
-                        }
-                    }
-
-                    _ => {}
                 }
-            }
+
+                WindowEvent::MouseInput {
+                    state: ElementState::Pressed,
+                    button: MouseButton::Left,
+                    ..
+                } => {
+                    app.on_event(AppEvent::Enter);
+                }
+
+                WindowEvent::MouseWheel { delta, .. } => {
+                    let scroll_y = match delta {
+                        MouseScrollDelta::LineDelta(_, y) => y,
+                        MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
+                    };
+                    if scroll_y > 0.0 {
+                        app.on_event(AppEvent::Up);
+                    } else if scroll_y < 0.0 {
+                        app.on_event(AppEvent::Down);
+                    }
+                }
+
+                WindowEvent::KeyboardInput {
+                    input:
+                        KeyboardInput {
+                            state: ElementState::Pressed,
+                            virtual_keycode: Some(keycode),
+                            ..
+                        },
+                    ..
+                } => match keycode {
+                    VirtualKeyCode::Up => app.on_event(AppEvent::Up),
+                    VirtualKeyCode::Down => app.on_event(AppEvent::Down),
+                    VirtualKeyCode::Back => app.on_event(AppEvent::Backspace),
+                    VirtualKeyCode::Return => app.on_event(AppEvent::Enter),
+                    VirtualKeyCode::Escape => app.on_event(AppEvent::Escape),
+                    VirtualKeyCode::Tab => app.on_event(AppEvent::CycleTuiMode),
+                    _ => {}
+                },
+
+                WindowEvent::ReceivedCharacter(c) => {
+                    if !c.is_control() {
+                        app.on_event(AppEvent::Char {
+                            c,
+                            timestamp: crate::timestamp::now(),
+                        });
+                    }
+                }
+
+                _ => {}
+            },
 
             Event::MainEventsCleared => {
                 let now = Instant::now();
@@ -180,7 +180,8 @@ pub fn run() -> Result<(), Box<dyn Error>> {
 
                 app.update(width, height, delta_time.min(100.0));
 
-                if let Err(err) = present_frame(width, height, &app, &mut pixel_buffer, &mut pixels) {
+                if let Err(err) = present_frame(width, height, &app, &mut pixel_buffer, &mut pixels)
+                {
                     eprintln!("Failed to draw frame: {err}");
                     *control_flow = ControlFlow::Exit;
                 }
@@ -262,7 +263,9 @@ fn render_frame(
                 let ruby_pixel_font_size = pixel_font_size * 0.4;
                 let total_width = segments
                     .iter()
-                    .map(|seg| gui_renderer::measure_text(current_font, &seg.base_text, pixel_font_size).0)
+                    .map(|seg| {
+                        gui_renderer::measure_text(current_font, &seg.base_text, pixel_font_size).0
+                    })
                     .sum::<u32>();
                 let total_height = gui_renderer::measure_text(current_font, " ", pixel_font_size).1;
 
@@ -289,8 +292,11 @@ fn render_frame(
                     );
 
                     if let Some(ruby) = &seg.ruby_text {
-                        let (base_w, ..) =
-                            gui_renderer::measure_text(current_font, &seg.base_text, pixel_font_size);
+                        let (base_w, ..) = gui_renderer::measure_text(
+                            current_font,
+                            &seg.base_text,
+                            pixel_font_size,
+                        );
                         let (ruby_w, ..) =
                             gui_renderer::measure_text(current_font, ruby, ruby_pixel_font_size);
                         let ruby_x = pen_x as f32 + (base_w as f32 - ruby_w as f32) / 2.0;
@@ -363,7 +369,12 @@ fn render_frame(
                 let total_height = gui_renderer::measure_text(current_font, " ", pixel_font_size).1;
 
                 let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
-                let (mut pen_x, y) = ui::calculate_aligned_position(anchor_pos, target_line_total_width, total_height, align);
+                let (mut pen_x, y) = ui::calculate_aligned_position(
+                    anchor_pos,
+                    target_line_total_width,
+                    total_height,
+                    align,
+                );
                 let visible_left = -100;
                 let visible_right = width as i32 + 100;
 
@@ -376,7 +387,10 @@ fn render_frame(
                             width: seg_width,
                         } => {
                             let seg_width_px = seg_width as i32;
-                            if seg_width_px > 0 && pen_x <= visible_right && pen_x + seg_width_px >= visible_left {
+                            if seg_width_px > 0
+                                && pen_x <= visible_right
+                                && pen_x + seg_width_px >= visible_left
+                            {
                                 let color = if is_correct {
                                     ui::CORRECT_COLOR
                                 } else {
@@ -396,10 +410,14 @@ fn render_frame(
 
                                 if let Some(ruby) = ruby_text {
                                     let base_w = seg_width;
-                                    let (ruby_w, ..) =
-                                        gui_renderer::measure_text(current_font, &ruby, ruby_pixel_font_size);
+                                    let (ruby_w, ..) = gui_renderer::measure_text(
+                                        current_font,
+                                        &ruby,
+                                        ruby_pixel_font_size,
+                                    );
                                     if ruby_w > 0 {
-                                        let ruby_x = pen_x as f32 + (base_w as f32 - ruby_w as f32) / 2.0;
+                                        let ruby_x =
+                                            pen_x as f32 + (base_w as f32 - ruby_w as f32) / 2.0;
                                         let ruby_y = y as f32 - ruby_pixel_font_size * 0.5;
                                         gui_renderer::draw_text(
                                             pixel_buffer,
@@ -420,7 +438,10 @@ fn render_frame(
                         LowerTypingSegment::Active { elements } => {
                             for el in elements {
                                 let (text, color) = match el {
-                                    ActiveLowerElement::Typed { character, is_correct } => (
+                                    ActiveLowerElement::Typed {
+                                        character,
+                                        is_correct,
+                                    } => (
                                         character.to_string(),
                                         if is_correct {
                                             ui::CORRECT_COLOR
@@ -428,7 +449,9 @@ fn render_frame(
                                             ui::INCORRECT_COLOR
                                         },
                                     ),
-                                    ActiveLowerElement::Cursor => ("|".to_string(), ui::CURSOR_COLOR),
+                                    ActiveLowerElement::Cursor => {
+                                        ("|".to_string(), ui::CURSOR_COLOR)
+                                    }
                                     ActiveLowerElement::UnconfirmedInput(s) => {
                                         (s.clone(), ui::UNCONFIRMED_COLOR)
                                     }
@@ -436,8 +459,16 @@ fn render_frame(
                                         (c.to_string(), ui::WRONG_KEY_COLOR)
                                     }
                                 };
-                                let text_width = gui_renderer::measure_text(current_font, &text, pixel_font_size).0 as i32;
-                                if text_width > 0 && pen_x <= visible_right && pen_x + text_width >= visible_left {
+                                let text_width = gui_renderer::measure_text(
+                                    current_font,
+                                    &text,
+                                    pixel_font_size,
+                                )
+                                .0 as i32;
+                                if text_width > 0
+                                    && pen_x <= visible_right
+                                    && pen_x + text_width >= visible_left
+                                {
                                     gui_renderer::draw_text(
                                         pixel_buffer,
                                         width,
@@ -484,7 +515,9 @@ fn present_frame(
         frame[base + 2] = (color & 0xff) as u8;
         frame[base + 3] = ((color >> 24) & 0xff) as u8;
     }
-    pixels.render().map_err(|err| -> Box<dyn Error> { format!("{err}").into() })?;
+    pixels
+        .render()
+        .map_err(|err| -> Box<dyn Error> { format!("{err}").into() })?;
     Ok(())
 }
 

@@ -1,4 +1,4 @@
-﻿// src/ui.rs
+// src/ui.rs
 
 // uefi feature驍ｵ・ｺ隴ｴ・ｧ隲､蜑ｰ諤上・・ｹ驍ｵ・ｺ繝ｻ・ｪ髯懶ｽ｣繝ｻ・ｴ髯ｷ・ｷ陋ｹ・ｻ・つ遶擾ｽｵ繝ｻ・ｨ陷ｻ雜｣・ｽ・ｺ隰費ｽｶ郢晢ｽｻalloc驛｢・ｧ繝ｻ・ｯ驛｢譎｢・ｽ・ｬ驛｢譎｢・ｽ・ｼ驛｢譎冗樟繝ｻ蝣､・ｹ・ｧ繝ｻ・､驛｢譎｢・ｽ・ｳ驛｢譎・ｺ｢郢晢ｽｻ驛｢譏ｴ繝ｻ
 #[cfg(feature = "uefi")]
@@ -16,12 +16,17 @@ use std::vec::Vec;
 
 // uefi 驍ｵ・ｺ繝ｻ・ｨ std 驍ｵ・ｺ繝ｻ・ｧ髣厄ｽｴ繝ｻ・ｿ鬨ｾ蛹・ｽｽ・ｨ驍ｵ・ｺ陷ｷ・ｶ繝ｻ繝ｻString 驍ｵ・ｺ繝ｻ・ｨ format! 驛｢・ｧ髮区ｧｭ繝ｻ驛｢・ｧ鬯・､ｧ・ｴ蟶ｷ・ｸ・ｺ陋ｹ・ｻ繝ｻ繝ｻ
 #[cfg(feature = "uefi")]
-use alloc::{format, string::{String, ToString}};
+use alloc::{
+    format,
+    string::{String, ToString},
+};
 #[cfg(not(feature = "uefi"))]
 use std::string::{String, ToString};
 
-use crate::app::{App, AppState, ScrollCache, Script};
-use crate::model::{Segment, TypingCorrectnessChar, TypingCorrectnessSegment, TypingCorrectnessWord};
+use crate::app::{App, AppState, Script, ScrollCache};
+use crate::model::{
+    Segment, TypingCorrectnessChar, TypingCorrectnessSegment, TypingCorrectnessWord,
+};
 use crate::renderer::{calculate_pixel_font_size, gui_renderer};
 use crate::typing; // For calculate_total_metrics
 use ab_glyph::FontVec;
@@ -175,7 +180,7 @@ pub enum Renderable {
         shift: Shift,
         width_ratio: f32, // 鬨ｾ蛹・ｽｽ・ｻ鬯ｮ・ｱ繝ｻ・｢髯晢ｽｷ郢晢ｽｻ遶頑･｢豎槭・・ｾ驍ｵ・ｺ陷ｷ・ｶ繝ｻ邇厄ｽｱ閧ｲ蝮ｩ驍擾ｽｫ
         height_ratio: f32, // 鬨ｾ蛹・ｽｽ・ｻ鬯ｮ・ｱ繝ｻ・｢鬯ｯ・ｮ陋滂ｽ･繝ｻ繝ｻ・ｸ・ｺ繝ｻ・ｫ髯昴・・ｽ・ｾ驍ｵ・ｺ陷ｷ・ｶ繝ｻ邇厄ｽｱ閧ｲ蝮ｩ驍擾ｽｫ
-        progress: f32, // 0.0 to 1.0
+        progress: f32,     // 0.0 to 1.0
         bg_color: u32,
         fg_color: u32,
     },
@@ -236,15 +241,31 @@ pub const UNCONFIRMED_COLOR: u32 = 0xFF_CCCCCC;
 pub fn build_ui(app: &App, font: &FontVec, width: usize, height: usize) -> Vec<Renderable> {
     let mut render_list = Vec::new();
 
-    let menu_gradient = Gradient { start_color: 0xFF_000010, end_color: 0xFF_000000 };
-    let typing_gradient = Gradient { start_color: 0xFF_100010, end_color: 0xFF_000000 };
-    let result_gradient = Gradient { start_color: 0xFF_101000, end_color: 0xFF_000000 };
-    let settings_gradient = Gradient { start_color: 0xFF_001010, end_color: 0xFF_000000 };
+    let menu_gradient = Gradient {
+        start_color: 0xFF_000010,
+        end_color: 0xFF_000000,
+    };
+    let typing_gradient = Gradient {
+        start_color: 0xFF_100010,
+        end_color: 0xFF_000000,
+    };
+    let result_gradient = Gradient {
+        start_color: 0xFF_101000,
+        end_color: 0xFF_000000,
+    };
+    let settings_gradient = Gradient {
+        start_color: 0xFF_001010,
+        end_color: 0xFF_000000,
+    };
 
     match app.state {
         AppState::MainMenu => build_main_menu_ui(app, &mut render_list, menu_gradient),
-        AppState::Typing => build_typing_ui(app, &mut render_list, typing_gradient, font, width, height),
-        AppState::ProblemSelection => build_problem_selection_ui(app, &mut render_list, menu_gradient),
+        AppState::Typing => {
+            build_typing_ui(app, &mut render_list, typing_gradient, font, width, height)
+        }
+        AppState::ProblemSelection => {
+            build_problem_selection_ui(app, &mut render_list, menu_gradient)
+        }
         AppState::ProblemSource => build_problem_source_ui(app, &mut render_list, menu_gradient),
         AppState::Result => build_result_ui(app, &mut render_list, result_gradient),
         AppState::Settings => build_settings_ui(app, &mut render_list, settings_gradient),
@@ -256,7 +277,10 @@ pub fn build_ui(app: &App, font: &FontVec, width: usize, height: usize) -> Vec<R
             text: app.status_text.clone(),
             anchor: Anchor::BottomLeft,
             shift: Shift { x: 0.01, y: -0.02 },
-            align: Align { horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Bottom },
+            align: Align {
+                horizontal: HorizontalAlign::Left,
+                vertical: VerticalAlign::Bottom,
+            },
             font_size: FontSize::WindowHeight(0.04),
             color: 0xFF_CCCCCC,
         });
@@ -268,7 +292,10 @@ pub fn build_ui(app: &App, font: &FontVec, width: usize, height: usize) -> Vec<R
         text: fps_text,
         anchor: Anchor::TopRight,
         shift: Shift { x: -0.01, y: 0.01 },
-        align: Align { horizontal: HorizontalAlign::Right, vertical: VerticalAlign::Top },
+        align: Align {
+            horizontal: HorizontalAlign::Right,
+            vertical: VerticalAlign::Top,
+        },
         font_size: FontSize::WindowHeight(0.04),
         color: 0xFF_00FF00, // 鬩搾ｽｱ鬯俶ｪ取ｨｪ
     });
@@ -280,7 +307,10 @@ pub fn build_ui(app: &App, font: &FontVec, width: usize, height: usize) -> Vec<R
             text: "GUI".to_string(),
             anchor: Anchor::BottomRight,
             shift: Shift { x: -0.01, y: -0.06 },
-            align: Align { horizontal: HorizontalAlign::Right, vertical: VerticalAlign::Bottom },
+            align: Align {
+                horizontal: HorizontalAlign::Right,
+                vertical: VerticalAlign::Bottom,
+            },
             font_size: FontSize::WindowHeight(0.04),
             color: 0xFF_AAAAAA,
         });
@@ -293,7 +323,10 @@ pub fn build_ui(app: &App, font: &FontVec, width: usize, height: usize) -> Vec<R
             text: mode_text,
             anchor: Anchor::BottomRight,
             shift: Shift { x: -0.01, y: -0.06 },
-            align: Align { horizontal: HorizontalAlign::Right, vertical: VerticalAlign::Bottom },
+            align: Align {
+                horizontal: HorizontalAlign::Right,
+                vertical: VerticalAlign::Bottom,
+            },
             font_size: FontSize::WindowHeight(0.04),
             color: 0xFF_AAAAAA,
         });
@@ -303,7 +336,10 @@ pub fn build_ui(app: &App, font: &FontVec, width: usize, height: usize) -> Vec<R
         text: app.instructions_text.clone(),
         anchor: Anchor::BottomRight,
         shift: Shift { x: -0.01, y: -0.03 },
-        align: Align { horizontal: HorizontalAlign::Right, vertical: VerticalAlign::Bottom },
+        align: Align {
+            horizontal: HorizontalAlign::Right,
+            vertical: VerticalAlign::Bottom,
+        },
         font_size: FontSize::WindowHeight(0.04),
         color: 0xFF_CCCCCC,
     });
@@ -317,7 +353,10 @@ fn build_main_menu_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gr
         text: "Neknaj Typing MP".to_string(),
         anchor: Anchor::TopCenter,
         shift: Shift { x: 0.0, y: 0.1 },
-        align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
+        align: Align {
+            horizontal: HorizontalAlign::Center,
+            vertical: VerticalAlign::Top,
+        },
         font_size: FontSize::WindowHeight(0.20),
         color: 0xFF_FFFFFF,
     });
@@ -330,8 +369,14 @@ fn build_main_menu_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gr
         render_list.push(Renderable::Text {
             text,
             anchor: Anchor::Center,
-            shift: Shift { x: 0.0, y: 0.0 + (i as f32 * 0.1) },
-            align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
+            shift: Shift {
+                x: 0.0,
+                y: 0.0 + (i as f32 * 0.1),
+            },
+            align: Align {
+                horizontal: HorizontalAlign::Center,
+                vertical: VerticalAlign::Center,
+            },
             font_size: FontSize::WindowHeight(0.05),
             color,
         });
@@ -344,7 +389,10 @@ fn build_settings_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gra
         text: "Settings".to_string(),
         anchor: Anchor::TopCenter,
         shift: Shift { x: 0.0, y: 0.1 },
-        align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
+        align: Align {
+            horizontal: HorizontalAlign::Center,
+            vertical: VerticalAlign::Top,
+        },
         font_size: FontSize::WindowHeight(0.2),
         color: 0xFF_FFFFFF,
     });
@@ -364,18 +412,28 @@ fn build_settings_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gra
         } else {
             format!("  {}", name)
         };
-        
+
         if is_active {
             display_text.push_str(" *");
         }
 
-        let color = if is_selected { 0xFF_FFFF00 } else { 0xFF_FFFFFF };
+        let color = if is_selected {
+            0xFF_FFFF00
+        } else {
+            0xFF_FFFFFF
+        };
 
         render_list.push(Renderable::Text {
             text: display_text,
             anchor: Anchor::Center,
-            shift: Shift { x: 0.0, y: 0.0 + (i as f32 * 0.1) },
-            align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
+            shift: Shift {
+                x: 0.0,
+                y: 0.0 + (i as f32 * 0.1),
+            },
+            align: Align {
+                horizontal: HorizontalAlign::Center,
+                vertical: VerticalAlign::Center,
+            },
             font_size: FontSize::WindowHeight(0.05),
             color,
         });
@@ -388,7 +446,10 @@ fn build_problem_selection_ui(app: &App, render_list: &mut Vec<Renderable>, grad
         text: "Select Problem".to_string(),
         anchor: Anchor::TopCenter,
         shift: Shift { x: 0.0, y: 0.1 },
-        align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
+        align: Align {
+            horizontal: HorizontalAlign::Center,
+            vertical: VerticalAlign::Top,
+        },
         font_size: FontSize::WindowHeight(0.2),
         color: 0xFF_FFFFFF,
     });
@@ -408,7 +469,11 @@ fn build_problem_selection_ui(app: &App, render_list: &mut Vec<Renderable>, grad
         let item = app.problem_name_at(i);
         let is_open_file = app.is_open_file_entry(i);
         // 驛｢・ｧ繝ｻ・ｽ驛｢譎｢・ｽ・ｼ驛｢・ｧ繝ｻ・ｹ鬩墓ｩｸ・ｽ・ｮ髯具ｽｻ繝ｻ・･驛｢譎√・郢晢ｽ｣驛｢・ｧ繝ｻ・ｸ驛｢・ｧ陷代・・ｽ・ｻ陋溘・・ｽ・ｸ郢晢ｽｻ [B]=builtin, [W]=web(wasm), [F]=file(desktop), [+]=open-file
-        let badge = if is_open_file { "+".to_string() } else { app.problem_source_label(i).to_string() };
+        let badge = if is_open_file {
+            "+".to_string()
+        } else {
+            app.problem_source_label(i).to_string()
+        };
         let selected = i == app.selected_problem_item;
         let (text, color) = if selected {
             (format!(">[{}] {}", badge, item), 0xFF_FFFF00u32)
@@ -423,19 +488,46 @@ fn build_problem_selection_ui(app: &App, render_list: &mut Vec<Renderable>, grad
             text,
             anchor: Anchor::TopCenter,
             shift: Shift { x: -0.2, y: y_pos },
-            align: Align { horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top },
+            align: Align {
+                horizontal: HorizontalAlign::Left,
+                vertical: VerticalAlign::Top,
+            },
             font_size: FontSize::WindowHeight(0.045),
             color,
         });
     }
 
     if start_index > 0 {
-        render_list.push(Renderable::Text { text: "髫ｨ繝ｻ・ｽ・ｲ".to_string(), anchor: Anchor::TopCenter, shift: Shift { x: 0.0, y: list_y_start - item_height },
-            align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center }, font_size: FontSize::WindowHeight(0.04), color: 0xFF_AAAAAA });
+        render_list.push(Renderable::Text {
+            text: "髫ｨ繝ｻ・ｽ・ｲ".to_string(),
+            anchor: Anchor::TopCenter,
+            shift: Shift {
+                x: 0.0,
+                y: list_y_start - item_height,
+            },
+            align: Align {
+                horizontal: HorizontalAlign::Center,
+                vertical: VerticalAlign::Center,
+            },
+            font_size: FontSize::WindowHeight(0.04),
+            color: 0xFF_AAAAAA,
+        });
     }
     if end_index < app.problem_count() {
-        render_list.push(Renderable::Text { text: "髫ｨ繝ｻ・ｽ・ｼ".to_string(), anchor: Anchor::TopCenter, shift: Shift { x: 0.0, y: list_y_start + list_height },
-            align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center }, font_size: FontSize::WindowHeight(0.04), color: 0xFF_AAAAAA });
+        render_list.push(Renderable::Text {
+            text: "髫ｨ繝ｻ・ｽ・ｼ".to_string(),
+            anchor: Anchor::TopCenter,
+            shift: Shift {
+                x: 0.0,
+                y: list_y_start + list_height,
+            },
+            align: Align {
+                horizontal: HorizontalAlign::Center,
+                vertical: VerticalAlign::Center,
+            },
+            font_size: FontSize::WindowHeight(0.04),
+            color: 0xFF_AAAAAA,
+        });
     }
 }
 
@@ -452,7 +544,10 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
         text: format!("[{}] {}", label, name),
         anchor: Anchor::TopCenter,
         shift: Shift { x: 0.0, y: 0.05 },
-        align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
+        align: Align {
+            horizontal: HorizontalAlign::Center,
+            vertical: VerticalAlign::Top,
+        },
         font_size: FontSize::WindowHeight(0.09),
         color: 0xFF_AADDFF,
     });
@@ -464,7 +559,12 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
     if let Some(content) = app.get_problem_source(idx) {
         let total_lines = content.lines().count();
 
-        for (i, line) in content.lines().skip(app.source_scroll).take(max_lines).enumerate() {
+        for (i, line) in content
+            .lines()
+            .skip(app.source_scroll)
+            .take(max_lines)
+            .enumerate()
+        {
             let ch_count = line.chars().count();
             let display = if ch_count > 60 {
                 let truncated: String = line.chars().take(60).collect();
@@ -476,8 +576,14 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
             render_list.push(Renderable::Text {
                 text: display,
                 anchor: Anchor::TopCenter,
-                shift: Shift { x: -0.46, y: content_y + i as f32 * line_h },
-                align: Align { horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top },
+                shift: Shift {
+                    x: -0.46,
+                    y: content_y + i as f32 * line_h,
+                },
+                align: Align {
+                    horizontal: HorizontalAlign::Left,
+                    vertical: VerticalAlign::Top,
+                },
                 font_size: FontSize::WindowHeight(0.033),
                 color: 0xFF_99DDAA,
             });
@@ -492,7 +598,10 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
             text: scroll_text,
             anchor: Anchor::TopRight,
             shift: Shift { x: -0.01, y: 0.14 },
-            align: Align { horizontal: HorizontalAlign::Right, vertical: VerticalAlign::Top },
+            align: Align {
+                horizontal: HorizontalAlign::Right,
+                vertical: VerticalAlign::Top,
+            },
             font_size: FontSize::WindowHeight(0.035),
             color: 0xFF_666688,
         });
@@ -501,8 +610,14 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
             render_list.push(Renderable::Text {
                 text: "↑".to_string(),
                 anchor: Anchor::TopCenter,
-                shift: Shift { x: 0.45, y: content_y - line_h },
-                align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
+                shift: Shift {
+                    x: 0.45,
+                    y: content_y - line_h,
+                },
+                align: Align {
+                    horizontal: HorizontalAlign::Center,
+                    vertical: VerticalAlign::Top,
+                },
                 font_size: FontSize::WindowHeight(0.035),
                 color: 0xFF_888888,
             });
@@ -511,8 +626,14 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
             render_list.push(Renderable::Text {
                 text: "↓".to_string(),
                 anchor: Anchor::TopCenter,
-                shift: Shift { x: 0.45, y: content_y + max_lines as f32 * line_h },
-                align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
+                shift: Shift {
+                    x: 0.45,
+                    y: content_y + max_lines as f32 * line_h,
+                },
+                align: Align {
+                    horizontal: HorizontalAlign::Center,
+                    vertical: VerticalAlign::Top,
+                },
                 font_size: FontSize::WindowHeight(0.035),
                 color: 0xFF_888888,
             });
@@ -526,7 +647,10 @@ fn build_how_to_use_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: G
         text: "How to Use".to_string(),
         anchor: Anchor::TopCenter,
         shift: Shift { x: 0.0, y: 0.05 },
-        align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
+        align: Align {
+            horizontal: HorizontalAlign::Center,
+            vertical: VerticalAlign::Top,
+        },
         font_size: FontSize::WindowHeight(0.09),
         color: 0xFF_AADDFF,
     });
@@ -549,8 +673,14 @@ fn build_how_to_use_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: G
         render_list.push(Renderable::Text {
             text: text.to_string(),
             anchor: Anchor::TopCenter,
-            shift: Shift { x: -0.46, y: content_y + i as f32 * line_h },
-            align: Align { horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Top },
+            shift: Shift {
+                x: -0.46,
+                y: content_y + i as f32 * line_h,
+            },
+            align: Align {
+                horizontal: HorizontalAlign::Left,
+                vertical: VerticalAlign::Top,
+            },
             font_size: FontSize::WindowHeight(0.033),
             color: *color,
         });
@@ -562,7 +692,10 @@ fn build_how_to_use_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: G
         text: scroll_text,
         anchor: Anchor::TopRight,
         shift: Shift { x: -0.01, y: 0.14 },
-        align: Align { horizontal: HorizontalAlign::Right, vertical: VerticalAlign::Top },
+        align: Align {
+            horizontal: HorizontalAlign::Right,
+            vertical: VerticalAlign::Top,
+        },
         font_size: FontSize::WindowHeight(0.035),
         color: 0xFF_666688,
     });
@@ -572,8 +705,14 @@ fn build_how_to_use_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: G
         render_list.push(Renderable::Text {
             text: "髫ｨ繝ｻ・ｽ・ｲ".to_string(),
             anchor: Anchor::TopCenter,
-            shift: Shift { x: 0.45, y: content_y - line_h },
-            align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
+            shift: Shift {
+                x: 0.45,
+                y: content_y - line_h,
+            },
+            align: Align {
+                horizontal: HorizontalAlign::Center,
+                vertical: VerticalAlign::Center,
+            },
             font_size: FontSize::WindowHeight(0.035),
             color: 0xFF_888888,
         });
@@ -584,8 +723,14 @@ fn build_how_to_use_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: G
         render_list.push(Renderable::Text {
             text: "髫ｨ繝ｻ・ｽ・ｼ".to_string(),
             anchor: Anchor::TopCenter,
-            shift: Shift { x: 0.45, y: content_y + max_lines as f32 * line_h },
-            align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
+            shift: Shift {
+                x: 0.45,
+                y: content_y + max_lines as f32 * line_h,
+            },
+            align: Align {
+                horizontal: HorizontalAlign::Center,
+                vertical: VerticalAlign::Top,
+            },
             font_size: FontSize::WindowHeight(0.035),
             color: 0xFF_888888,
         });
@@ -616,9 +761,19 @@ fn segment_display_parts(seg: &Segment) -> (String, Option<String>, Option<Strin
         Segment::Plain { text } => (text.clone(), None, None),
         Segment::Annotated { base, reading } => (base.clone(), Some(reading.clone()), None),
         Segment::Anno { inner, annotation } => {
-            let base = inner.iter().map(|s| segment_base_text(s)).collect::<String>();
-            let reading = inner.iter().map(|s| segment_reading_text(s)).collect::<String>();
-            let ruby = if reading.is_empty() { None } else { Some(reading) };
+            let base = inner
+                .iter()
+                .map(|s| segment_base_text(s))
+                .collect::<String>();
+            let reading = inner
+                .iter()
+                .map(|s| segment_reading_text(s))
+                .collect::<String>();
+            let ruby = if reading.is_empty() {
+                None
+            } else {
+                Some(reading)
+            };
             (base, ruby, Some(annotation.clone()))
         }
     }
@@ -629,21 +784,34 @@ fn is_word_correct(word: &TypingCorrectnessWord) -> bool {
 }
 
 fn is_segment_correct(segment: &TypingCorrectnessSegment) -> bool {
-    !segment.chars.iter().any(|c| *c == TypingCorrectnessChar::Incorrect)
+    !segment
+        .chars
+        .iter()
+        .any(|c| *c == TypingCorrectnessChar::Incorrect)
 }
 
-fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient, font: &FontVec, width: usize, height: usize) {
+fn build_typing_ui(
+    app: &App,
+    render_list: &mut Vec<Renderable>,
+    gradient: Gradient,
+    font: &FontVec,
+    width: usize,
+    height: usize,
+) {
     render_list.push(Renderable::Background { gradient });
 
     if let Some(model) = &app.typing_model {
         // --- 驛｢譎｢・ｽ・ｬ驛｢・ｧ繝ｻ・､驛｢・ｧ繝ｻ・｢驛｢・ｧ繝ｻ・ｦ驛｢譎槭Γ繝ｻ・ｪ繝ｻ・ｿ髫ｰ・ｨ繝ｻ・ｴ髯区ｻゑｽｽ・､ ---
         let v_offset = 0.08; // UI髯ｷ闌ｨ・ｽ・ｨ髣厄ｽｴ髦ｮ蜻ｻ・ｽ螳壼初闕ｵ譏ｶ繝ｻ驍ｵ・ｺ陞｢・ｹ繝ｻ閾･・ｸ・ｺ陷ｷ譎画ｨｪ髯ｷ・ｷ郢晢ｽｻ
-        // --- 髯懶｣ｰ陜楢ｶ｣・ｽ・｡陟募ｾ娯蔓驛｢・ｧ繝ｻ・､驛｢譎冗樟・取辨蜍励・・ｨ鬩穂ｼ夲ｽｽ・ｺ ---
+                             // --- 髯懶｣ｰ陜楢ｶ｣・ｽ・｡陟募ｾ娯蔓驛｢・ｧ繝ｻ・､驛｢譎冗樟・取辨蜍励・・ｨ鬩穂ｼ夲ｽｽ・ｺ ---
         render_list.push(Renderable::BigText {
             text: model.content.title.to_string(),
             anchor: Anchor::TopCenter,
             shift: Shift { x: 0.0, y: 0.01 },
-            align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
+            align: Align {
+                horizontal: HorizontalAlign::Center,
+                vertical: VerticalAlign::Top,
+            },
             font_size: FontSize::WindowHeight(0.12),
             color: ACTIVE_COLOR,
         });
@@ -651,25 +819,38 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
         let base_font_size = FontSize::WindowHeight(BASE_FONT_SIZE_RATIO);
         let base_pixel_font_size = calculate_pixel_font_size(base_font_size, width, height);
         let line_idx = model.status.line as usize;
-        let content_line = if let Some(line) = model.content.lines.get(line_idx) { line } else { return; };
-        let correctness_line = if let Some(line) = model.typing_correctness.lines.get(line_idx) { line } else { return; };
+        let content_line = if let Some(line) = model.content.lines.get(line_idx) {
+            line
+        } else {
+            return;
+        };
+        let correctness_line = if let Some(line) = model.typing_correctness.lines.get(line_idx) {
+            line
+        } else {
+            return;
+        };
         let status = &model.status;
         let cached_cache = match app.scroll_cache.as_ref() {
             Some(ScrollCache::Ready(state)) if state.current.line == status.line => Some(state),
             _ => None,
         };
-        let line_origin = cached_cache.map(|state| state.line_origin as f64).unwrap_or(0.0);
+        let line_origin = cached_cache
+            .map(|state| state.line_origin as f64)
+            .unwrap_or(0.0);
         let target_line_total_width = match cached_cache {
             Some(state) => (state.current.total_width + state.gap_width) as u32,
-            None => content_line
-                .words
-                .iter()
-                .flat_map(|w| &w.segments)
-                .map(|seg| {
-                    let text = segment_base_text(seg);
-                    gui_renderer::measure_text(font, &text, base_pixel_font_size).0
-                })
-                .sum::<u32>() + width as u32,
+            None => {
+                content_line
+                    .words
+                    .iter()
+                    .flat_map(|w| &w.segments)
+                    .map(|seg| {
+                        let text = segment_base_text(seg);
+                        gui_renderer::measure_text(font, &text, base_pixel_font_size).0
+                    })
+                    .sum::<u32>()
+                    + width as u32
+            }
         };
         let scroll_offset = if cached_cache.is_some() {
             (model.scroll.scroll - line_origin) as f32
@@ -708,22 +889,34 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
                 };
 
                 let (base_text, ruby_text, anno_text) = segment_display_parts(seg);
-                upper_segments.push(UpperTypingSegment { base_text, ruby_text, anno_text, state });
+                upper_segments.push(UpperTypingSegment {
+                    base_text,
+                    ruby_text,
+                    anno_text,
+                    state,
+                });
             }
         }
-        
-        let upper_y_shift_from_center = -(base_pixel_font_size * UPPER_ROW_Y_OFFSET_FACTOR) / height as f32 + 0.17;
+
+        let upper_y_shift_from_center =
+            -(base_pixel_font_size * UPPER_ROW_Y_OFFSET_FACTOR) / height as f32 + 0.17;
         render_list.push(Renderable::TypingUpper {
             segments: upper_segments,
             anchor: Anchor::Center,
-            shift: Shift { x: -scroll_offset / width as f32, y: upper_y_shift_from_center },
-            align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
+            shift: Shift {
+                x: -scroll_offset / width as f32,
+                y: upper_y_shift_from_center,
+            },
+            align: Align {
+                horizontal: HorizontalAlign::Center,
+                vertical: VerticalAlign::Center,
+            },
             font_size: base_font_size,
         });
 
         // --- 髣包ｽｳ陋ｹ・ｺ繝ｻ・ｮ繝ｻ・ｵ郢晢ｽｻ闔・･郢晢ｽｻ髯ｷ迚呻ｽｸ蜷ｶﾎ倬Δ・ｧ繝ｻ・ｭ驛｢・ｧ繝ｻ・ｹ驛｢譎∬か繝ｻ・ｼ陝ｲ・ｨ郢晢ｽｻ髫ｶ蝣､霍昴・・ｯ郢晢ｽｻ---
         let mut lower_segments = Vec::new();
-            let status_word = usize::try_from(status.word).ok();
+        let status_word = usize::try_from(status.word).ok();
         let status_segment = usize::try_from(status.segment).ok().unwrap_or(0);
         let status_segment_opt = usize::try_from(status.segment).ok();
 
@@ -736,7 +929,9 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
             let right_bound = cursor_x + viewport;
 
             let active_segment_idx = match (status_word, status_segment_opt) {
-                (Some(word_idx), Some(segment_idx)) if word_idx < current_cache.word_segment_starts.len() => {
+                (Some(word_idx), Some(segment_idx))
+                    if word_idx < current_cache.word_segment_starts.len() =>
+                {
                     let word_start = current_cache
                         .word_segment_starts
                         .get(word_idx)
@@ -761,7 +956,9 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
                 .segment_prefix_width
                 .partition_point(|value| *value <= right_bound);
             visible_start = visible_start.min(active_segment_idx);
-            visible_end = visible_end.min(active_segment_idx).min(current_cache.segments.len());
+            visible_end = visible_end
+                .min(active_segment_idx)
+                .min(current_cache.segments.len());
             if visible_end < visible_start {
                 visible_end = visible_start;
             }
@@ -775,15 +972,16 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
 
             for cache_index in visible_start..visible_end {
                 if let Some(cache_seg) = current_cache.segments.get(cache_index) {
-                    let is_correct = match (status_word, correctness_line.words.get(cache_seg.word_index)) {
+                    let is_correct = match (
+                        status_word,
+                        correctness_line.words.get(cache_seg.word_index),
+                    ) {
                         (Some(current_status_word), Some(correctness_word))
                             if cache_seg.word_index < current_status_word =>
                         {
                             is_word_correct(correctness_word)
                         }
-                        (_, Some(correctness_word))
-                            if cache_seg.word_index == status_word_idx =>
-                        {
+                        (_, Some(correctness_word)) if cache_seg.word_index == status_word_idx => {
                             correctness_word
                                 .segments
                                 .get(cache_seg.segment_index)
@@ -801,35 +999,45 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
                 }
             }
 
-            if let Some(active_word_content) = content_line.words.get(status_word.unwrap_or(usize::MAX)) {
+            if let Some(active_word_content) =
+                content_line.words.get(status_word.unwrap_or(usize::MAX))
+            {
                 let active_word_idx = status_word.unwrap_or(0);
                 if active_word_idx < correctness_line.words.len() {
                     let active_correctness_word = &correctness_line.words[active_word_idx];
-                    if let Some(active_seg_content) = active_word_content.segments.get(status_segment) {
+                    if let Some(active_seg_content) =
+                        active_word_content.segments.get(status_segment)
+                    {
                         let reading_text = segment_reading_text(active_seg_content);
                         let mut active_elements = Vec::new();
 
                         let correctness_seg = &active_correctness_word.segments[status_segment];
-                        for (char_idx, character) in reading_text
-                            .chars()
-                            .enumerate()
-                            .take(status.char_ as usize)
+                        for (char_idx, character) in
+                            reading_text.chars().enumerate().take(status.char_ as usize)
                         {
-                            let is_correct = correctness_seg.chars[char_idx] != TypingCorrectnessChar::Incorrect;
-                            active_elements.push(ActiveLowerElement::Typed { character, is_correct });
+                            let is_correct =
+                                correctness_seg.chars[char_idx] != TypingCorrectnessChar::Incorrect;
+                            active_elements.push(ActiveLowerElement::Typed {
+                                character,
+                                is_correct,
+                            });
                         }
 
                         if let Some(wrong_char) = status.last_wrong_keydown {
-                            active_elements.push(ActiveLowerElement::LastIncorrectInput(wrong_char));
+                            active_elements
+                                .push(ActiveLowerElement::LastIncorrectInput(wrong_char));
                         } else {
                             if !status.unconfirmed.is_empty() {
                                 let unconfirmed_text: String = status.unconfirmed.iter().collect();
-                                active_elements.push(ActiveLowerElement::UnconfirmedInput(unconfirmed_text));
+                                active_elements
+                                    .push(ActiveLowerElement::UnconfirmedInput(unconfirmed_text));
                             }
                             active_elements.push(ActiveLowerElement::Cursor);
                         }
 
-                        lower_segments.push(LowerTypingSegment::Active { elements: active_elements });
+                        lower_segments.push(LowerTypingSegment::Active {
+                            elements: active_elements,
+                        });
                     }
                 }
             }
@@ -841,7 +1049,8 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
                 ) {
                     for seg in &word.segments {
                         let (base_text, ruby_text, _) = segment_display_parts(seg);
-                        let seg_width = gui_renderer::measure_text(font, &base_text, base_pixel_font_size).0;
+                        let seg_width =
+                            gui_renderer::measure_text(font, &base_text, base_pixel_font_size).0;
                         lower_segments.push(LowerTypingSegment::Completed {
                             base_text,
                             ruby_text,
@@ -863,7 +1072,8 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
                             .segments
                             .get(seg_idx)
                             .map_or(false, is_segment_correct);
-                        let width = gui_renderer::measure_text(font, &base_text, base_pixel_font_size).0;
+                        let width =
+                            gui_renderer::measure_text(font, &base_text, base_pixel_font_size).0;
                         lower_segments.push(LowerTypingSegment::Completed {
                             base_text,
                             ruby_text,
@@ -878,9 +1088,15 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
                     let mut active_elements = Vec::new();
 
                     let correctness_seg = &active_correctness_word.segments[status_segment];
-                    for (char_idx, character) in reading_text.chars().enumerate().take(status.char_ as usize) {
-                        let is_correct = correctness_seg.chars[char_idx] != TypingCorrectnessChar::Incorrect;
-                        active_elements.push(ActiveLowerElement::Typed { character, is_correct });
+                    for (char_idx, character) in
+                        reading_text.chars().enumerate().take(status.char_ as usize)
+                    {
+                        let is_correct =
+                            correctness_seg.chars[char_idx] != TypingCorrectnessChar::Incorrect;
+                        active_elements.push(ActiveLowerElement::Typed {
+                            character,
+                            is_correct,
+                        });
                     }
 
                     if let Some(wrong_char) = status.last_wrong_keydown {
@@ -888,22 +1104,32 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
                     } else {
                         if !status.unconfirmed.is_empty() {
                             let unconfirmed_text: String = status.unconfirmed.iter().collect();
-                            active_elements.push(ActiveLowerElement::UnconfirmedInput(unconfirmed_text));
+                            active_elements
+                                .push(ActiveLowerElement::UnconfirmedInput(unconfirmed_text));
                         }
                         active_elements.push(ActiveLowerElement::Cursor);
                     }
 
-                    lower_segments.push(LowerTypingSegment::Active { elements: active_elements });
+                    lower_segments.push(LowerTypingSegment::Active {
+                        elements: active_elements,
+                    });
                 }
             }
         }
-        
-        let lower_y_shift_from_center = (base_pixel_font_size * LOWER_ROW_Y_OFFSET_FACTOR) / height as f32 + 0.01;
+
+        let lower_y_shift_from_center =
+            (base_pixel_font_size * LOWER_ROW_Y_OFFSET_FACTOR) / height as f32 + 0.01;
         render_list.push(Renderable::TypingLower {
             segments: lower_segments,
             anchor: Anchor::Center,
-            shift: Shift { x: -scroll_offset / width as f32, y: lower_y_shift_from_center },
-            align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Top },
+            shift: Shift {
+                x: -scroll_offset / width as f32,
+                y: lower_y_shift_from_center,
+            },
+            align: Align {
+                horizontal: HorizontalAlign::Center,
+                vertical: VerticalAlign::Top,
+            },
             font_size: base_font_size,
             target_line_total_width,
         });
@@ -917,25 +1143,35 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
                 render_list.push(Renderable::Text {
                     text: model.content.lines[line_idx_context].to_string(),
                     anchor: Anchor::Center,
-                    shift: Shift { x: 0.0, y: (offset as f32 * 0.37) + 0.05 },
-                    align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
+                    shift: Shift {
+                        x: 0.0,
+                        y: (offset as f32 * 0.37) + 0.05,
+                    },
+                    align: Align {
+                        horizontal: HorizontalAlign::Center,
+                        vertical: VerticalAlign::Center,
+                    },
                     font_size: FontSize::WindowHeight(0.08),
                     color: 0xFF_444444,
                 });
             }
         }
-        
+
         // --- 驛｢・ｧ繝ｻ・ｹ驛｢譏ｴ繝ｻ郢晢ｽｻ驛｢・ｧ繝ｻ・ｿ驛｢・ｧ繝ｻ・ｹ驛｢譏懶ｽｻ・｣郢晢ｽｭ驛｢譎｢・ｽ・ｫ ---
         let metrics = typing::calculate_total_metrics(model);
         let time = metrics.total_time / 1000.0;
         let status_items = vec![
-            format!("Progress: {} / {}", model.status.line as usize + 1, line_count),
+            format!(
+                "Progress: {} / {}",
+                model.status.line as usize + 1,
+                line_count
+            ),
             format!("Speed: {:.2} KPS", metrics.speed),
             format!("Accuracy: {:.1}%", metrics.accuracy * 100.0),
             format!("Misses: {}", metrics.miss_count),
             format!("Time: {:02.0}:{:05.2}", (time / 60.0).floor(), time % 60.0),
         ];
-        
+
         let progress_bar_height_ratio = 0.02;
         let status_item_height_ratio = 0.04;
 
@@ -943,22 +1179,31 @@ fn build_typing_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
             render_list.push(Renderable::Text {
                 text: item.clone(),
                 anchor: Anchor::BottomLeft,
-                shift: Shift { x: 0.02, y: -0.02 - progress_bar_height_ratio - ((status_items.len() - 1 - i) as f32 * status_item_height_ratio)},
-                align: Align {horizontal: HorizontalAlign::Left, vertical: VerticalAlign::Bottom },
+                shift: Shift {
+                    x: 0.02,
+                    y: -0.02
+                        - progress_bar_height_ratio
+                        - ((status_items.len() - 1 - i) as f32 * status_item_height_ratio),
+                },
+                align: Align {
+                    horizontal: HorizontalAlign::Left,
+                    vertical: VerticalAlign::Bottom,
+                },
                 font_size: FontSize::WindowHeight(status_item_height_ratio),
                 color: 0xFF_DDDDDD,
             });
         }
 
         // --- 鬯ｨ・ｾ繝ｻ・ｲ髫ｰ莉吝ｹｲ郢晢ｽｰ驛｢譎｢・ｽ・ｼ ---
-        let char_progress_in_line = model.status.word as f32 / content_line.words.len().max(1) as f32;
+        let char_progress_in_line =
+            model.status.word as f32 / content_line.words.len().max(1) as f32;
         let detailed_progress_ratio = if line_count > 0 {
             (model.status.line as f32 + char_progress_in_line) / (line_count as f32)
         } else {
             0.0
         };
 
-                render_list.push(Renderable::ProgressBar {
+        render_list.push(Renderable::ProgressBar {
             anchor: Anchor::BottomLeft,
             shift: Shift { x: 0.0, y: -0.005 },
             width_ratio: 1.0,
@@ -976,7 +1221,10 @@ fn build_result_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
         text: "Result".to_string(),
         anchor: Anchor::Center,
         shift: Shift { x: 0.0, y: -0.3 },
-        align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
+        align: Align {
+            horizontal: HorizontalAlign::Center,
+            vertical: VerticalAlign::Center,
+        },
         font_size: FontSize::WindowHeight(0.15),
         color: 0xFF_FFFF00,
     });
@@ -995,8 +1243,14 @@ fn build_result_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
             render_list.push(Renderable::Text {
                 text: text.clone(),
                 anchor: Anchor::Center,
-                shift: Shift { x: 0.0, y: -0.1 + (i as f32 * 0.08) },
-                align: Align { horizontal: HorizontalAlign::Center, vertical: VerticalAlign::Center },
+                shift: Shift {
+                    x: 0.0,
+                    y: -0.1 + (i as f32 * 0.08),
+                },
+                align: Align {
+                    horizontal: HorizontalAlign::Center,
+                    vertical: VerticalAlign::Center,
+                },
                 font_size: FontSize::WindowHeight(0.05),
                 color: 0xFF_FFFFFF,
             });
@@ -1004,10 +1258,13 @@ fn build_result_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
     }
 }
 
-
 /// Anchor驍ｵ・ｺ繝ｻ・ｨShift驍ｵ・ｺ闕ｵ譎｢・ｽ閾･・ｸ・ｲ遶乗刋・ｸ謌奇ｽｲ繝ｻ縺倡ｫ雁､・ｸ・ｺ繝ｻ・ｪ驛｢・ｧ陷ｿ・･繝ｻ・ｺ繝ｻ・ｧ髫ｶ阮吶・x, y)驛｢・ｧ陞ｳ螟ｲ・ｽ・ｨ髢ｧ・ｲ繝ｻ・ｮ陷会ｽｱ隨倥・・ｹ・ｧ郢晢ｽｻ
 pub fn calculate_anchor_position(
-    anchor: Anchor, shift: Shift, width: usize, height: usize) -> (i32, i32) {
+    anchor: Anchor,
+    shift: Shift,
+    width: usize,
+    height: usize,
+) -> (i32, i32) {
     let (w, h) = (width as i32, height as i32);
     let base_pos = match anchor {
         Anchor::TopLeft => (0, 0),
@@ -1027,7 +1284,11 @@ pub fn calculate_anchor_position(
 
 /// 髯憺屮・ｽ・ｺ髮九・・ｹ貅倪雷驍ｵ・ｲ遶丞｣ｹﾎ倬Δ・ｧ繝ｻ・ｭ驛｢・ｧ繝ｻ・ｹ驛｢譎冗樟郢晢ｽｻ髯昴・・ｽ・ｸ髮取・・ｼ譚ｿﾂ遶擾ｽｵ驍冗坩・ｸ・ｺ陜捺ｺｷ・ｩ・ｿ驍ｵ・ｺ闕ｵ譎｢・ｽ閾･・ｸ・ｲ遶擾ｽｵ隲､蜥弱♀郢ｧ迚咎｣ｭ驍ｵ・ｺ繝ｻ・ｪ髫ｰ・ｰ陷諤懈・鬯ｮ・｢陷ｿ・･繝ｻ・ｧ陷ｿ・･繝ｻ・ｺ繝ｻ・ｧ髫ｶ轣倬●繝ｻ・ｼ闔・･繝ｻ・ｷ繝ｻ・ｦ髣包ｽｳ陞ゅ・・ｽ・ｼ陝ｲ・ｨ繝ｻ蟶晏搦髢ｧ・ｲ繝ｻ・ｮ陷会ｽｱ隨倥・・ｹ・ｧ郢晢ｽｻ
 pub fn calculate_aligned_position(
-    anchor_pos: (i32, i32), text_width: u32, text_height: u32, align: Align) -> (i32, i32) {
+    anchor_pos: (i32, i32),
+    text_width: u32,
+    text_height: u32,
+    align: Align,
+) -> (i32, i32) {
     let (tw, th) = (text_width as i32, text_height as i32);
     let (ax, ay) = anchor_pos;
 
@@ -1045,7 +1306,3 @@ pub fn calculate_aligned_position(
 
     (x, y)
 }
-
-
-
-

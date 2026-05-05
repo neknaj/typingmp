@@ -4,10 +4,18 @@
 extern crate alloc;
 
 #[cfg(feature = "uefi")]
-use alloc::{string::{String, ToString}, vec, vec::Vec};
-#[cfg(not(feature = "uefi"))]
-use std::{string::{String, ToString}, vec, vec::Vec};
+use alloc::{
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
 use core::mem;
+#[cfg(not(feature = "uefi"))]
+use std::{
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
 
 use crate::model::{Content, Line, Segment, Word};
 
@@ -30,45 +38,54 @@ fn tokenize_line(line: &str) -> Vec<Token> {
 
     let flush_plain = |plain: &mut String, tokens: &mut Vec<Token>| {
         if !plain.is_empty() {
-            tokens.push(Token::Segment(Segment::Plain { text: mem::take(plain) }));
+            tokens.push(Token::Segment(Segment::Plain {
+                text: mem::take(plain),
+            }));
         }
     };
 
     while pos < chars.len() {
         match chars[pos] {
-            '\\' => { // エスケープ文字
+            '\\' => {
+                // エスケープ文字
                 pos += 1;
                 if pos < chars.len() {
                     plain_text.push(chars[pos]);
                 }
             }
-            '[' => { // ruby記法の開始 [base/reading]
+            '[' => {
+                // ruby記法の開始 [base/reading]
                 flush_plain(&mut plain_text, &mut tokens);
                 let (segment, new_pos) = parse_ruby(&chars, pos);
                 tokens.push(Token::Segment(segment));
                 pos = new_pos;
                 continue;
             }
-            '{' => { // anno記法の開始 {inner/annotation}
+            '{' => {
+                // anno記法の開始 {inner/annotation}
                 flush_plain(&mut plain_text, &mut tokens);
                 let (segment, new_pos) = parse_anno(&chars, pos);
                 tokens.push(Token::Segment(segment));
                 pos = new_pos;
                 continue;
             }
-            '-' => { // ハイフン（連結子の候補）
+            '-' => {
+                // ハイフン（連結子の候補）
                 flush_plain(&mut plain_text, &mut tokens);
                 tokens.push(Token::Hyphen);
             }
-            '/' => { // 単語区切り
+            '/' => {
+                // 単語区切り
                 flush_plain(&mut plain_text, &mut tokens);
                 tokens.push(Token::Separator);
             }
-            ' ' => { // スペース（単語区切り）
+            ' ' => {
+                // スペース（単語区切り）
                 flush_plain(&mut plain_text, &mut tokens);
                 tokens.push(Token::Space);
             }
-            _ => { // プレーンテキスト文字
+            _ => {
+                // プレーンテキスト文字
                 plain_text.push(chars[pos]);
             }
         }
@@ -129,7 +146,9 @@ fn parse_anno(chars: &Vec<char>, start: usize) -> (Segment, usize) {
 
     let flush_plain_buf = |buf: &mut String, inner: &mut Vec<Segment>| {
         if !buf.is_empty() {
-            inner.push(Segment::Plain { text: mem::take(buf) });
+            inner.push(Segment::Plain {
+                text: mem::take(buf),
+            });
         }
     };
 
@@ -188,7 +207,6 @@ fn parse_anno(chars: &Vec<char>, start: usize) -> (Segment, usize) {
     (Segment::Anno { inner, annotation }, pos)
 }
 
-
 // Stage 2: トークン列を単語のベクタにグループ化する
 fn group_tokens_into_words(tokens: Vec<Token>) -> Vec<Word> {
     let mut words = Vec::new();
@@ -196,7 +214,9 @@ fn group_tokens_into_words(tokens: Vec<Token>) -> Vec<Word> {
 
     let finalize_current_word = |segments: &mut Vec<Segment>, words: &mut Vec<Word>| {
         if !segments.is_empty() {
-            words.push(Word { segments: mem::take(segments) });
+            words.push(Word {
+                segments: mem::take(segments),
+            });
         }
     };
 
@@ -227,7 +247,9 @@ fn group_tokens_into_words(tokens: Vec<Token>) -> Vec<Word> {
                 } else {
                     // 接続子ではない（ただの文字）
                     finalize_current_word(&mut current_segments, &mut words); // 直前の単語を確定
-                    current_segments.push(Segment::Plain { text: "-".to_string() }); // ハイフン自体をセグメントに
+                    current_segments.push(Segment::Plain {
+                        text: "-".to_string(),
+                    }); // ハイフン自体をセグメントに
                     finalize_current_word(&mut current_segments, &mut words); // ハイフンを独立した単語として確定
                     last_token_was_connector = false;
                 }
@@ -238,7 +260,11 @@ fn group_tokens_into_words(tokens: Vec<Token>) -> Vec<Word> {
             }
             Token::Space => {
                 finalize_current_word(&mut current_segments, &mut words);
-                words.push(Word { segments: vec![Segment::Plain { text: " ".to_string() }] });
+                words.push(Word {
+                    segments: vec![Segment::Plain {
+                        text: " ".to_string(),
+                    }],
+                });
                 last_token_was_connector = false;
             }
         }
@@ -248,7 +274,6 @@ fn group_tokens_into_words(tokens: Vec<Token>) -> Vec<Word> {
 
     words
 }
-
 
 // アプリケーションから呼び出されるメインのパーサー関数
 pub fn parse_problem(input: &str) -> Content {
@@ -280,7 +305,6 @@ pub fn parse_problem(input: &str) -> Content {
     Content { title, lines }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,10 +325,28 @@ mod tests {
         // annotatedとplain、annotated同士がハイフンなしで区切られる最も基本的なケース
         let line = "[秋/あき]の[田/た]の";
         let expected = vec![
-            Word { segments: vec![Segment::Annotated { base: "秋".to_string(), reading: "あき".to_string() }] },
-            Word { segments: vec![Segment::Plain { text: "の".to_string() }] },
-            Word { segments: vec![Segment::Annotated { base: "田".to_string(), reading: "た".to_string() }] },
-            Word { segments: vec![Segment::Plain { text: "の".to_string() }] },
+            Word {
+                segments: vec![Segment::Annotated {
+                    base: "秋".to_string(),
+                    reading: "あき".to_string(),
+                }],
+            },
+            Word {
+                segments: vec![Segment::Plain {
+                    text: "の".to_string(),
+                }],
+            },
+            Word {
+                segments: vec![Segment::Annotated {
+                    base: "田".to_string(),
+                    reading: "た".to_string(),
+                }],
+            },
+            Word {
+                segments: vec![Segment::Plain {
+                    text: "の".to_string(),
+                }],
+            },
         ];
         assert_eq!(parse_line_to_words(line), expected);
     }
@@ -313,12 +355,17 @@ mod tests {
     fn test_okurigana_connection() {
         // annotatedとplainがハイフンで連結され、1つの単語になるケース（送り仮名）
         let line = "[悲/かな]-しき";
-        let expected = vec![
-            Word { segments: vec![
-                Segment::Annotated { base: "悲".to_string(), reading: "かな".to_string() },
-                Segment::Plain { text: "しき".to_string() },
-            ] },
-        ];
+        let expected = vec![Word {
+            segments: vec![
+                Segment::Annotated {
+                    base: "悲".to_string(),
+                    reading: "かな".to_string(),
+                },
+                Segment::Plain {
+                    text: "しき".to_string(),
+                },
+            ],
+        }];
         assert_eq!(parse_line_to_words(line), expected);
     }
 
@@ -326,13 +373,20 @@ mod tests {
     fn test_multiple_connections() {
         // 複数のセグメント（plain, annotated, plain）がハイフンで連結されるケース
         let line = "ふみ-[分/わ]-け";
-        let expected = vec![
-            Word { segments: vec![
-                Segment::Plain { text: "ふみ".to_string() },
-                Segment::Annotated { base: "分".to_string(), reading: "わ".to_string() },
-                Segment::Plain { text: "け".to_string() },
-            ] },
-        ];
+        let expected = vec![Word {
+            segments: vec![
+                Segment::Plain {
+                    text: "ふみ".to_string(),
+                },
+                Segment::Annotated {
+                    base: "分".to_string(),
+                    reading: "わ".to_string(),
+                },
+                Segment::Plain {
+                    text: "け".to_string(),
+                },
+            ],
+        }];
         assert_eq!(parse_line_to_words(line), expected);
     }
 
@@ -341,9 +395,23 @@ mod tests {
         // スペースが独立した単語として扱われるケース
         let line = "[春/はる] [夏/なつ]";
         let expected = vec![
-            Word { segments: vec![Segment::Annotated { base: "春".to_string(), reading: "はる".to_string() }] },
-            Word { segments: vec![Segment::Plain { text: " ".to_string() }] },
-            Word { segments: vec![Segment::Annotated { base: "夏".to_string(), reading: "なつ".to_string() }] },
+            Word {
+                segments: vec![Segment::Annotated {
+                    base: "春".to_string(),
+                    reading: "はる".to_string(),
+                }],
+            },
+            Word {
+                segments: vec![Segment::Plain {
+                    text: " ".to_string(),
+                }],
+            },
+            Word {
+                segments: vec![Segment::Annotated {
+                    base: "夏".to_string(),
+                    reading: "なつ".to_string(),
+                }],
+            },
         ];
         assert_eq!(parse_line_to_words(line), expected);
     }
@@ -353,9 +421,21 @@ mod tests {
         // スラッシュ `/` が単語の区切り文字として機能するケース
         let line = "とま/を/あらみ";
         let expected = vec![
-            Word { segments: vec![Segment::Plain { text: "とま".to_string() }] },
-            Word { segments: vec![Segment::Plain { text: "を".to_string() }] },
-            Word { segments: vec![Segment::Plain { text: "あらみ".to_string() }] },
+            Word {
+                segments: vec![Segment::Plain {
+                    text: "とま".to_string(),
+                }],
+            },
+            Word {
+                segments: vec![Segment::Plain {
+                    text: "を".to_string(),
+                }],
+            },
+            Word {
+                segments: vec![Segment::Plain {
+                    text: "あらみ".to_string(),
+                }],
+            },
         ];
         assert_eq!(parse_line_to_words(line), expected);
     }
@@ -364,9 +444,11 @@ mod tests {
     fn test_escape_brackets() {
         // バックスラッシュで角括弧をエスケープし、ただの文字として扱うケース
         let line = "\\[ここまで\\]";
-        let expected = vec![
-            Word { segments: vec![Segment::Plain { text: "[ここまで]".to_string() }] },
-        ];
+        let expected = vec![Word {
+            segments: vec![Segment::Plain {
+                text: "[ここまで]".to_string(),
+            }],
+        }];
         assert_eq!(parse_line_to_words(line), expected);
     }
 
@@ -375,8 +457,17 @@ mod tests {
         // バックスラッシュでハイフンをエスケープし、連結子ではなく文字として扱うケース
         let line = "コピー\\-[機/き]";
         let expected = vec![
-            Word { segments: vec![Segment::Plain { text: "コピー-".to_string() }] },
-            Word { segments: vec![Segment::Annotated { base: "機".to_string(), reading: "き".to_string() }] },
+            Word {
+                segments: vec![Segment::Plain {
+                    text: "コピー-".to_string(),
+                }],
+            },
+            Word {
+                segments: vec![Segment::Annotated {
+                    base: "機".to_string(),
+                    reading: "き".to_string(),
+                }],
+            },
         ];
         assert_eq!(parse_line_to_words(line), expected);
     }
@@ -385,9 +476,12 @@ mod tests {
     fn test_escape_inside_ruby() {
         // ruby内部の特殊文字（スラッシュ）をエスケープするケース
         let line = "[A\\/B/えーぶんのびー]";
-        let expected = vec![
-            Word { segments: vec![Segment::Annotated { base: "A/B".to_string(), reading: "えーぶんのびー".to_string() }] },
-        ];
+        let expected = vec![Word {
+            segments: vec![Segment::Annotated {
+                base: "A/B".to_string(),
+                reading: "えーぶんのびー".to_string(),
+            }],
+        }];
         assert_eq!(parse_line_to_words(line), expected);
     }
 
@@ -396,9 +490,23 @@ mod tests {
         // 前後が区切り文字で、連結の対象にならないハイフンが、それ自体で単語になるケース
         let line = "[東京/とうきょう]/-/[大阪/おおさか]";
         let expected = vec![
-            Word { segments: vec![Segment::Annotated { base: "東京".to_string(), reading: "とうきょう".to_string() }] },
-            Word { segments: vec![Segment::Plain { text: "-".to_string() }] },
-            Word { segments: vec![Segment::Annotated { base: "大阪".to_string(), reading: "おおさか".to_string() }] },
+            Word {
+                segments: vec![Segment::Annotated {
+                    base: "東京".to_string(),
+                    reading: "とうきょう".to_string(),
+                }],
+            },
+            Word {
+                segments: vec![Segment::Plain {
+                    text: "-".to_string(),
+                }],
+            },
+            Word {
+                segments: vec![Segment::Annotated {
+                    base: "大阪".to_string(),
+                    reading: "おおさか".to_string(),
+                }],
+            },
         ];
         assert_eq!(parse_line_to_words(line), expected);
     }
@@ -408,8 +516,17 @@ mod tests {
         // 行末など、後ろに連結する相手がいないハイフンが、独立した単語になるケース
         let line = "[長/なが]-";
         let expected = vec![
-                Word { segments: vec![Segment::Annotated { base: "長".to_string(), reading: "なが".to_string() }] },
-                Word { segments: vec![Segment::Plain { text: "-".to_string() }] },
+            Word {
+                segments: vec![Segment::Annotated {
+                    base: "長".to_string(),
+                    reading: "なが".to_string(),
+                }],
+            },
+            Word {
+                segments: vec![Segment::Plain {
+                    text: "-".to_string(),
+                }],
+            },
         ];
         assert_eq!(parse_line_to_words(line), expected);
     }
@@ -419,13 +536,29 @@ mod tests {
         // 複数の連結と区切りが混在する実践的なケース
         let line = "[思/おも]-ひ-[絶/た]-え/なむ";
         let expected = vec![
-            Word { segments: vec![
-                Segment::Annotated { base: "思".to_string(), reading: "おも".to_string() },
-                Segment::Plain { text: "ひ".to_string() },
-                Segment::Annotated { base: "絶".to_string(), reading: "た".to_string() },
-                Segment::Plain { text: "え".to_string() },
-            ]},
-            Word { segments: vec![Segment::Plain { text: "なむ".to_string() }] },
+            Word {
+                segments: vec![
+                    Segment::Annotated {
+                        base: "思".to_string(),
+                        reading: "おも".to_string(),
+                    },
+                    Segment::Plain {
+                        text: "ひ".to_string(),
+                    },
+                    Segment::Annotated {
+                        base: "絶".to_string(),
+                        reading: "た".to_string(),
+                    },
+                    Segment::Plain {
+                        text: "え".to_string(),
+                    },
+                ],
+            },
+            Word {
+                segments: vec![Segment::Plain {
+                    text: "なむ".to_string(),
+                }],
+            },
         ];
         assert_eq!(parse_line_to_words(line), expected);
     }
@@ -435,10 +568,28 @@ mod tests {
         // 複数の連続した空白が、それぞれ独立した単語として扱われることを確認
         let line = "[上/うえ]  [下/した]";
         let expected = vec![
-            Word { segments: vec![Segment::Annotated { base: "上".to_string(), reading: "うえ".to_string() }] },
-            Word { segments: vec![Segment::Plain { text: " ".to_string() }] },
-            Word { segments: vec![Segment::Plain { text: " ".to_string() }] },
-            Word { segments: vec![Segment::Annotated { base: "下".to_string(), reading: "した".to_string() }] },
+            Word {
+                segments: vec![Segment::Annotated {
+                    base: "上".to_string(),
+                    reading: "うえ".to_string(),
+                }],
+            },
+            Word {
+                segments: vec![Segment::Plain {
+                    text: " ".to_string(),
+                }],
+            },
+            Word {
+                segments: vec![Segment::Plain {
+                    text: " ".to_string(),
+                }],
+            },
+            Word {
+                segments: vec![Segment::Annotated {
+                    base: "下".to_string(),
+                    reading: "した".to_string(),
+                }],
+            },
         ];
         assert_eq!(parse_line_to_words(line), expected);
     }
@@ -448,11 +599,32 @@ mod tests {
         // 行頭と行末の空白が正しく単語として認識されることを確認
         let line = "  [開始/かいし]  ";
         let expected = vec![
-            Word { segments: vec![Segment::Plain { text: " ".to_string() }] },
-            Word { segments: vec![Segment::Plain { text: " ".to_string() }] },
-            Word { segments: vec![Segment::Annotated { base: "開始".to_string(), reading: "かいし".to_string() }] },
-            Word { segments: vec![Segment::Plain { text: " ".to_string() }] },
-            Word { segments: vec![Segment::Plain { text: " ".to_string() }] },
+            Word {
+                segments: vec![Segment::Plain {
+                    text: " ".to_string(),
+                }],
+            },
+            Word {
+                segments: vec![Segment::Plain {
+                    text: " ".to_string(),
+                }],
+            },
+            Word {
+                segments: vec![Segment::Annotated {
+                    base: "開始".to_string(),
+                    reading: "かいし".to_string(),
+                }],
+            },
+            Word {
+                segments: vec![Segment::Plain {
+                    text: " ".to_string(),
+                }],
+            },
+            Word {
+                segments: vec![Segment::Plain {
+                    text: " ".to_string(),
+                }],
+            },
         ];
         assert_eq!(parse_line_to_words(line), expected);
     }
@@ -462,8 +634,18 @@ mod tests {
         // 区切り文字が連続しても、間に空の単語が生成されないことを確認
         let line = "[一/いち]//[二/に]";
         let expected = vec![
-            Word { segments: vec![Segment::Annotated { base: "一".to_string(), reading: "いち".to_string() }] },
-            Word { segments: vec![Segment::Annotated { base: "二".to_string(), reading: "に".to_string() }] },
+            Word {
+                segments: vec![Segment::Annotated {
+                    base: "一".to_string(),
+                    reading: "いち".to_string(),
+                }],
+            },
+            Word {
+                segments: vec![Segment::Annotated {
+                    base: "二".to_string(),
+                    reading: "に".to_string(),
+                }],
+            },
         ];
         assert_eq!(parse_line_to_words(line), expected);
     }
@@ -472,22 +654,39 @@ mod tests {
     fn test_malformed_ruby() {
         // 閉じられていない括弧や、スラッシュがないなどの不正な形式でもパニックしないことを確認
         let line = "[未完了/みかんりょう";
-        let expected = vec![
-            Word { segments: vec![Segment::Annotated { base: "未完了".to_string(), reading: "みかんりょう".to_string() }] },
-        ];
+        let expected = vec![Word {
+            segments: vec![Segment::Annotated {
+                base: "未完了".to_string(),
+                reading: "みかんりょう".to_string(),
+            }],
+        }];
         assert_eq!(parse_line_to_words(line), expected, "Unclosed bracket");
 
         let line_no_slash = "[ベースのみ]";
-        let expected_no_slash = vec![
-            Word { segments: vec![Segment::Annotated { base: "ベースのみ".to_string(), reading: "".to_string() }] },
-        ];
-        assert_eq!(parse_line_to_words(line_no_slash), expected_no_slash, "No slash in ruby");
+        let expected_no_slash = vec![Word {
+            segments: vec![Segment::Annotated {
+                base: "ベースのみ".to_string(),
+                reading: "".to_string(),
+            }],
+        }];
+        assert_eq!(
+            parse_line_to_words(line_no_slash),
+            expected_no_slash,
+            "No slash in ruby"
+        );
 
         let line_empty = "[]";
-        let expected_empty = vec![
-            Word { segments: vec![Segment::Annotated { base: "".to_string(), reading: "".to_string() }] },
-        ];
-        assert_eq!(parse_line_to_words(line_empty), expected_empty, "Empty ruby");
+        let expected_empty = vec![Word {
+            segments: vec![Segment::Annotated {
+                base: "".to_string(),
+                reading: "".to_string(),
+            }],
+        }];
+        assert_eq!(
+            parse_line_to_words(line_empty),
+            expected_empty,
+            "Empty ruby"
+        );
     }
 
     #[test]
@@ -497,20 +696,41 @@ mod tests {
         let content = parse_problem(full_problem);
 
         let expected_title_words = vec![
-            Word { segments: vec![Segment::Annotated { base: "Rust".to_string(), reading: "ラスト".to_string() }] },
-            Word { segments: vec![
-                Segment::Plain { text: "で".to_string() },
-                Segment::Annotated { base: "書".to_string(), reading: "か".to_string() },
-                Segment::Plain { text: "かれた".to_string() },
-            ]},
-            Word { segments: vec![Segment::Plain { text: "パーサー".to_string() }] },
+            Word {
+                segments: vec![Segment::Annotated {
+                    base: "Rust".to_string(),
+                    reading: "ラスト".to_string(),
+                }],
+            },
+            Word {
+                segments: vec![
+                    Segment::Plain {
+                        text: "で".to_string(),
+                    },
+                    Segment::Annotated {
+                        base: "書".to_string(),
+                        reading: "か".to_string(),
+                    },
+                    Segment::Plain {
+                        text: "かれた".to_string(),
+                    },
+                ],
+            },
+            Word {
+                segments: vec![Segment::Plain {
+                    text: "パーサー".to_string(),
+                }],
+            },
         ];
 
         assert_eq!(content.title.words, expected_title_words);
 
-        let expected_body_words = vec![
-            Word { segments: vec![Segment::Annotated { base: "本文".to_string(), reading: "ほんぶん".to_string() }] },
-        ];
+        let expected_body_words = vec![Word {
+            segments: vec![Segment::Annotated {
+                base: "本文".to_string(),
+                reading: "ほんぶん".to_string(),
+            }],
+        }];
         assert_eq!(content.lines[0].words, expected_body_words);
     }
 
@@ -519,8 +739,17 @@ mod tests {
         // バックスラッシュ自体をエスケープするケース
         let line = "C:\\\\Users\\\\[Taro/たろう]";
         let expected = vec![
-            Word { segments: vec![Segment::Plain { text: "C:\\Users\\".to_string() }] },
-            Word { segments: vec![Segment::Annotated { base: "Taro".to_string(), reading: "たろう".to_string() }] },
+            Word {
+                segments: vec![Segment::Plain {
+                    text: "C:\\Users\\".to_string(),
+                }],
+            },
+            Word {
+                segments: vec![Segment::Annotated {
+                    base: "Taro".to_string(),
+                    reading: "たろう".to_string(),
+                }],
+            },
         ];
         assert_eq!(parse_line_to_words(line), expected);
     }
@@ -531,12 +760,14 @@ mod tests {
     fn test_anno_simple() {
         // プレーンテキストを anno で囲む基本ケース
         let line = "{hello/こんにちは}";
-        let expected = vec![
-            Word { segments: vec![Segment::Anno {
-                inner: vec![Segment::Plain { text: "hello".to_string() }],
+        let expected = vec![Word {
+            segments: vec![Segment::Anno {
+                inner: vec![Segment::Plain {
+                    text: "hello".to_string(),
+                }],
                 annotation: "こんにちは".to_string(),
-            }] },
-        ];
+            }],
+        }];
         assert_eq!(parse_line_to_words(line), expected);
     }
 
@@ -544,15 +775,21 @@ mod tests {
     fn test_anno_with_ruby() {
         // anno の inner に ruby を含むケース
         let line = "{[微分/びぶん][係数/けいすう]/derivative}";
-        let expected = vec![
-            Word { segments: vec![Segment::Anno {
+        let expected = vec![Word {
+            segments: vec![Segment::Anno {
                 inner: vec![
-                    Segment::Annotated { base: "微分".to_string(), reading: "びぶん".to_string() },
-                    Segment::Annotated { base: "係数".to_string(), reading: "けいすう".to_string() },
+                    Segment::Annotated {
+                        base: "微分".to_string(),
+                        reading: "びぶん".to_string(),
+                    },
+                    Segment::Annotated {
+                        base: "係数".to_string(),
+                        reading: "けいすう".to_string(),
+                    },
                 ],
                 annotation: "derivative".to_string(),
-            }] },
-        ];
+            }],
+        }];
         assert_eq!(parse_line_to_words(line), expected);
     }
 
@@ -560,15 +797,20 @@ mod tests {
     fn test_anno_with_hyphen_connection() {
         // anno セグメントがハイフンで他セグメントと連結されるケース
         let line = "{[悲/かな]/sad}-しき";
-        let expected = vec![
-            Word { segments: vec![
+        let expected = vec![Word {
+            segments: vec![
                 Segment::Anno {
-                    inner: vec![Segment::Annotated { base: "悲".to_string(), reading: "かな".to_string() }],
+                    inner: vec![Segment::Annotated {
+                        base: "悲".to_string(),
+                        reading: "かな".to_string(),
+                    }],
                     annotation: "sad".to_string(),
                 },
-                Segment::Plain { text: "しき".to_string() },
-            ] },
-        ];
+                Segment::Plain {
+                    text: "しき".to_string(),
+                },
+            ],
+        }];
         assert_eq!(parse_line_to_words(line), expected);
     }
 
@@ -577,11 +819,19 @@ mod tests {
         // anno の外側の '/' は通常の単語区切りとして機能することを確認
         let line = "{abc/訳}/plain";
         let expected = vec![
-            Word { segments: vec![Segment::Anno {
-                inner: vec![Segment::Plain { text: "abc".to_string() }],
-                annotation: "訳".to_string(),
-            }] },
-            Word { segments: vec![Segment::Plain { text: "plain".to_string() }] },
+            Word {
+                segments: vec![Segment::Anno {
+                    inner: vec![Segment::Plain {
+                        text: "abc".to_string(),
+                    }],
+                    annotation: "訳".to_string(),
+                }],
+            },
+            Word {
+                segments: vec![Segment::Plain {
+                    text: "plain".to_string(),
+                }],
+            },
         ];
         assert_eq!(parse_line_to_words(line), expected);
     }
@@ -590,16 +840,24 @@ mod tests {
     fn test_anno_mixed_inner() {
         // anno の inner に ruby とプレーンテキストが混在するケース
         let line = "{[台湾/たいわん]の[首都/しゅと]/Taiwan's capital}";
-        let expected = vec![
-            Word { segments: vec![Segment::Anno {
+        let expected = vec![Word {
+            segments: vec![Segment::Anno {
                 inner: vec![
-                    Segment::Annotated { base: "台湾".to_string(), reading: "たいわん".to_string() },
-                    Segment::Plain { text: "の".to_string() },
-                    Segment::Annotated { base: "首都".to_string(), reading: "しゅと".to_string() },
+                    Segment::Annotated {
+                        base: "台湾".to_string(),
+                        reading: "たいわん".to_string(),
+                    },
+                    Segment::Plain {
+                        text: "の".to_string(),
+                    },
+                    Segment::Annotated {
+                        base: "首都".to_string(),
+                        reading: "しゅと".to_string(),
+                    },
                 ],
                 annotation: "Taiwan's capital".to_string(),
-            }] },
-        ];
+            }],
+        }];
         assert_eq!(parse_line_to_words(line), expected);
     }
 }

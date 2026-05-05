@@ -128,12 +128,16 @@ pub mod gui_renderer {
         outlined.draw(|x, y, c| {
             // カバレッジがほぼゼロなら背景が透けて見えるだけなのでスキップする。
             // アンチエイリアス端部には c ≈ 0 のピクセルが多く、分岐コストを補って余りある。
-            if c < 0.004 { return; }
+            if c < 0.004 {
+                return;
+            }
 
             let buffer_x = bounds.min.x as i32 + x as i32;
             let buffer_y = bounds.min.y as i32 + y as i32;
-            if buffer_x < 0 || buffer_x >= stride as i32
-                || buffer_y < 0 || buffer_y >= buf_height as i32
+            if buffer_x < 0
+                || buffer_x >= stride as i32
+                || buffer_y < 0
+                || buffer_y >= buf_height as i32
             {
                 return;
             }
@@ -252,7 +256,8 @@ pub mod tui_renderer {
         }
         max_x = max_x.max(pen_x); // 最後の文字の右端も考慮
 
-        if min_x > max_x { // テキストに描画可能なグリフがなかった場合
+        if min_x > max_x {
+            // テキストに描画可能なグリフがなかった場合
             return (Vec::new(), 0, 0, 0);
         }
 
@@ -291,7 +296,11 @@ pub mod tui_renderer {
                     let cell_x = (px / art_cell_width) as i32;
                     let cell_y = (py / art_cell_height) as i32;
 
-                    if cell_x >= 0 && cell_x < art_width as i32 && cell_y >= 0 && cell_y < art_height as i32 {
+                    if cell_x >= 0
+                        && cell_x < art_width as i32
+                        && cell_y >= 0
+                        && cell_y < art_height as i32
+                    {
                         let index = cell_y as usize * art_width + cell_x as usize;
                         coverage_buffer[index] = (coverage_buffer[index] + v).min(1.0);
                     }
@@ -358,9 +367,9 @@ pub mod tui_renderer {
         if min_x > max_x {
             return (Vec::new(), 0, 0, 0);
         }
-        
+
         // 点字は 4x2 のグリッド。1文字セル(高さ=幅*2)の比率に合わせる
-        let art_cell_height = 4.0; 
+        let art_cell_height = 4.0;
         // FIX: アスペクト比の計算を修正
         let art_cell_width = art_cell_height / TUI_CHAR_ASPECT_RATIO;
 
@@ -370,10 +379,10 @@ pub mod tui_renderer {
         if art_width == 0 || art_height == 0 {
             return (Vec::new(), 0, 0, 0);
         }
-        
+
         let ascent_in_pixels = ascent - min_y;
         let ascent_in_cells = (ascent_in_pixels / art_cell_height).floor().max(0.0) as usize;
-        
+
         // グリフのピクセルカバレッジを計算するための高解像度バッファ
         // 点字の各ドットに対応させるため、TUIセルの2x4倍の解像度にする
         let sub_w = art_width * 2;
@@ -407,7 +416,7 @@ pub mod tui_renderer {
             pen_x += scaled_font.h_advance(glyph_id);
             last_glyph = Some(glyph_id);
         }
-        
+
         // 高解像度バッファから点字文字バッファを生成
         let mut char_buffer = Vec::with_capacity(art_width * art_height);
         // 点字ドットとビットのマッピング
@@ -426,7 +435,8 @@ pub mod tui_renderer {
                         let sub_x = x * 2 + dx;
                         let sub_y = y * 4 + dy;
                         let index = sub_y * sub_w + sub_x;
-                        if sub_pixel_buffer[index] > 0.3 { // カバレッジの閾値
+                        if sub_pixel_buffer[index] > 0.3 {
+                            // カバレッジの閾値
                             braille_byte |= 1 << BIT_MAP[dy][dx];
                         }
                     }

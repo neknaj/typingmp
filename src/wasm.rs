@@ -10,13 +10,18 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::Clamped;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{CanvasRenderingContext2d, HtmlInputElement, ImageData, InputEvent, KeyboardEvent, WheelEvent};
+use web_sys::{
+    CanvasRenderingContext2d, HtmlInputElement, ImageData, InputEvent, KeyboardEvent, WheelEvent,
+};
 
 const LS_KEY: &str = "typingmp_custom_problems";
 
 /// localStorage からカスタム問題リストを読み込む
 fn load_custom_problems() -> Vec<CustomProblem> {
-    let window = match web_sys::window() { Some(w) => w, None => return Vec::new() };
+    let window = match web_sys::window() {
+        Some(w) => w,
+        None => return Vec::new(),
+    };
     let storage = match window.local_storage() {
         Ok(Some(s)) => s,
         _ => return Vec::new(),
@@ -38,13 +43,23 @@ fn load_custom_problems() -> Vec<CustomProblem> {
     for i in 0..arr.length() {
         let item = arr.get(i);
         let name = js_sys::Reflect::get(&item, &JsValue::from_str("name"))
-            .ok().and_then(|v| v.as_string()).unwrap_or_default();
+            .ok()
+            .and_then(|v| v.as_string())
+            .unwrap_or_default();
         let content = js_sys::Reflect::get(&item, &JsValue::from_str("content"))
-            .ok().and_then(|v| v.as_string()).unwrap_or_default();
+            .ok()
+            .and_then(|v| v.as_string())
+            .unwrap_or_default();
         let timestamp_ms = js_sys::Reflect::get(&item, &JsValue::from_str("timestamp"))
-            .ok().and_then(|v| v.as_f64()).unwrap_or(0.0) as u64;
+            .ok()
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0) as u64;
         if !name.is_empty() && !content.is_empty() {
-            result.push(CustomProblem { name, content, timestamp_ms });
+            result.push(CustomProblem {
+                name,
+                content,
+                timestamp_ms,
+            });
         }
     }
     result
@@ -52,7 +67,10 @@ fn load_custom_problems() -> Vec<CustomProblem> {
 
 /// カスタム問題リストを localStorage に保存する
 fn save_custom_problems(problems: &[CustomProblem]) {
-    let window = match web_sys::window() { Some(w) => w, None => return };
+    let window = match web_sys::window() {
+        Some(w) => w,
+        None => return,
+    };
     let storage = match window.local_storage() {
         Ok(Some(s)) => s,
         _ => return,
@@ -60,9 +78,21 @@ fn save_custom_problems(problems: &[CustomProblem]) {
     let arr = js_sys::Array::new();
     for p in problems {
         let obj = js_sys::Object::new();
-        let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("name"), &JsValue::from_str(&p.name));
-        let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("content"), &JsValue::from_str(&p.content));
-        let _ = js_sys::Reflect::set(&obj, &JsValue::from_str("timestamp"), &JsValue::from_f64(p.timestamp_ms as f64));
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("name"),
+            &JsValue::from_str(&p.name),
+        );
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("content"),
+            &JsValue::from_str(&p.content),
+        );
+        let _ = js_sys::Reflect::set(
+            &obj,
+            &JsValue::from_str("timestamp"),
+            &JsValue::from_f64(p.timestamp_ms as f64),
+        );
         arr.push(&obj);
     }
     if let Ok(json) = js_sys::JSON::stringify(&arr) {
@@ -126,8 +156,7 @@ pub fn has_wrong_input() -> bool {
         instance.borrow().as_ref().map_or(false, |app_rc| {
             let app = app_rc.borrow();
             if let Some(model) = &app.typing_model {
-                model.status.last_wrong_keydown.is_some()
-                    || !model.status.unconfirmed.is_empty()
+                model.status.last_wrong_keydown.is_some() || !model.status.unconfirmed.is_empty()
             } else {
                 false
             }
@@ -164,12 +193,11 @@ pub fn trigger_event(event_type: &str) {
                 "Enter" => app.on_event(AppEvent::Enter),
                 "Backspace" => app.on_event(AppEvent::Backspace),
                 "Escape" => app.on_event(AppEvent::Escape),
-                _ => {},
+                _ => {}
             }
         }
     });
 }
-
 
 /// フォントを `fonts/` 相対パスから非同期に fetch して Vec<u8> で返す
 async fn fetch_font_bytes(url: &str) -> Result<Vec<u8>, JsValue> {
@@ -177,7 +205,11 @@ async fn fetch_font_bytes(url: &str) -> Result<Vec<u8>, JsValue> {
     let resp_value = JsFuture::from(window.fetch_with_str(url)).await?;
     let resp: web_sys::Response = resp_value.dyn_into()?;
     if !resp.ok() {
-        return Err(JsValue::from_str(&format!("Failed to fetch font (status {}): {}", resp.status(), url)));
+        return Err(JsValue::from_str(&format!(
+            "Failed to fetch font (status {}): {}",
+            resp.status(),
+            url
+        )));
     }
     let buffer = JsFuture::from(resp.array_buffer()?).await?;
     let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
@@ -235,23 +267,27 @@ async fn start_async() -> Result<(), JsValue> {
         .get_element_by_id("canvas-wrapper")
         .ok_or_else(|| JsValue::from_str("Missing #canvas-wrapper element"))?;
 
-    let canvas = document.create_element("canvas")?.dyn_into::<web_sys::HtmlCanvasElement>()?;
-    
+    let canvas = document
+        .create_element("canvas")?
+        .dyn_into::<web_sys::HtmlCanvasElement>()?;
+
     wrapper.append_child(&canvas)?;
-    
-    let context = canvas.get_context("2d")?.unwrap().dyn_into::<CanvasRenderingContext2d>()?;
-    
+
+    let context = canvas
+        .get_context("2d")?
+        .unwrap()
+        .dyn_into::<CanvasRenderingContext2d>()?;
+
     // フォントをサーバーから非同期 fetch する（WASM バイナリへの埋め込みを回避）
-    let japanese_font = FontVec::try_from_vec(fetch_font_bytes("./fonts/YujiSyuku-Regular.ttf").await?)
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let traditional_chinese_font = FontVec::try_from_vec(
-        fetch_font_bytes("./fonts/NotoSerifJP-Regular.ttf").await?,
-    )
-    .map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let simplified_chinese_font = FontVec::try_from_vec(
-        fetch_font_bytes("./fonts/NotoSerifJP-Regular.ttf").await?,
-    )
-    .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let japanese_font =
+        FontVec::try_from_vec(fetch_font_bytes("./fonts/YujiSyuku-Regular.ttf").await?)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let traditional_chinese_font =
+        FontVec::try_from_vec(fetch_font_bytes("./fonts/NotoSerifJP-Regular.ttf").await?)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let simplified_chinese_font =
+        FontVec::try_from_vec(fetch_font_bytes("./fonts/NotoSerifJP-Regular.ttf").await?)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     let fonts = Fonts {
         japanese: japanese_font,
@@ -351,7 +387,10 @@ async fn start_async() -> Result<(), JsValue> {
                 *touch_start_clone.borrow_mut() = Some((e.client_x() as f64, e.client_y() as f64));
                 let _ = input_clone.focus();
             });
-            canvas.add_event_listener_with_callback("pointerdown", closure.as_ref().unchecked_ref())?;
+            canvas.add_event_listener_with_callback(
+                "pointerdown",
+                closure.as_ref().unchecked_ref(),
+            )?;
             closure.forget();
         }
 
@@ -360,9 +399,9 @@ async fn start_async() -> Result<(), JsValue> {
             let touch_start_clone = touch_start.clone();
             let app_clone = app.clone();
             let file_input_clone = file_input.clone();
-            const TAP_MAX_DIST: f64 = 12.0;    // タップ判定の最大移動量 (px)
-            const SWIPE_MIN_DIST: f64 = 40.0;  // スワイプ判定の最小移動量 (px)
-            const SWIPE_STEP_PX: f64 = 60.0;   // スワイプ距離 60px ごとに 1 ステップ
+            const TAP_MAX_DIST: f64 = 12.0; // タップ判定の最大移動量 (px)
+            const SWIPE_MIN_DIST: f64 = 40.0; // スワイプ判定の最小移動量 (px)
+            const SWIPE_STEP_PX: f64 = 60.0; // スワイプ距離 60px ごとに 1 ステップ
             let closure = Closure::<dyn FnMut(_)>::new(move |e: PointerEvent| {
                 let start = match touch_start_clone.borrow_mut().take() {
                     Some(s) => s,
@@ -393,7 +432,8 @@ async fn start_async() -> Result<(), JsValue> {
                 }
                 // 横スワイプは無視（タイピング中の横スクロールは将来対応）
             });
-            canvas.add_event_listener_with_callback("pointerup", closure.as_ref().unchecked_ref())?;
+            canvas
+                .add_event_listener_with_callback("pointerup", closure.as_ref().unchecked_ref())?;
             closure.forget();
         }
     }
@@ -407,8 +447,8 @@ async fn start_async() -> Result<(), JsValue> {
             let delta = e.delta_y();
             let steps = match e.delta_mode() {
                 0 => ((delta.abs() / 50.0).ceil() as u32).max(1).min(5), // ピクセル単位
-                1 => (delta.abs() as u32).max(1).min(5),                  // 行単位
-                _ => 1,                                                     // ページ単位など
+                1 => (delta.abs() as u32).max(1).min(5),                 // 行単位
+                _ => 1,                                                  // ページ単位など
             };
             let mut a = app_clone.borrow_mut();
             for _ in 0..steps {
@@ -434,11 +474,16 @@ async fn start_async() -> Result<(), JsValue> {
             canvas_clone.set_height(height);
             *size_clone.borrow_mut() = (width as usize, height as usize);
         });
-        window.add_event_listener_with_callback("resize", resize_closure.as_ref().unchecked_ref())?;
-        resize_closure.as_ref().unchecked_ref::<js_sys::Function>().call0(&JsValue::NULL).unwrap();
+        window
+            .add_event_listener_with_callback("resize", resize_closure.as_ref().unchecked_ref())?;
+        resize_closure
+            .as_ref()
+            .unchecked_ref::<js_sys::Function>()
+            .call0(&JsValue::NULL)
+            .unwrap();
         resize_closure.forget();
     }
-    
+
     // キー入力イベント（特殊キー用）
     {
         let app_clone = app.clone();
@@ -456,15 +501,15 @@ async fn start_async() -> Result<(), JsValue> {
                 "ArrowUp" => {
                     event.prevent_default();
                     app_clone.borrow_mut().on_event(AppEvent::Up)
-                },
+                }
                 "ArrowDown" => {
                     event.prevent_default();
                     app_clone.borrow_mut().on_event(AppEvent::Down)
-                },
+                }
                 "Backspace" => {
                     event.prevent_default();
                     app_clone.borrow_mut().on_event(AppEvent::Backspace)
-                },
+                }
                 "Enter" => {
                     event.prevent_default();
                     app_clone.borrow_mut().on_event(AppEvent::Enter);
@@ -473,11 +518,11 @@ async fn start_async() -> Result<(), JsValue> {
                         app_clone.borrow_mut().should_open_file_dialog = false;
                         let _ = file_input_clone.click();
                     }
-                },
+                }
                 "Escape" => {
                     event.prevent_default();
                     app_clone.borrow_mut().on_event(AppEvent::Escape)
-                },
+                }
                 _ => {}
             }
         });
@@ -506,7 +551,10 @@ async fn start_async() -> Result<(), JsValue> {
                 if !data.is_empty() {
                     let mut app = app_clone.borrow_mut();
                     for c in data.chars() {
-                        app.on_event(AppEvent::Char { c, timestamp: crate::timestamp::now() });
+                        app.on_event(AppEvent::Char {
+                            c,
+                            timestamp: crate::timestamp::now(),
+                        });
                     }
                     // ProblemSelection での削除・並び替えが発生した場合 localStorage に保存
                     if app.should_save_custom_problems {
@@ -516,7 +564,8 @@ async fn start_async() -> Result<(), JsValue> {
                 }
             }
         });
-        input_element.add_event_listener_with_callback("input", closure.as_ref().unchecked_ref())?;
+        input_element
+            .add_event_listener_with_callback("input", closure.as_ref().unchecked_ref())?;
         closure.forget();
     }
 
@@ -527,7 +576,7 @@ async fn start_async() -> Result<(), JsValue> {
     // メインループ（アニメーションフレーム）
     *g.borrow_mut() = Some(Closure::<dyn FnMut()>::new(move || {
         let (width, height) = *size.borrow();
-        
+
         if width == 0 || height == 0 {
             request_animation_frame(f.borrow().as_ref().unwrap());
             return;
@@ -535,7 +584,11 @@ async fn start_async() -> Result<(), JsValue> {
 
         let now = crate::timestamp::now();
         let mut last_time_borrow = last_time.borrow_mut();
-        let delta_time = if *last_time_borrow > 0.0 { now - *last_time_borrow } else { 16.6 };
+        let delta_time = if *last_time_borrow > 0.0 {
+            now - *last_time_borrow
+        } else {
+            16.6
+        };
         *last_time_borrow = now;
 
         app.borrow_mut().update(width, height, delta_time);
@@ -565,46 +618,107 @@ async fn start_async() -> Result<(), JsValue> {
                             GRADIENT_CACHE.with(|gc| {
                                 let mut gc = gc.borrow_mut();
                                 let matches = gc.as_ref().map_or(false, |(sc, ec, gw, gh, _)| {
-                                    *sc == gradient.start_color && *ec == gradient.end_color
-                                        && *gw == width && *gh == height
+                                    *sc == gradient.start_color
+                                        && *ec == gradient.end_color
+                                        && *gw == width
+                                        && *gh == height
                                 });
                                 if matches {
                                     let cached = &gc.as_ref().unwrap().4;
                                     pb.copy_from_slice(cached);
                                 } else {
                                     crate::renderer::draw_linear_gradient(
-                                        &mut pb, width, height,
-                                        gradient.start_color, gradient.end_color,
-                                        (0.0, 0.0), (width as f32, height as f32),
+                                        &mut pb,
+                                        width,
+                                        height,
+                                        gradient.start_color,
+                                        gradient.end_color,
+                                        (0.0, 0.0),
+                                        (width as f32, height as f32),
                                     );
                                     *gc = Some((
-                                        gradient.start_color, gradient.end_color,
-                                        width, height, pb.to_vec(),
+                                        gradient.start_color,
+                                        gradient.end_color,
+                                        width,
+                                        height,
+                                        pb.to_vec(),
                                     ));
                                 }
                             });
                         }
-                        Renderable::BigText { text, anchor, shift, align, font_size, color } |
-                        Renderable::Text { text, anchor, shift, align, font_size, color } => {
-                            let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
-                            let (text_width, text_height, _) = gui_renderer::measure_text(current_font, &text, pixel_font_size);
-                            let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
-                            let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
-                            gui_renderer::draw_text(&mut pb, width, current_font, &text, (x as f32, y as f32), pixel_font_size, color);
+                        Renderable::BigText {
+                            text,
+                            anchor,
+                            shift,
+                            align,
+                            font_size,
+                            color,
                         }
-                        Renderable::TypingUpper { segments, anchor, shift, align, font_size } => {
-                            let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
+                        | Renderable::Text {
+                            text,
+                            anchor,
+                            shift,
+                            align,
+                            font_size,
+                            color,
+                        } => {
+                            let pixel_font_size =
+                                calculate_pixel_font_size(font_size, width, height);
+                            let (text_width, text_height, _) =
+                                gui_renderer::measure_text(current_font, &text, pixel_font_size);
+                            let anchor_pos =
+                                ui::calculate_anchor_position(anchor, shift, width, height);
+                            let (x, y) = ui::calculate_aligned_position(
+                                anchor_pos,
+                                text_width,
+                                text_height,
+                                align,
+                            );
+                            gui_renderer::draw_text(
+                                &mut pb,
+                                width,
+                                current_font,
+                                &text,
+                                (x as f32, y as f32),
+                                pixel_font_size,
+                                color,
+                            );
+                        }
+                        Renderable::TypingUpper {
+                            segments,
+                            anchor,
+                            shift,
+                            align,
+                            font_size,
+                        } => {
+                            let pixel_font_size =
+                                calculate_pixel_font_size(font_size, width, height);
                             let ruby_pixel_font_size = pixel_font_size * 0.4;
 
                             // 各セグメントの幅を一度だけ計測してキャッシュする
-                            let seg_widths: Vec<u32> = segments.iter().map(|seg| {
-                                gui_renderer::measure_text(current_font, &seg.base_text, pixel_font_size).0
-                            }).collect();
+                            let seg_widths: Vec<u32> = segments
+                                .iter()
+                                .map(|seg| {
+                                    gui_renderer::measure_text(
+                                        current_font,
+                                        &seg.base_text,
+                                        pixel_font_size,
+                                    )
+                                    .0
+                                })
+                                .collect();
                             let total_width: u32 = seg_widths.iter().sum();
-                            let total_height = gui_renderer::measure_text(current_font, " ", pixel_font_size).1;
+                            let total_height =
+                                gui_renderer::measure_text(current_font, " ", pixel_font_size).1;
 
-                            let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
-                            let (mut pen_x, y) = ui::calculate_aligned_position(anchor_pos, total_width, total_height, align);
+                            let anchor_pos =
+                                ui::calculate_anchor_position(anchor, shift, width, height);
+                            let (mut pen_x, y) = ui::calculate_aligned_position(
+                                anchor_pos,
+                                total_width,
+                                total_height,
+                                align,
+                            );
 
                             for (seg, &seg_w) in segments.iter().zip(seg_widths.iter()) {
                                 let color = match seg.state {
@@ -613,25 +727,61 @@ async fn start_async() -> Result<(), JsValue> {
                                     UpperSegmentState::Active => ui::ACTIVE_COLOR,
                                     UpperSegmentState::Pending => ui::PENDING_COLOR,
                                 };
-                                gui_renderer::draw_text(&mut pb, width, current_font, &seg.base_text, (pen_x as f32, y as f32), pixel_font_size, color);
+                                gui_renderer::draw_text(
+                                    &mut pb,
+                                    width,
+                                    current_font,
+                                    &seg.base_text,
+                                    (pen_x as f32, y as f32),
+                                    pixel_font_size,
+                                    color,
+                                );
 
                                 if let Some(ruby) = &seg.ruby_text {
-                                    let (ruby_w, ..) = gui_renderer::measure_text(current_font, ruby, ruby_pixel_font_size);
-                                    let ruby_x = pen_x as f32 + (seg_w as f32 - ruby_w as f32) / 2.0;
+                                    let (ruby_w, ..) = gui_renderer::measure_text(
+                                        current_font,
+                                        ruby,
+                                        ruby_pixel_font_size,
+                                    );
+                                    let ruby_x =
+                                        pen_x as f32 + (seg_w as f32 - ruby_w as f32) / 2.0;
                                     let ruby_y = y as f32 - ruby_pixel_font_size * 0.5;
-                                    gui_renderer::draw_text(&mut pb, width, current_font, ruby, (ruby_x, ruby_y), ruby_pixel_font_size, color);
+                                    gui_renderer::draw_text(
+                                        &mut pb,
+                                        width,
+                                        current_font,
+                                        ruby,
+                                        (ruby_x, ruby_y),
+                                        ruby_pixel_font_size,
+                                        color,
+                                    );
                                 }
 
                                 pen_x += seg_w as i32;
                             }
                         }
-                        Renderable::TypingLower { segments, anchor, shift, align, font_size, target_line_total_width } => {
-                            let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
+                        Renderable::TypingLower {
+                            segments,
+                            anchor,
+                            shift,
+                            align,
+                            font_size,
+                            target_line_total_width,
+                        } => {
+                            let pixel_font_size =
+                                calculate_pixel_font_size(font_size, width, height);
                             let ruby_pixel_font_size = pixel_font_size * 0.3;
-                            let total_height = gui_renderer::measure_text(current_font, " ", pixel_font_size).1;
+                            let total_height =
+                                gui_renderer::measure_text(current_font, " ", pixel_font_size).1;
 
-                            let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
-                            let (mut pen_x, y) = ui::calculate_aligned_position(anchor_pos, target_line_total_width, total_height, align);
+                            let anchor_pos =
+                                ui::calculate_anchor_position(anchor, shift, width, height);
+                            let (mut pen_x, y) = ui::calculate_aligned_position(
+                                anchor_pos,
+                                target_line_total_width,
+                                total_height,
+                                align,
+                            );
 
                             for seg in segments {
                                 match seg {
@@ -642,16 +792,41 @@ async fn start_async() -> Result<(), JsValue> {
                                         width: seg_width,
                                         ..
                                     } => {
-                                        let color = if is_correct { ui::CORRECT_COLOR } else { ui::INCORRECT_COLOR };
+                                        let color = if is_correct {
+                                            ui::CORRECT_COLOR
+                                        } else {
+                                            ui::INCORRECT_COLOR
+                                        };
                                         // base_w を一度だけ計測してルビ位置と pen 進行の両方に使う
-                                            let base_w = seg_width;
-                                        gui_renderer::draw_text(&mut pb, width, current_font, &base_text, (pen_x as f32, y as f32), pixel_font_size, color);
+                                        let base_w = seg_width;
+                                        gui_renderer::draw_text(
+                                            &mut pb,
+                                            width,
+                                            current_font,
+                                            &base_text,
+                                            (pen_x as f32, y as f32),
+                                            pixel_font_size,
+                                            color,
+                                        );
 
                                         if let Some(ruby) = ruby_text {
-                                            let (ruby_w, ..) = gui_renderer::measure_text(current_font, &ruby, ruby_pixel_font_size);
-                                            let ruby_x = pen_x as f32 + (base_w as f32 - ruby_w as f32) / 2.0;
+                                            let (ruby_w, ..) = gui_renderer::measure_text(
+                                                current_font,
+                                                &ruby,
+                                                ruby_pixel_font_size,
+                                            );
+                                            let ruby_x = pen_x as f32
+                                                + (base_w as f32 - ruby_w as f32) / 2.0;
                                             let ruby_y = y as f32 - ruby_pixel_font_size * 0.5;
-                                            gui_renderer::draw_text(&mut pb, width, current_font, &ruby, (ruby_x, ruby_y), ruby_pixel_font_size, color);
+                                            gui_renderer::draw_text(
+                                                &mut pb,
+                                                width,
+                                                current_font,
+                                                &ruby,
+                                                (ruby_x, ruby_y),
+                                                ruby_pixel_font_size,
+                                                color,
+                                            );
                                         }
 
                                         pen_x += base_w as i32;
@@ -659,32 +834,86 @@ async fn start_async() -> Result<(), JsValue> {
                                     LowerTypingSegment::Active { elements } => {
                                         for el in elements {
                                             let (text, color) = match el {
-                                                ActiveLowerElement::Typed { character, is_correct } => (character.to_string(), if is_correct { ui::CORRECT_COLOR } else { ui::INCORRECT_COLOR }),
-                                                ActiveLowerElement::Cursor => ("|".to_string(), ui::CURSOR_COLOR),
-                                                ActiveLowerElement::UnconfirmedInput(s) => (s.clone(), ui::UNCONFIRMED_COLOR),
-                                                ActiveLowerElement::LastIncorrectInput(c) => (c.to_string(), ui::WRONG_KEY_COLOR),
+                                                ActiveLowerElement::Typed {
+                                                    character,
+                                                    is_correct,
+                                                } => (
+                                                    character.to_string(),
+                                                    if is_correct {
+                                                        ui::CORRECT_COLOR
+                                                    } else {
+                                                        ui::INCORRECT_COLOR
+                                                    },
+                                                ),
+                                                ActiveLowerElement::Cursor => {
+                                                    ("|".to_string(), ui::CURSOR_COLOR)
+                                                }
+                                                ActiveLowerElement::UnconfirmedInput(s) => {
+                                                    (s.clone(), ui::UNCONFIRMED_COLOR)
+                                                }
+                                                ActiveLowerElement::LastIncorrectInput(c) => {
+                                                    (c.to_string(), ui::WRONG_KEY_COLOR)
+                                                }
                                             };
-                                            let text_w = gui_renderer::measure_text(current_font, &text, pixel_font_size).0;
-                                            gui_renderer::draw_text(&mut pb, width, current_font, &text, (pen_x as f32, y as f32), pixel_font_size, color);
+                                            let text_w = gui_renderer::measure_text(
+                                                current_font,
+                                                &text,
+                                                pixel_font_size,
+                                            )
+                                            .0;
+                                            gui_renderer::draw_text(
+                                                &mut pb,
+                                                width,
+                                                current_font,
+                                                &text,
+                                                (pen_x as f32, y as f32),
+                                                pixel_font_size,
+                                                color,
+                                            );
                                             pen_x += text_w as i32;
                                         }
                                     }
                                 }
                             }
                         }
-                        Renderable::ProgressBar { anchor, shift, width_ratio, height_ratio, progress, bg_color, fg_color } => {
+                        Renderable::ProgressBar {
+                            anchor,
+                            shift,
+                            width_ratio,
+                            height_ratio,
+                            progress,
+                            bg_color,
+                            fg_color,
+                        } => {
                             let bar_width = (width as f32 * width_ratio) as u32;
                             let bar_height = (height as f32 * height_ratio) as u32;
 
-                            let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
+                            let anchor_pos =
+                                ui::calculate_anchor_position(anchor, shift, width, height);
                             let start_x = anchor_pos.0 as usize;
                             let start_y = (anchor_pos.1 - bar_height as i32).max(0) as usize;
 
-                            gui_renderer::draw_rect(&mut pb, width, start_x, start_y, bar_width as usize, bar_height as usize, bg_color);
+                            gui_renderer::draw_rect(
+                                &mut pb,
+                                width,
+                                start_x,
+                                start_y,
+                                bar_width as usize,
+                                bar_height as usize,
+                                bg_color,
+                            );
 
                             let fg_width = (bar_width as f32 * progress) as usize;
                             if fg_width > 0 {
-                                gui_renderer::draw_rect(&mut pb, width, start_x, start_y, fg_width, bar_height as usize, fg_color);
+                                gui_renderer::draw_rect(
+                                    &mut pb,
+                                    width,
+                                    start_x,
+                                    start_y,
+                                    fg_width,
+                                    bar_height as usize,
+                                    fg_color,
+                                );
                             }
                         }
                     }
@@ -699,7 +928,7 @@ async fn start_async() -> Result<(), JsValue> {
                     }
                     for (i, pixel) in pb.iter().enumerate() {
                         let base = i * 4;
-                        ub[base]     = ((*pixel >> 16) & 0xFF) as u8;
+                        ub[base] = ((*pixel >> 16) & 0xFF) as u8;
                         ub[base + 1] = ((*pixel >> 8) & 0xFF) as u8;
                         ub[base + 2] = (*pixel & 0xFF) as u8;
                         ub[base + 3] = 255;
@@ -708,10 +937,10 @@ async fn start_async() -> Result<(), JsValue> {
                         Clamped(&ub),
                         width as u32,
                         height as u32,
-                    ).unwrap();
+                    )
+                    .unwrap();
                     context.put_image_data(&image_data, 0.0, 0.0).unwrap();
                 });
-
             });
         }
 
@@ -726,7 +955,7 @@ async fn start_async() -> Result<(), JsValue> {
         request_animation_frame(f.borrow().as_ref().unwrap());
     }));
     request_animation_frame(g.borrow().as_ref().unwrap());
-    
+
     Ok(())
 }
 

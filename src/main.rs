@@ -29,11 +29,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // デスクトップ用featureが一つも有効でない場合にコンパイルされるブロック
     #[cfg(not(any(feature = "gui", feature = "tui", feature = "mobile")))]
     {
-        println!("No desktop backend feature enabled. Please run with --features gui or --features tui");
+        println!(
+            "No desktop backend feature enabled. Please run with --features gui or --features tui"
+        );
         return Ok(());
     }
 }
-
 
 #[cfg(feature = "uefi")]
 #[uefi::entry]

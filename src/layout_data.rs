@@ -208,11 +208,12 @@ static JAPANESE_LAYOUT: PhfLayoutMap = phf_map! {
 /// Converts the static PHF map to a Vec of heap-allocated Strings,
 /// which is what the rest of the application expects.
 pub fn get_layout() -> Vec<(String, Vec<String>)> {
-    JAPANESE_LAYOUT.entries()
+    JAPANESE_LAYOUT
+        .entries()
         .map(|(key, values)| {
             (
                 String::from(*key),
-                values.iter().map(|s| String::from(*s)).collect()
+                values.iter().map(|s| String::from(*s)).collect(),
             )
         })
         .collect()

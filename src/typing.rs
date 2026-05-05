@@ -1,4 +1,4 @@
-﻿// ./src/typing.rs
+// ./src/typing.rs
 
 #[cfg(feature = "uefi")]
 extern crate alloc;
@@ -17,8 +17,8 @@ use std::{
 
 use crate::model::{
     Content, Model, ResultModel, Segment, TypingCorrectnessChar, TypingCorrectnessContent,
-    TypingCorrectnessLine, TypingCorrectnessSegment, TypingCorrectnessWord, TypingInput, TypingMetrics, TypingModel,
-    TypingSession,
+    TypingCorrectnessLine, TypingCorrectnessSegment, TypingCorrectnessWord, TypingInput,
+    TypingMetrics, TypingModel, TypingSession,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -75,10 +75,11 @@ fn normalize_typing_char(c: char) -> char {
 
 fn is_n_auto_commit_trigger(unconfirmed: &[char], input_lower: char, target_slice: &str) -> bool {
     match (unconfirmed, target_slice.chars().next()) {
-        ([ 'n' ], Some('ん')) if !matches!(
-            input_lower,
-            'a' | 'i' | 'u' | 'e' | 'o' | 'n' | 'y' | '\''
-        ) => true,
+        (['n'], Some('ん'))
+            if !matches!(input_lower, 'a' | 'i' | 'u' | 'e' | 'o' | 'n' | 'y' | '\'') =>
+        {
+            true
+        }
         _ => false,
     }
 }
@@ -98,7 +99,9 @@ fn match_romaji_mapping(
     layout: &crate::model::Layout,
 ) -> KeystrokeMatch {
     let candidate_indexes: &[usize] = match target_slice.as_bytes().first() {
-        Some(first_byte) => &layout.normalized_mapping_by_first_char[first_byte.to_ascii_lowercase() as usize],
+        Some(first_byte) => {
+            &layout.normalized_mapping_by_first_char[first_byte.to_ascii_lowercase() as usize]
+        }
         None => &[],
     };
 
@@ -213,7 +216,11 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     log(&format!("\n--- key_input: '{}' --- typing.rs", input));
     log(&format!(
         "  [State Before] line: {}, word: {}, seg: {}, char: {}, unconfirmed: {:?}",
-        model.status.line, model.status.word, model.status.segment, model.status.char_, model.status.unconfirmed
+        model.status.line,
+        model.status.word,
+        model.status.segment,
+        model.status.char_,
+        model.status.unconfirmed
     ));
 
     let current_time = timestamp;
@@ -247,8 +254,11 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     // 元の子音入力を処理する。
     {
         let input_lower = input.to_ascii_lowercase();
-        let is_n_commit_trigger =
-            is_n_auto_commit_trigger(model.status.unconfirmed.as_slice(), input_lower, &target_slice);
+        let is_n_commit_trigger = is_n_auto_commit_trigger(
+            model.status.unconfirmed.as_slice(),
+            input_lower,
+            &target_slice,
+        );
         if is_n_commit_trigger {
             log("  [ん auto-commit] triggering 'n' then original input");
             return match key_input(model, 'n', timestamp) {
@@ -258,9 +268,7 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
         }
     }
 
-    if model
-        .user_input
-        .is_empty()
+    if model.user_input.is_empty()
         || model
             .user_input
             .last()
@@ -307,18 +315,30 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
             let mut current_char_idx = model.status.char_ as usize;
 
             while remaining_advance > 0 && current_seg_idx < word_content.segments.len() {
-                let Some(correctness_word) = model.typing_correctness.lines
+                let Some(correctness_word) = model
+                    .typing_correctness
+                    .lines
                     .get_mut(current_line_idx)
-                    .and_then(|l| l.words.get_mut(model.status.word as usize)) else { break; };
-                let Some(correctness_segment) = correctness_word.segments.get_mut(current_seg_idx) else { break; };
+                    .and_then(|l| l.words.get_mut(model.status.word as usize))
+                else {
+                    break;
+                };
+                let Some(correctness_segment) = correctness_word.segments.get_mut(current_seg_idx)
+                else {
+                    break;
+                };
                 let current_seg_len = correctness_segment.chars.len();
 
-                let chars_to_advance_in_seg = (current_seg_len - current_char_idx).min(remaining_advance);
+                let chars_to_advance_in_seg =
+                    (current_seg_len - current_char_idx).min(remaining_advance);
 
                 // 正誤情報を更新
                 for i in 0..chars_to_advance_in_seg {
-                    if correctness_segment.chars[current_char_idx + i] != TypingCorrectnessChar::Incorrect {
-                        correctness_segment.chars[current_char_idx + i] = TypingCorrectnessChar::Correct;
+                    if correctness_segment.chars[current_char_idx + i]
+                        != TypingCorrectnessChar::Incorrect
+                    {
+                        correctness_segment.chars[current_char_idx + i] =
+                            TypingCorrectnessChar::Correct;
                     }
                 }
 
@@ -336,13 +356,19 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     } else {
         model.status.last_wrong_keydown = Some(input);
         model.status.unconfirmed.clear();
-        let Some(correctness_segment) = model.typing_correctness.lines
+        let Some(correctness_segment) = model
+            .typing_correctness
+            .lines
             .get_mut(current_line_idx)
             .and_then(|l| l.words.get_mut(model.status.word as usize))
-            .and_then(|w| w.segments.get_mut(model.status.segment as usize)) else {
+            .and_then(|w| w.segments.get_mut(model.status.segment as usize))
+        else {
             return Model::Typing(model);
         };
-        if let Some(c) = correctness_segment.chars.get_mut(model.status.char_ as usize) {
+        if let Some(c) = correctness_segment
+            .chars
+            .get_mut(model.status.char_ as usize)
+        {
             *c = TypingCorrectnessChar::Incorrect;
         }
     }
@@ -362,10 +388,17 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     } else {
         model.total_miss_count += 1;
     }
-    if model.first_input_time.map_or(true, |first| timestamp < first) {
+    if model
+        .first_input_time
+        .map_or(true, |first| timestamp < first)
+    {
         model.first_input_time = Some(timestamp);
     }
-    model.last_input_time = Some(model.last_input_time.map_or(timestamp, |last| last.max(timestamp)));
+    model.last_input_time = Some(
+        model
+            .last_input_time
+            .map_or(timestamp, |last| last.max(timestamp)),
+    );
 
     // 4. セグメント、単語、行、全体の完了チェック
     let completion = if model.status.segment as usize >= word_content.segments.len() {
@@ -394,7 +427,11 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     ));
     log(&format!(
         "  [State After] line: {}, word: {}, seg: {}, char: {}, unconfirmed: {:?}",
-        model.status.line, model.status.word, model.status.segment, model.status.char_, model.status.unconfirmed
+        model.status.line,
+        model.status.word,
+        model.status.segment,
+        model.status.char_,
+        model.status.unconfirmed
     ));
 
     if matches!(completion, TypingCompletion::Finished) {
@@ -411,7 +448,10 @@ fn segment_target_reading_static(seg: &Segment) -> String {
     match seg {
         Segment::Plain { text } => text.clone(),
         Segment::Annotated { reading, .. } => reading.clone(),
-        Segment::Anno { inner, .. } => inner.iter().map(|s| segment_target_reading_static(s)).collect(),
+        Segment::Anno { inner, .. } => inner
+            .iter()
+            .map(|s| segment_target_reading_static(s))
+            .collect(),
     }
 }
 
@@ -423,7 +463,8 @@ pub fn create_typing_correctness_model(content: &Content) -> TypingCorrectnessCo
             let mut segments = Vec::new();
             for segment in &word.segments {
                 let target_text = segment_target_reading_static(segment);
-                let chars = target_text.chars()
+                let chars = target_text
+                    .chars()
                     .map(|_| TypingCorrectnessChar::Pending)
                     .collect();
                 segments.push(TypingCorrectnessSegment { chars });
@@ -460,7 +501,9 @@ pub fn calculate_total_metrics(model: &TypingModel) -> TypingMetrics {
     let mut metrics = TypingMetrics::new();
     metrics.type_count = model.total_type_count;
     metrics.miss_count = model.total_miss_count;
-    if let (Some(first_input_time), Some(last_input_time)) = (model.first_input_time, model.last_input_time) {
+    if let (Some(first_input_time), Some(last_input_time)) =
+        (model.first_input_time, model.last_input_time)
+    {
         if last_input_time > first_input_time {
             metrics.total_time = last_input_time - first_input_time;
         }
