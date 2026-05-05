@@ -214,3 +214,51 @@ pub fn get_layout() -> Vec<(String, Vec<String>)> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn values_for<'a>(layout: &'a [(String, Vec<String>)], key: &str) -> &'a [String] {
+        layout
+            .iter()
+            .find_map(|(candidate_key, values)| {
+                if candidate_key == key {
+                    Some(values.as_slice())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| panic!("layout key {key:?} should exist"))
+    }
+
+    fn has_value(values: &[String], expected: &str) -> bool {
+        values.iter().any(|value| value == expected)
+    }
+
+    #[test]
+    fn japanese_mapping_keeps_common_shi_variants() {
+        let layout = get_layout();
+        let values = values_for(&layout, "し");
+
+        assert!(has_value(values, "si"));
+        assert!(has_value(values, "shi"));
+    }
+
+    #[test]
+    fn sokuon_mapping_keeps_collision_variants() {
+        let layout = get_layout();
+        let values = values_for(&layout, "っか");
+
+        assert!(has_value(values, "kka"));
+        assert!(has_value(values, "cca"));
+    }
+
+    #[test]
+    fn ascii_mapping_is_direct() {
+        let layout = get_layout();
+        let values = values_for(&layout, "a");
+
+        assert_eq!(values, ["a"]);
+    }
+}

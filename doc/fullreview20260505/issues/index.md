@@ -7,8 +7,8 @@ generated_at: `2026-05-05T00:00:00Z`
 | key | count |
 |---|---:|
 | total | 29 |
-| open | 26 |
-| resolved | 3 |
+| open | 25 |
+| resolved | 4 |
 | P0 | 1 |
 | P1 | 17 |
 | P2 | 10 |
@@ -43,7 +43,6 @@ generated_at: `2026-05-05T00:00:00Z`
 | P1 | TP-ARCH-005 | architecture | architecture | problem/font/storage/loggerのI/Oがprovider境界で仮想化されていない | [item](./items/ISS-20260505T000000Z-TP-ARCH-005-IO-PROVIDER-VFS.md) |
 | P1 | TP-STATIC-001 | static-safety | type-safety | 状態とcommandがraw number/raw stringに依存しenumとmatchの網羅性検査が効いていない | [item](./items/ISS-20260505T000000Z-TP-STATIC-001-ENUM-MATCH-STATE.md) |
 | P1 | TP-CI-002 | ci | quality | cargo fmtとclippy warningが品質gateになっていない | [item](./items/ISS-20260505T000000Z-TP-CI-002-FMT-CLIPPY-GATE.md) |
-| P1 | TP-CORE-003 | quality | test | parser以外のcore regression testが不足している | [item](./items/ISS-20260505T000000Z-TP-CORE-003-TEST-COVERAGE-GAP.md) |
 | P1 | TP-ARCH-001 | architecture | architecture | Appがscene/input/problem/scroll/fontを抱えすぎている | [item](./items/ISS-20260505T000000Z-TP-ARCH-001-APP-GOD-OBJECT.md) |
 | P1 | TP-ARCH-002 | architecture | architecture | backendごとにrendering pipelineが重複している | [item](./items/ISS-20260505T000000Z-TP-ARCH-002-RENDERER-DUPLICATION.md) |
 | P1 | TP-TYPE-001 | core | type-safety | typing stateがi32 indexとunchecked castに依存している | [item](./items/ISS-20260505T000000Z-TP-TYPE-001-I32-CURSOR-INDICES.md) |
@@ -73,5 +72,6 @@ generated_at: `2026-05-05T00:00:00Z`
 | status | legacy id | title | file |
 |---|---|---|---|
 | verified | TP-CI-001 | WASM debug buildがWEBSOCKET_ADDRESS未設定でcompile不能になる | [item](./items/ISS-20260505T000000Z-TP-CI-001-WASM-DEBUG-ENV.md) |
+| verified | TP-CORE-003 | parser以外のcore regression testが不足している | [item](./items/ISS-20260505T000000Z-TP-CORE-003-TEST-COVERAGE-GAP.md) |
 | verified | TP-STATIC-001 | 状態とcommandがraw number/raw stringに依存しenumとmatchの網羅性検査が効いていない | [item](./items/ISS-20260505T000000Z-TP-STATIC-001-ENUM-MATCH-STATE.md) |
 | verified | TP-TYPE-001 | typing stateがi32 indexとunchecked castに依存している | [item](./items/ISS-20260505T000000Z-TP-TYPE-001-I32-CURSOR-INDICES.md) |

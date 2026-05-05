@@ -65,7 +65,7 @@ use ab_glyph::FontVec;
 include!(concat!(env!("OUT_DIR"), "/problem_files.rs"));
 
 /// アプリケーションの現在の状態（シーン）を定義するenum
-#[derive(PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum AppState {
     MainMenu,
     ProblemSelection,
@@ -1278,5 +1278,58 @@ impl App {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_fonts() -> Fonts {
+        let japanese =
+            FontVec::try_from_vec(include_bytes!("../fonts/YujiSyuku-Regular.ttf").to_vec())
+                .expect("test font should parse");
+        Fonts {
+            japanese,
+            traditional_chinese: None,
+            simplified_chinese: None,
+        }
+    }
+
+    #[test]
+    fn enter_on_start_menu_opens_problem_selection() {
+        let mut app = App::new(test_fonts());
+
+        app.on_event(AppEvent::Enter);
+
+        assert_eq!(app.state, AppState::ProblemSelection);
+        assert!(app.typing_model.is_none());
+        assert_eq!(app.instructions_text, app.problem_selection_instructions());
+    }
+
+    #[test]
+    fn enter_on_builtin_problem_starts_typing_session() {
+        let mut app = App::new(test_fonts());
+
+        app.on_event(AppEvent::Enter);
+        app.on_event(AppEvent::Enter);
+
+        assert_eq!(app.state, AppState::Typing);
+        assert!(app.typing_model.is_some());
+        assert!(app.result_model.is_none());
+        assert_eq!(app.instructions_text, "ESC: Back to Menu | Tab: Cycle Mode");
+    }
+
+    #[test]
+    fn invalid_problem_selection_does_not_start_typing_session() {
+        let mut app = App::new(test_fonts());
+
+        app.on_event(AppEvent::Enter);
+        app.selected_problem_item = app.problem_count();
+        app.on_event(AppEvent::Enter);
+
+        assert_eq!(app.state, AppState::ProblemSelection);
+        assert!(app.typing_model.is_none());
+        assert!(app.result_model.is_none());
     }
 }

@@ -471,3 +471,103 @@ pub fn calculate_total_metrics(model: &TypingModel) -> TypingMetrics {
     metrics.calculate();
     metrics
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{
+        CharIndex, LineIndex, Model, Scroll, SegmentIndex, TypingCorrectnessChar, TypingModel,
+        TypingStatus, WordIndex,
+    };
+
+    fn typing_model_from_problem(source: &str) -> TypingModel {
+        let content = crate::parser::parse_problem(source);
+        let typing_correctness = create_typing_correctness_model(&content);
+
+        TypingModel {
+            content,
+            status: TypingStatus {
+                line: LineIndex::ZERO,
+                word: WordIndex::ZERO,
+                segment: SegmentIndex::ZERO,
+                char_: CharIndex::ZERO,
+                unconfirmed: Vec::new(),
+                last_wrong_keydown: None,
+            },
+            user_input: Vec::new(),
+            total_type_count: 0,
+            total_miss_count: 0,
+            first_input_time: None,
+            last_input_time: None,
+            typing_correctness,
+            layout: Default::default(),
+            scroll: Scroll {
+                scroll: 0.0,
+                max: 0.0,
+            },
+        }
+    }
+
+    #[test]
+    fn direct_kana_input_finishes_single_character_problem() {
+        let model = typing_model_from_problem("#title Test\nあ");
+
+        let result = key_input(model, 'あ', 10.0);
+
+        let Model::Result(result) = result else {
+            panic!("single direct kana input should finish the problem");
+        };
+        assert_eq!(result.typing_model.total_type_count, 1);
+        assert_eq!(result.typing_model.total_miss_count, 0);
+        assert_eq!(
+            result.typing_model.typing_correctness.lines[0].words[0].segments[0].chars[0],
+            TypingCorrectnessChar::Correct
+        );
+    }
+
+    #[test]
+    fn romaji_prefix_keeps_cursor_until_mapping_is_complete() {
+        let model = typing_model_from_problem("#title Test\n[色/し]あ");
+
+        let model = match key_input(model, 's', 10.0) {
+            Model::Typing(model) => model,
+            Model::Result(_) => panic!("romaji prefix should not finish input"),
+        };
+        assert_eq!(model.status.unconfirmed, ['s']);
+        assert_eq!(model.status.segment, SegmentIndex::ZERO);
+        assert_eq!(model.status.char_, CharIndex::ZERO);
+
+        let model = match key_input(model, 'i', 20.0) {
+            Model::Typing(model) => model,
+            Model::Result(_) => panic!("remaining segment should keep the session active"),
+        };
+        assert!(model.status.unconfirmed.is_empty());
+        assert_eq!(model.status.word, WordIndex::new(1));
+        assert_eq!(model.status.segment, SegmentIndex::ZERO);
+        assert_eq!(model.status.char_, CharIndex::ZERO);
+        assert_eq!(
+            model.typing_correctness.lines[0].words[0].segments[0].chars[0],
+            TypingCorrectnessChar::Correct
+        );
+    }
+
+    #[test]
+    fn miss_marks_current_character_without_advancing_cursor() {
+        let model = typing_model_from_problem("#title Test\nあ");
+
+        let model = match key_input(model, 'x', 10.0) {
+            Model::Typing(model) => model,
+            Model::Result(_) => panic!("miss should keep the session active"),
+        };
+
+        assert_eq!(model.total_type_count, 0);
+        assert_eq!(model.total_miss_count, 1);
+        assert_eq!(model.status.last_wrong_keydown, Some('x'));
+        assert_eq!(model.status.segment, SegmentIndex::ZERO);
+        assert_eq!(model.status.char_, CharIndex::ZERO);
+        assert_eq!(
+            model.typing_correctness.lines[0].words[0].segments[0].chars[0],
+            TypingCorrectnessChar::Incorrect
+        );
+    }
+}
