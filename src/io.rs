@@ -213,14 +213,17 @@ impl ProblemRepository {
         }
     }
 
-    pub fn problem_content(&self, index: usize) -> Option<Cow<'_, str>> {
+    pub fn problem_content_ref(&self, index: usize) -> Option<&str> {
         if index < self.builtin_names.len() {
-            Some(Cow::Borrowed((self.builtin_content)(index)))
+            Some((self.builtin_content)(index))
         } else {
-            self.custom_index(index).map(|custom_index| {
-                Cow::Borrowed(self.custom_problems[custom_index].content.as_str())
-            })
+            self.custom_index(index)
+                .map(|custom_index| self.custom_problems[custom_index].content.as_str())
         }
+    }
+
+    pub fn problem_content(&self, index: usize) -> Option<Cow<'_, str>> {
+        self.problem_content_ref(index).map(Cow::Borrowed)
     }
 
     pub fn delete_custom_problem_at(&mut self, index: usize) -> bool {

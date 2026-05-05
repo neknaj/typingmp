@@ -13,25 +13,34 @@ use uefi::proto::console::gop::{BltOp, BltPixel, BltRegion, GraphicsOutput};
 use uefi::proto::console::text::{Key, ScanCode};
 
 pub fn run() -> Status {
-    uefi::helpers::init().unwrap();
+    match run_inner() {
+        Ok(()) => Status::SUCCESS,
+        Err(status) => {
+            report_startup_failure(status);
+            status
+        }
+    }
+}
 
-    let gop_handle = uefi::boot::get_handle_for_protocol::<GraphicsOutput>().unwrap();
-    let mut gop = uefi::boot::open_protocol_exclusive::<GraphicsOutput>(gop_handle).unwrap();
+fn run_inner() -> core::result::Result<(), Status> {
+    firmware(uefi::helpers::init())?;
+
+    let gop_handle = firmware(uefi::boot::get_handle_for_protocol::<GraphicsOutput>())?;
+    let mut gop = firmware(uefi::boot::open_protocol_exclusive::<GraphicsOutput>(
+        gop_handle,
+    ))?;
 
     let mode_info = gop.current_mode_info();
     let (width, height) = mode_info.resolution();
 
     // UEFI ではファイルシステムアクセスが困難なため、バイナリにフォントを埋め込む
     let yuji_font_data: &[u8] = include_bytes!("../fonts/YujiSyuku-Regular.ttf");
-    let yuji_font =
-        FontVec::try_from_vec(yuji_font_data.to_vec()).expect("Failed to load Yuji Syuku font");
+    let yuji_font = load_embedded_font(yuji_font_data)?;
 
     let traditional_chinese_font_data: &[u8] = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
-    let traditional_chinese_font = FontVec::try_from_vec(traditional_chinese_font_data.to_vec())
-        .expect("Failed to load Noto Serif JP font");
+    let traditional_chinese_font = load_embedded_font(traditional_chinese_font_data)?;
     let simplified_chinese_font_data: &[u8] = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
-    let simplified_chinese_font = FontVec::try_from_vec(simplified_chinese_font_data.to_vec())
-        .expect("Failed to load Noto Serif JP font");
+    let simplified_chinese_font = load_embedded_font(simplified_chinese_font_data)?;
 
     // Fonts構造体を初期化
     let fonts = Fonts {
@@ -44,10 +53,13 @@ pub fn run() -> Status {
     let mut app = App::new(fonts);
     app.on_event(AppEvent::Start);
 
-    let timer_event = unsafe {
-        uefi::boot::create_event(EventType::TIMER, Tpl::APPLICATION, None, None).unwrap()
-    };
-    uefi::boot::set_timer(&timer_event, TimerTrigger::Relative(100_000)).unwrap();
+    let timer_event = firmware(unsafe {
+        uefi::boot::create_event(EventType::TIMER, Tpl::APPLICATION, None, None)
+    })?;
+    firmware(uefi::boot::set_timer(
+        &timer_event,
+        TimerTrigger::Relative(100_000),
+    ))?;
 
     // 最後のフレームからの経過時間を記録するための変数を初期化
     let mut last_frame_time = crate::timestamp::now();
@@ -58,7 +70,7 @@ pub fn run() -> Status {
     let mut pixel_buffer = alloc::vec![BltPixel::new(0, 0, 0); width * height];
 
     while !app.snapshot().should_quit {
-        uefi::boot::wait_for_event(&mut events).unwrap();
+        firmware(uefi::boot::wait_for_event(&mut events))?;
 
         let keys: Vec<Key> = uefi::system::with_stdin(|stdin| {
             let mut collected_keys = Vec::new();
@@ -110,16 +122,30 @@ pub fn run() -> Status {
                 );
             }
         }
-        gop.blt(BltOp::BufferToVideo {
+        firmware(gop.blt(BltOp::BufferToVideo {
             buffer: &pixel_buffer,
             src: BltRegion::Full,
             dest: (0, 0),
             dims: (width, height),
-        })
-        .unwrap();
+        }))?;
 
-        uefi::boot::set_timer(&events[0], TimerTrigger::Relative(100_000)).unwrap();
+        firmware(uefi::boot::set_timer(
+            &events[0],
+            TimerTrigger::Relative(100_000),
+        ))?;
     }
 
-    Status::SUCCESS
+    Ok(())
+}
+
+fn firmware<T, D: core::fmt::Debug>(result: uefi::Result<T, D>) -> core::result::Result<T, Status> {
+    result.map_err(|error| error.status())
+}
+
+fn report_startup_failure(status: Status) {
+    uefi::println!("typingmp UEFI error: {:?}", status);
+}
+
+fn load_embedded_font(bytes: &[u8]) -> core::result::Result<FontVec, Status> {
+    FontVec::try_from_vec(bytes.to_vec()).map_err(|_| Status::LOAD_ERROR)
 }

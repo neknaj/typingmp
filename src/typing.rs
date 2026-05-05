@@ -365,16 +365,14 @@ pub fn key_input(model: &mut TypingModel, input: char, timestamp: f64) -> Typing
         }
     }
 
-    model
-        .user_input
-        .last_mut()
-        .unwrap()
-        .inputs
-        .push(TypingInput {
-            key: input,
-            timestamp,
-            is_correct,
-        });
+    let Some(session) = model.user_input.last_mut() else {
+        return TypingTransition::Ignored;
+    };
+    session.inputs.push(TypingInput {
+        key: input,
+        timestamp,
+        is_correct,
+    });
     if is_correct {
         model.total_type_count += 1;
     } else {

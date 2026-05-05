@@ -2,12 +2,12 @@
 id: ISS-20260505T000000Z-TP-UEFI-001-FIRMWARE-PANIC-TIME
 title: "UEFI backendがfirmware API unwrapと粗いtimestampに依存している"
 area: uefi
-status: open
-resolved: false
+status: verified
+resolved: true
 priority: P1
 type: bug
 created: 2026-05-05
-updated: 2026-05-05
+updated: 2026-05-06
 target: "src/uefi.rs, src/timestamp.rs"
 legacy_id: TP-UEFI-001
 source: "doc/fullreview20260505/platforms/uefi.md"
@@ -32,3 +32,17 @@ firmware 実装差や device failure で診断不能な panic になりやすい
 
 - UEFI target check
 - QEMU smoke
+
+## 進捗: T16
+
+- `src/uefi.rs` の init / GOP open / timer / event wait / blit / embedded font load を `run_inner() -> Result<(), Status>` に集約し、firmware failure を panic ではなく UEFI `Status` として返すようにした。startup failure は UEFI console にも出す。
+- `src/timestamp.rs` の UEFI path は `runtime::get_time()` failure を fallback にし、year/month を固定秒数で足す近似ではなく leap year と month length を含む Unix millisecond 変換にした。
+- `src/typing.rs` に残っていた runtime `last_mut().unwrap()` を invariant break 時に `TypingTransition::Ignored` へ落とす形にした。
+
+検証:
+
+- `cargo fmt --check`: pass
+- `cargo test --no-default-features`: pass
+- `cargo clippy --no-default-features --all-targets -- -W clippy::all`: pass
+- `cargo check --no-default-features --features uefi --target x86_64-unknown-uefi`: pass (`cdylib` unsupported warning only)
+- QEMU smoke: local environment lacks `qemu-system-x86_64.exe` and `C:\qemu\OVMF.fd`; not run.

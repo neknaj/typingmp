@@ -65,14 +65,7 @@ impl App {
 
     /// 問題のソーステキストを返す（builtin / custom 両対応、open-file は None）
     pub fn get_problem_source(&self, idx: usize) -> Option<&str> {
-        self.problem_repository
-            .problem_content(idx)
-            .map(|content| match content {
-                alloc::borrow::Cow::Borrowed(content) => content,
-                alloc::borrow::Cow::Owned(_) => {
-                    unreachable!("problem repository returns borrowed text")
-                }
-            })
+        self.problem_repository.problem_content_ref(idx)
     }
 
     /// カスタム問題を削除する。選択カーソルを調整する。

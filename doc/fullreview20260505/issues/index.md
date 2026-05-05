@@ -7,8 +7,8 @@ generated_at: `2026-05-05T00:00:00Z`
 | key | count |
 |---|---:|
 | total | 29 |
-| open | 12 |
-| resolved | 17 |
+| open | 10 |
+| resolved | 19 |
 | P0 | 1 |
 | P1 | 17 |
 | P2 | 10 |
@@ -84,3 +84,5 @@ generated_at: `2026-05-05T00:00:00Z`
 | verified | TP-ARCH-002 | backendごとにrendering pipelineが重複している | [item](./items/ISS-20260505T000000Z-TP-ARCH-002-RENDERER-DUPLICATION.md) |
 | verified | TP-PERF-002 | text measurementとrasterizationが再計算されやすい | [item](./items/ISS-20260505T000000Z-TP-PERF-002-TEXT-MEASURE-CACHE.md) |
 | verified | TP-PERF-003 | UEFI backendがframeごとに大きなbufferを確保している | [item](./items/ISS-20260505T000000Z-TP-PERF-003-UEFI-FRAME-ALLOC.md) |
+| verified | TP-ERR-001 | platform backendに環境依存unwrapが多い | [item](./items/ISS-20260505T000000Z-TP-ERR-001-BACKEND-UNWRAPS.md) |
+| verified | TP-UEFI-001 | UEFI backendがfirmware API unwrapと粗いtimestampに依存している | [item](./items/ISS-20260505T000000Z-TP-UEFI-001-FIRMWARE-PANIC-TIME.md) |

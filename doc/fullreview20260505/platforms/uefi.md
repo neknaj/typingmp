@@ -4,17 +4,17 @@
 
 ## 結論
 
-UEFI backend は compile check は通るが、firmware call の `unwrap()` が残っている。frame ごとの大きな allocation は `ArgbSurface` / `RenderCache` と persistent buffer reuse により解消済みである。UEFI は OS 上の desktop app と違い、device failure が現実的な制約なので、残りは error path を優先する。
+UEFI backend は compile check が通り、firmware call の `unwrap()` は `Status` return path に置き換え済み。frame ごとの大きな allocation は `ArgbSurface` / `RenderCache` と persistent buffer reuse により解消済みである。QEMU/OVMF は local environment に無いため smoke は未実行だが、`x86_64-unknown-uefi` target check は通る。
 
 ## firmware API unwrap
 
-`src/uefi.rs` は stdout、graphics output protocol、event wait、file path などで `unwrap()` を使う。firmware 実装差や device 状態で失敗する可能性があり、panic すると診断が難しい。
+`src/uefi.rs` は `run_inner() -> Result<(), Status>` を持ち、UEFI helper init、graphics output protocol、timer、event wait、blit、font parse failure を `Status` に変換する。firmware 実装差や device 状態による failure で panic しない。
 
 修正方針:
 
-- init phase は `Result` で段階的に失敗を返す。
-- screen に最低限の error message を出す fallback を用意する。
-- unrecoverable error と retriable error を分ける。
+- init phase は `Result` で段階的に失敗を返す。完了済み。
+- screen に最低限の error message を出す fallback は `report_startup_failure()` で UEFI console に出す。firmware caller には同じ `Status` を返す。
+- unrecoverable error と retriable error は `Status` 境界で扱う。再試行 policy は今後の backend policy に残る。
 
 ## frame allocation
 
@@ -28,7 +28,7 @@ frame ごとの full-screen buffer と background buffer allocation は解消済
 
 ## timestamp
 
-`src/timestamp.rs` の UEFI timestamp は月・年を粗い定数で扱い、`unwrap()` も含む。ログや ordering に使うなら、正確性と失敗時 fallback を明示する必要がある。
+`src/timestamp.rs` の UEFI timestamp は `runtime::get_time()` の failure を fallback し、leap year と month length を含む Unix millisecond 変換にした。invalid date は `0.0` に落とし、unit test で leap day と invalid date を固定している。
 
 ## 関連 issue
 

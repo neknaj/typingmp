@@ -415,10 +415,10 @@ impl App {
 
     /// 新しいタイピングセッションを開始する
     fn start_typing_session(&mut self, problem_index: usize) {
-        let Some(problem_text) = self.problem_repository.problem_content(problem_index) else {
+        let Some(problem_text) = self.problem_repository.problem_content_ref(problem_index) else {
             return;
         };
-        let content = match parser::parse_problem(problem_text.as_ref()) {
+        let content = match parser::parse_problem(problem_text) {
             Ok(content) => content,
             Err(diagnostics) => {
                 self.status_text = format!("Problem parse error: {diagnostics}");

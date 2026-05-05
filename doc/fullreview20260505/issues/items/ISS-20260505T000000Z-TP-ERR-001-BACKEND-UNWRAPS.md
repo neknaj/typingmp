@@ -2,8 +2,8 @@
 id: ISS-20260505T000000Z-TP-ERR-001-BACKEND-UNWRAPS
 title: "platform backendに環境依存unwrapが多い"
 area: error-handling
-status: open
-resolved: false
+status: verified
+resolved: true
 priority: P1
 type: bug
 created: 2026-05-05
@@ -56,3 +56,20 @@ browser DOM、mobile surface、firmware protocol、terminal state は環境差�
 - `cargo clippy --no-default-features --all-targets -- -W clippy::all`: pass
 - `cargo check --no-default-features`: pass
 - `cargo check --no-default-features --features wasm --target wasm32-unknown-unknown`: pass
+
+## 進捗: T16
+
+- T13/T14/T15/T16 により、platform backend の host API / state lock / firmware API に残っていた runtime `unwrap()` は解消済み。
+- UEFI backend は `run_inner() -> Result<(), Status>` に集約し、firmware / timer / blit / font parse failure を panic ではなく `Status` として返す。
+- production source の `unwrap()` / `expect()` / `panic!` / `unreachable!` は解消済み。残りは test code の検証 failure に限定されている。
+
+追加検証:
+
+- `cargo fmt --check`: pass
+- `cargo test --no-default-features`: pass
+- `cargo clippy --no-default-features --all-targets -- -W clippy::all`: pass
+- `cargo check --no-default-features --features gui`: pass
+- `cargo check --no-default-features --features tui`: pass
+- `cargo check --no-default-features --features wasm --target wasm32-unknown-unknown`: pass
+- `cargo check --no-default-features --features mobile`: pass
+- `cargo check --no-default-features --features uefi --target x86_64-unknown-uefi`: pass (`cdylib` unsupported warning only)
