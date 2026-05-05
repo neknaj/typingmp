@@ -1,32 +1,18 @@
 // ./src/app.rs
 
-// uefi featureが有効な場合、標準のallocクレートをインポート
-#[cfg(feature = "uefi")]
 extern crate alloc;
 
-// uefi と std で使用する String と format! を切り替える
-#[cfg(feature = "uefi")]
+#[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
+use crate::io::FontEntry;
+use crate::io::{FontAssetId, ProblemRepository, ProblemSourceProvider};
+use crate::model::{Model, ResultModel, Scroll, Segment, TypingModel, TypingStatus};
 use alloc::{
     format,
     string::{String, ToString},
     vec::Vec,
 };
-#[cfg(feature = "uefi")]
-use core_maths::CoreFloat;
-#[cfg(not(feature = "uefi"))]
-use std::{
-    string::{String, ToString},
-    vec::Vec,
-};
 
-use crate::model::{Model, ResultModel, Scroll, Segment, TypingModel, TypingStatus};
-
-/// ユーザーがアップロード/オープンしたカスタム問題ファイル
-pub struct CustomProblem {
-    pub name: String,
-    pub content: String,
-    pub timestamp_ms: u64,
-}
+pub use crate::io::{CustomProblem, FontSource};
 
 // セグメントの base テキストを返す（Anno は inner を連結）
 fn seg_base_text_owned(seg: &Segment) -> String {
@@ -96,7 +82,7 @@ pub enum TuiDisplayMode {
 }
 
 /// どのスクリプト種別のフォントを選択しているか
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Script {
     Japanese,
     TraditionalChinese,
@@ -111,22 +97,6 @@ impl Script {
             Script::SimplifiedChinese => "Simplified Chinese",
         }
     }
-}
-
-/// ディスカバリーされたフォントエントリ（デスクトップのみ）
-#[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
-#[derive(Clone)]
-pub enum FontSource {
-    Bundled,
-    System,
-}
-
-#[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
-#[derive(Clone)]
-pub struct FontEntry {
-    pub name: String,
-    pub path: std::path::PathBuf,
-    pub source: FontSource,
 }
 
 /// ロードされたフォントデータ（スクリプト別）
@@ -172,6 +142,17 @@ pub enum AppEvent {
     Escape,
     CycleTuiMode,
     Quit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FontLoadRequest {
+    pub script: Script,
+    pub font_id: FontAssetId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FontApplyError {
+    InvalidFontData,
 }
 
 /// スクロール計算結果のキャッシュ。毎フレームの全セグメント計測を回避する。
@@ -450,7 +431,7 @@ pub struct App {
     pub selected_main_menu_item: usize,
     pub selected_problem_item: usize,
     pub selected_settings_item: usize,
-    pub custom_problems: Vec<CustomProblem>,
+    problem_repository: ProblemRepository,
     pub typing_model: Option<TypingModel>,
     pub result_model: Option<ResultModel>,
     pub status_text: String,
@@ -469,6 +450,7 @@ pub struct App {
     /// 発見されたフォント一覧（起動時にディスカバリー）
     #[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
     pub available_fonts: Vec<FontEntry>,
+    requested_font_load: Option<FontLoadRequest>,
     pub fps: f64,
     pub source_scroll: usize,     // ProblemSource でのスクロール行数
     pub how_to_use_scroll: usize, // HowToUse でのスクロール行数
@@ -479,107 +461,32 @@ pub struct App {
     pub should_save_custom_problems: bool, // localStorage への保存要求フラグ
 }
 
-/// 非WASM・非UEFI環境でフォントファイルを探索し FontEntry のリストを返す
-#[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
-pub fn discover_available_fonts() -> Vec<FontEntry> {
-    let mut entries: Vec<FontEntry> = Vec::new();
-
-    let mut search_dirs: Vec<(std::path::PathBuf, FontSource)> = Vec::new();
-
-    // バンドル済みフォントディレクトリ
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            search_dirs.push((dir.join("fonts"), FontSource::Bundled));
-        }
-    }
-    search_dirs.push((std::path::PathBuf::from("fonts"), FontSource::Bundled));
-
-    // OS 別のシステムフォントディレクトリ
-    #[cfg(target_os = "windows")]
-    {
-        search_dirs.push((
-            std::path::PathBuf::from(r"C:\Windows\Fonts"),
-            FontSource::System,
-        ));
-    }
-    #[cfg(target_os = "macos")]
-    {
-        search_dirs.push((
-            std::path::PathBuf::from("/System/Library/Fonts"),
-            FontSource::System,
-        ));
-        search_dirs.push((
-            std::path::PathBuf::from("/Library/Fonts"),
-            FontSource::System,
-        ));
-        if let Ok(home) = std::env::var("HOME") {
-            search_dirs.push((
-                std::path::PathBuf::from(home).join("Library/Fonts"),
-                FontSource::System,
-            ));
-        }
-    }
-    #[cfg(target_os = "linux")]
-    {
-        search_dirs.push((
-            std::path::PathBuf::from("/usr/share/fonts"),
-            FontSource::System,
-        ));
-        search_dirs.push((
-            std::path::PathBuf::from("/usr/local/share/fonts"),
-            FontSource::System,
-        ));
-        if let Ok(home) = std::env::var("HOME") {
-            search_dirs.push((
-                std::path::PathBuf::from(home).join(".local/share/fonts"),
-                FontSource::System,
-            ));
-        }
-    }
-
-    let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    for (dir, source) in search_dirs {
-        if let Ok(read_dir) = std::fs::read_dir(&dir) {
-            for entry in read_dir.flatten() {
-                let path = entry.path();
-                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                    let ext_lower = ext.to_lowercase();
-                    if ext_lower == "ttf" || ext_lower == "otf" {
-                        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                            let name = stem.to_string();
-                            if seen_names.insert(name.clone()) {
-                                entries.push(FontEntry {
-                                    name,
-                                    path,
-                                    source: source.clone(),
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    entries
-}
-
 impl App {
     /// Appの新しいインスタンスを生成する
     pub fn new(fonts: Fonts) -> Self {
-        #[cfg(feature = "uefi")]
-        uefi::println!("APP: START");
+        #[cfg(target_arch = "wasm32")]
+        let custom_source_label = "W";
+        #[cfg(not(target_arch = "wasm32"))]
+        let custom_source_label = "F";
 
-        #[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
-        let available_fonts = discover_available_fonts();
+        #[cfg(any(feature = "gui", target_arch = "wasm32"))]
+        let open_file_enabled = true;
+        #[cfg(not(any(feature = "gui", target_arch = "wasm32")))]
+        let open_file_enabled = false;
+
+        let problem_repository = ProblemRepository::new(
+            PROBLEM_FILES_NAMES,
+            get_problem_content,
+            custom_source_label,
+            open_file_enabled,
+        );
 
         Self {
             state: AppState::MainMenu,
             selected_main_menu_item: 0,
             selected_problem_item: 0,
             selected_settings_item: 0,
-            custom_problems: Vec::new(),
+            problem_repository,
             typing_model: None,
             result_model: None,
             status_text: String::new(),
@@ -592,7 +499,8 @@ impl App {
             settings_picking_font: false,
             selected_font_item: 0,
             #[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
-            available_fonts,
+            available_fonts: Vec::new(),
+            requested_font_load: None,
             fps: 0.0,
             source_scroll: 0,
             how_to_use_scroll: 0,
@@ -606,55 +514,46 @@ impl App {
 
     /// 組み込み問題 + カスタム問題 + (gui/wasm では「Open File」エントリ1件) の合計数
     pub fn problem_count(&self) -> usize {
-        let base = PROBLEM_FILES_NAMES.len() + self.custom_problems.len();
-        #[cfg(any(feature = "gui", target_arch = "wasm32"))]
-        {
-            base + 1
-        }
-        #[cfg(not(any(feature = "gui", target_arch = "wasm32")))]
-        {
-            base
-        }
+        self.problem_repository.problem_count()
     }
 
     /// インデックスに対応する表示名を返す
     pub fn problem_name_at(&self, idx: usize) -> &str {
-        let builtin_count = PROBLEM_FILES_NAMES.len();
-        if idx < builtin_count {
-            PROBLEM_FILES_NAMES[idx]
-        } else if idx < builtin_count + self.custom_problems.len() {
-            &self.custom_problems[idx - builtin_count].name
-        } else {
-            "[ Open File... ]"
-        }
+        self.problem_repository
+            .problem_name_at(idx)
+            .unwrap_or("[ Unknown ]")
     }
 
     /// そのインデックスが「Open File」エントリかどうか
     pub fn is_open_file_entry(&self, idx: usize) -> bool {
-        #[cfg(any(feature = "gui", target_arch = "wasm32"))]
-        {
-            idx == PROBLEM_FILES_NAMES.len() + self.custom_problems.len()
-        }
-        #[cfg(not(any(feature = "gui", target_arch = "wasm32")))]
-        {
-            let _ = idx;
-            false
-        }
+        self.problem_repository.is_open_file_entry(idx)
     }
 
     /// カスタム問題を追加し、そのインデックスを選択状態にする
     pub fn add_custom_problem(&mut self, name: String, content: String, timestamp_ms: u64) {
-        self.custom_problems.push(CustomProblem {
+        let selected_index = self.problem_repository.add_custom_problem(CustomProblem {
             name,
             content,
             timestamp_ms,
         });
         // 追加された問題のインデックスを選択
-        self.selected_problem_item = PROBLEM_FILES_NAMES.len() + self.custom_problems.len() - 1;
+        self.selected_problem_item = selected_index;
         if self.state != AppState::ProblemSelection {
             self.state = AppState::ProblemSelection;
             self.on_event(AppEvent::ChangeScene);
         }
+    }
+
+    pub fn set_custom_problems(&mut self, problems: Vec<CustomProblem>) {
+        self.problem_repository.set_custom_problems(problems);
+        let count = self.problem_count();
+        if count > 0 && self.selected_problem_item >= count {
+            self.selected_problem_item = count - 1;
+        }
+    }
+
+    pub fn custom_problems(&self) -> &[CustomProblem] {
+        self.problem_repository.custom_problems()
     }
 
     /// 現在の設定言語に合わせたメインフォントへの参照を取得する
@@ -664,46 +563,29 @@ impl App {
 
     /// インデックスがカスタム問題（builtin でも open-file エントリでもない）かどうか
     pub fn is_custom_problem(&self, idx: usize) -> bool {
-        let builtin_count = PROBLEM_FILES_NAMES.len();
-        idx >= builtin_count && idx < builtin_count + self.custom_problems.len()
+        self.problem_repository.is_custom_problem(idx)
     }
 
     /// 問題のソース種別バッジ文字を返す: "B" = builtin, "W" = web(wasm), "F" = file(non-wasm)
     pub fn problem_source_label(&self, idx: usize) -> &str {
-        if idx < PROBLEM_FILES_NAMES.len() {
-            "B"
-        } else if idx < PROBLEM_FILES_NAMES.len() + self.custom_problems.len() {
-            #[cfg(target_arch = "wasm32")]
-            {
-                "W"
-            }
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                "F"
-            }
-        } else {
-            "+"
-        }
+        self.problem_repository.problem_source_label(idx)
     }
 
     /// 問題のソーステキストを返す（builtin / custom 両対応、open-file は None）
     pub fn get_problem_source(&self, idx: usize) -> Option<&str> {
-        let builtin_count = PROBLEM_FILES_NAMES.len();
-        if idx < builtin_count {
-            Some(get_problem_content(idx))
-        } else if idx < builtin_count + self.custom_problems.len() {
-            Some(&self.custom_problems[idx - builtin_count].content)
-        } else {
-            None
-        }
+        self.problem_repository
+            .problem_content(idx)
+            .map(|content| match content {
+                alloc::borrow::Cow::Borrowed(content) => content,
+                alloc::borrow::Cow::Owned(_) => {
+                    unreachable!("problem repository returns borrowed text")
+                }
+            })
     }
 
     /// カスタム問題を削除する。選択カーソルを調整する。
     pub fn delete_custom_problem_at(&mut self, idx: usize) {
-        let builtin_count = PROBLEM_FILES_NAMES.len();
-        let custom_idx = idx.saturating_sub(builtin_count);
-        if custom_idx < self.custom_problems.len() {
-            self.custom_problems.remove(custom_idx);
+        if self.problem_repository.delete_custom_problem_at(idx) {
             // 削除後に problem_count を超えていれば一つ前に移動
             let count = self.problem_count();
             if count > 0 && self.selected_problem_item >= count {
@@ -718,10 +600,7 @@ impl App {
 
     /// カスタム問題を一つ上（インデックスを小さく）に移動する。選択カーソルも追従する。
     pub fn move_custom_problem_up_at(&mut self, idx: usize) {
-        let builtin_count = PROBLEM_FILES_NAMES.len();
-        let custom_idx = idx.saturating_sub(builtin_count);
-        if custom_idx > 0 && custom_idx < self.custom_problems.len() {
-            self.custom_problems.swap(custom_idx, custom_idx - 1);
+        if self.problem_repository.move_custom_problem_up_at(idx) {
             self.selected_problem_item -= 1;
             #[cfg(target_arch = "wasm32")]
             {
@@ -732,10 +611,7 @@ impl App {
 
     /// カスタム問題を一つ下（インデックスを大きく）に移動する。選択カーソルも追従する。
     pub fn move_custom_problem_down_at(&mut self, idx: usize) {
-        let builtin_count = PROBLEM_FILES_NAMES.len();
-        let custom_idx = idx.saturating_sub(builtin_count);
-        if custom_idx + 1 < self.custom_problems.len() {
-            self.custom_problems.swap(custom_idx, custom_idx + 1);
+        if self.problem_repository.move_custom_problem_down_at(idx) {
             self.selected_problem_item += 1;
             #[cfg(target_arch = "wasm32")]
             {
@@ -756,41 +632,39 @@ impl App {
         }
     }
 
-    /// 選択中のスクリプトに対してフォントファイルをロードして適用する
-    #[cfg(not(feature = "uefi"))]
-    pub fn load_font_for_script(&mut self, script: Script, path: &std::path::Path) {
-        if let Ok(data) = std::fs::read(path) {
-            if let Ok(font) = FontVec::try_from_vec(data) {
-                match script {
-                    Script::Japanese => self.fonts.japanese = font,
-                    Script::TraditionalChinese => self.fonts.traditional_chinese = Some(font),
-                    Script::SimplifiedChinese => self.fonts.simplified_chinese = Some(font),
-                }
-                // フォントが変わったのでスクロールキャッシュを破棄する
-                self.scroll_cache = None;
-            }
+    #[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
+    pub fn set_available_fonts(&mut self, entries: Vec<FontEntry>) {
+        self.available_fonts = entries;
+        if self.selected_font_item >= self.available_fonts.len() {
+            self.selected_font_item = 0;
         }
     }
 
-    #[cfg(feature = "uefi")]
-    pub fn load_font_for_script(&mut self, _script: Script, _path: &str) {
+    pub fn take_font_load_request(&mut self) -> Option<FontLoadRequest> {
+        self.requested_font_load.take()
+    }
+
+    pub fn apply_font_bytes(
+        &mut self,
+        script: Script,
+        bytes: Vec<u8>,
+    ) -> Result<(), FontApplyError> {
+        let font = FontVec::try_from_vec(bytes).map_err(|_| FontApplyError::InvalidFontData)?;
+        match script {
+            Script::Japanese => self.fonts.japanese = font,
+            Script::TraditionalChinese => self.fonts.traditional_chinese = Some(font),
+            Script::SimplifiedChinese => self.fonts.simplified_chinese = Some(font),
+        }
         self.scroll_cache = None;
+        Ok(())
     }
 
     /// 新しいタイピングセッションを開始する
     fn start_typing_session(&mut self, problem_index: usize) {
-        // 選択されたインデックスに基づいて問題文を読み込む
-        let builtin_count = PROBLEM_FILES_NAMES.len();
-        let problem_text_owned: String;
-        let problem_text: &str = if problem_index < builtin_count {
-            get_problem_content(problem_index)
-        } else {
-            problem_text_owned = self.custom_problems[problem_index - builtin_count]
-                .content
-                .clone();
-            &problem_text_owned
+        let Some(problem_text) = self.problem_repository.problem_content(problem_index) else {
+            return;
         };
-        let content = parser::parse_problem(problem_text);
+        let content = parser::parse_problem(problem_text.as_ref());
         let typing_correctness = typing::create_typing_correctness_model(&content);
 
         self.typing_model = Some(TypingModel {
@@ -1089,10 +963,10 @@ impl App {
                             }
                             AppEvent::Enter => {
                                 if self.selected_font_item < font_count {
-                                    let path =
-                                        self.available_fonts[self.selected_font_item].path.clone();
+                                    let font_id = self.available_fonts[self.selected_font_item].id;
                                     let script = self.settings_script;
-                                    self.load_font_for_script(script, &path);
+                                    self.requested_font_load =
+                                        Some(FontLoadRequest { script, font_id });
                                 }
                                 self.settings_picking_font = false;
                             }

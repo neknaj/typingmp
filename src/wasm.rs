@@ -1,6 +1,7 @@
 // src/wasm.rs
 
 use crate::app::{App, AppEvent, CustomProblem, Fonts};
+use crate::io::{PersistentStore, ProviderError, ProviderErrorKind};
 use crate::renderer::{calculate_pixel_font_size, gui_renderer};
 use crate::ui::{self, ActiveLowerElement, LowerTypingSegment, Renderable, UpperSegmentState};
 use ab_glyph::FontVec;
@@ -16,87 +17,120 @@ use web_sys::{
 
 const LS_KEY: &str = "typingmp_custom_problems";
 
-/// localStorage からカスタム問題リストを読み込む
-fn load_custom_problems() -> Vec<CustomProblem> {
-    let window = match web_sys::window() {
-        Some(w) => w,
-        None => return Vec::new(),
-    };
-    let storage = match window.local_storage() {
-        Ok(Some(s)) => s,
-        _ => return Vec::new(),
-    };
-    let json = match storage.get_item(LS_KEY) {
-        Ok(Some(s)) => s,
-        _ => return Vec::new(),
-    };
-    // JSON パース: [{name, content, timestamp}, ...]
-    let parsed = match js_sys::JSON::parse(&json) {
-        Ok(v) => v,
-        Err(_) => return Vec::new(),
-    };
-    let arr = match parsed.dyn_into::<js_sys::Array>() {
-        Ok(a) => a,
-        Err(_) => return Vec::new(),
-    };
-    let mut result = Vec::new();
-    for i in 0..arr.length() {
-        let item = arr.get(i);
-        let name = js_sys::Reflect::get(&item, &JsValue::from_str("name"))
-            .ok()
-            .and_then(|v| v.as_string())
-            .unwrap_or_default();
-        let content = js_sys::Reflect::get(&item, &JsValue::from_str("content"))
-            .ok()
-            .and_then(|v| v.as_string())
-            .unwrap_or_default();
-        let timestamp_ms = js_sys::Reflect::get(&item, &JsValue::from_str("timestamp"))
-            .ok()
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0) as u64;
-        if !name.is_empty() && !content.is_empty() {
-            result.push(CustomProblem {
-                name,
-                content,
-                timestamp_ms,
-            });
-        }
-    }
-    result
-}
+#[derive(Debug, Clone, Copy, Default)]
+struct WebCustomProblemStore;
 
-/// カスタム問題リストを localStorage に保存する
-fn save_custom_problems(problems: &[CustomProblem]) {
-    let window = match web_sys::window() {
-        Some(w) => w,
-        None => return,
-    };
-    let storage = match window.local_storage() {
-        Ok(Some(s)) => s,
-        _ => return,
-    };
-    let arr = js_sys::Array::new();
-    for p in problems {
-        let obj = js_sys::Object::new();
-        let _ = js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("name"),
-            &JsValue::from_str(&p.name),
-        );
-        let _ = js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("content"),
-            &JsValue::from_str(&p.content),
-        );
-        let _ = js_sys::Reflect::set(
-            &obj,
-            &JsValue::from_str("timestamp"),
-            &JsValue::from_f64(p.timestamp_ms as f64),
-        );
-        arr.push(&obj);
+impl PersistentStore for WebCustomProblemStore {
+    fn load_custom_problems(&self) -> Result<Vec<CustomProblem>, ProviderError> {
+        let Some(window) = web_sys::window() else {
+            return Ok(Vec::new());
+        };
+        let storage = match window.local_storage() {
+            Ok(Some(storage)) => storage,
+            Ok(None) => return Ok(Vec::new()),
+            Err(_) => {
+                return Err(ProviderError::new(
+                    ProviderErrorKind::Io,
+                    "failed to access localStorage",
+                ));
+            }
+        };
+        let json = match storage.get_item(LS_KEY) {
+            Ok(Some(json)) => json,
+            Ok(None) => return Ok(Vec::new()),
+            Err(_) => {
+                return Err(ProviderError::new(
+                    ProviderErrorKind::Io,
+                    "failed to read custom problems from localStorage",
+                ));
+            }
+        };
+
+        let parsed = js_sys::JSON::parse(&json).map_err(|_| {
+            ProviderError::new(
+                ProviderErrorKind::Decode,
+                "failed to parse custom problems JSON",
+            )
+        })?;
+        let arr = parsed.dyn_into::<js_sys::Array>().map_err(|_| {
+            ProviderError::new(
+                ProviderErrorKind::Decode,
+                "custom problems JSON root is not an array",
+            )
+        })?;
+
+        let mut result = Vec::new();
+        for i in 0..arr.length() {
+            let item = arr.get(i);
+            let name = js_sys::Reflect::get(&item, &JsValue::from_str("name"))
+                .ok()
+                .and_then(|v| v.as_string())
+                .unwrap_or_default();
+            let content = js_sys::Reflect::get(&item, &JsValue::from_str("content"))
+                .ok()
+                .and_then(|v| v.as_string())
+                .unwrap_or_default();
+            let timestamp_ms = js_sys::Reflect::get(&item, &JsValue::from_str("timestamp"))
+                .ok()
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0) as u64;
+            if !name.is_empty() && !content.is_empty() {
+                result.push(CustomProblem {
+                    name,
+                    content,
+                    timestamp_ms,
+                });
+            }
+        }
+        Ok(result)
     }
-    if let Ok(json) = js_sys::JSON::stringify(&arr) {
-        let _ = storage.set_item(LS_KEY, &String::from(json));
+
+    fn save_custom_problems(&self, problems: &[CustomProblem]) -> Result<(), ProviderError> {
+        let Some(window) = web_sys::window() else {
+            return Ok(());
+        };
+        let storage = match window.local_storage() {
+            Ok(Some(storage)) => storage,
+            Ok(None) => return Ok(()),
+            Err(_) => {
+                return Err(ProviderError::new(
+                    ProviderErrorKind::Io,
+                    "failed to access localStorage",
+                ));
+            }
+        };
+        let arr = js_sys::Array::new();
+        for p in problems {
+            let obj = js_sys::Object::new();
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("name"),
+                &JsValue::from_str(&p.name),
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("content"),
+                &JsValue::from_str(&p.content),
+            );
+            let _ = js_sys::Reflect::set(
+                &obj,
+                &JsValue::from_str("timestamp"),
+                &JsValue::from_f64(p.timestamp_ms as f64),
+            );
+            arr.push(&obj);
+        }
+        let json = js_sys::JSON::stringify(&arr).map_err(|_| {
+            ProviderError::new(
+                ProviderErrorKind::Decode,
+                "failed to encode custom problems JSON",
+            )
+        })?;
+        storage.set_item(LS_KEY, &String::from(json)).map_err(|_| {
+            ProviderError::new(
+                ProviderErrorKind::Io,
+                "failed to save custom problems to localStorage",
+            )
+        })
     }
 }
 
@@ -299,8 +333,9 @@ async fn start_async() -> Result<(), JsValue> {
     // localStorage からカスタム問題を復元
     {
         let mut app_mut = app.borrow_mut();
-        for p in load_custom_problems() {
-            app_mut.custom_problems.push(p);
+        match WebCustomProblemStore.load_custom_problems() {
+            Ok(problems) => app_mut.set_custom_problems(problems),
+            Err(err) => web_sys::console::warn_1(&JsValue::from_str(&err.to_string())),
         }
     }
     app.borrow_mut().on_event(AppEvent::Start);
@@ -350,7 +385,11 @@ async fn start_async() -> Result<(), JsValue> {
                         let mut app_mut = app_inner.borrow_mut();
                         app_mut.add_custom_problem(name_clone.clone(), content, timestamp);
                         // localStorage に保存
-                        save_custom_problems(&app_mut.custom_problems);
+                        if let Err(err) =
+                            WebCustomProblemStore.save_custom_problems(app_mut.custom_problems())
+                        {
+                            web_sys::console::warn_1(&JsValue::from_str(&err.to_string()));
+                        }
                     }
                     // 同一ファイルを再度選択できるようにリセット
                     file_input_inner.set_value("");
@@ -558,7 +597,11 @@ async fn start_async() -> Result<(), JsValue> {
                     }
                     // ProblemSelection での削除・並び替えが発生した場合 localStorage に保存
                     if app.should_save_custom_problems {
-                        save_custom_problems(&app.custom_problems);
+                        if let Err(err) =
+                            WebCustomProblemStore.save_custom_problems(app.custom_problems())
+                        {
+                            web_sys::console::warn_1(&JsValue::from_str(&err.to_string()));
+                        }
                         app.should_save_custom_problems = false;
                     }
                 }

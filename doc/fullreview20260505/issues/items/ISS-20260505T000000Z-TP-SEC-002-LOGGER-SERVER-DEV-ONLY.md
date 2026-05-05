@@ -7,7 +7,7 @@ resolved: false
 priority: P2
 type: security
 created: 2026-05-05
-updated: 2026-05-05
+updated: 2026-05-06
 target: "logger_server.js, src/wasm_debug_logger.rs"
 legacy_id: TP-SEC-002
 source: "doc/fullreview20260505/security/dev-tools.md"
@@ -33,3 +33,7 @@ debug WebSocket logger は認証、message size limit、rate limit、log retenti
 
 - local bind 確認
 - oversized message の拒否 test
+
+## 進捗: T05
+
+I/O provider 境界の一部として `Logger` trait と `NoopLogger` を追加し、core / `App` 側の default logger は no-op に寄せた。debug WebSocket logger server 自体の bind / size / rate limit は T18 で扱う。

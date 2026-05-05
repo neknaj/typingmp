@@ -7,7 +7,7 @@ resolved: false
 priority: P1
 type: architecture
 created: 2026-05-05
-updated: 2026-05-05
+updated: 2026-05-06
 target: "src/app.rs, src/gui.rs, src/tui.rs, src/wasm.rs, src/mobile.rs"
 legacy_id: TP-ARCH-005
 source: "doc/fullreview20260505/architecture/io-virtualization.md"
@@ -34,3 +34,31 @@ desktop の都合が core に入り込みやすい。UEFI や web など filesys
 - no_std core check
 - desktop / web / UEFI で provider 差し替え compile
 - custom problem import failure の diagnostic test
+
+## 進捗: T05
+
+`src/io.rs` を追加し、`ProblemSourceProvider`、`AssetProvider`、`PersistentStore`、`Clock`、`Logger`、typed `ProblemId` / `FontAssetId`、`ProblemRepository` を導入した。`App` は custom problem repository と font catalog / request を扱い、desktop filesystem path、font discovery、font bytes loading、web localStorage の詳細を直接持たない形にした。
+
+backend 側の接続:
+
+- GUI / TUI / mobile は `DesktopAssetProvider` 経由で bundled font と font catalog を取得する。
+- GUI file import は `DesktopProblemSourceProvider` 経由で `.ntq` を読み込む。
+- WASM custom problem storage は `PersistentStore` 実装に閉じた。
+- default logger provider として `NoopLogger` を定義した。
+
+検証:
+
+- `cargo fmt --check`: pass
+- `cargo test --no-default-features`: pass
+- `cargo clippy --no-default-features --all-targets -- -W clippy::all`: pass
+- `cargo check --no-default-features --features tui`: pass
+- `cargo check --no-default-features --features gui`: pass
+- `cargo check --no-default-features --features gui-file`: pass
+- `cargo check --no-default-features --features mobile`: pass
+- `cargo check --no-default-features --features wasm --target wasm32-unknown-unknown`: pass
+- `cargo check --no-default-features --features uefi --target x86_64-unknown-uefi`: pass
+
+残作業:
+
+- parser diagnostic の source label / span は T08 で扱う。
+- backend error contract と visible error 化は T12 / T14 で扱う。

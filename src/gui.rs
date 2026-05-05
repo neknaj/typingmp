@@ -1,5 +1,9 @@
 #[cfg(not(feature = "uefi"))]
 use crate::app::{App, AppEvent, Fonts};
+#[cfg(all(not(feature = "uefi"), feature = "gui-file"))]
+use crate::io::DesktopProblemSourceProvider;
+#[cfg(not(feature = "uefi"))]
+use crate::io::{AssetProvider, BundledFont, DesktopAssetProvider};
 #[cfg(not(feature = "uefi"))]
 use crate::renderer::{calculate_pixel_font_size, draw_linear_gradient, gui_renderer};
 #[cfg(not(feature = "uefi"))]
@@ -31,13 +35,16 @@ const FRAME_DURATION: Duration = Duration::from_millis(16);
 
 #[cfg(not(feature = "uefi"))]
 pub fn run() -> Result<(), Box<dyn Error>> {
-    let japanese_font = FontVec::try_from_vec(load_font_file("YujiSyuku-Regular.ttf")?)
-        .map_err(|_| "Failed to parse Yuji Syuku font")?;
+    let asset_provider = DesktopAssetProvider::discover();
+    let japanese_font =
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::YujiSyukuRegular)?)
+            .map_err(|_| "Failed to parse Yuji Syuku font")?;
     let traditional_chinese_font =
-        FontVec::try_from_vec(load_font_file("NotoSerifJP-Regular.ttf")?)
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::NotoSerifJpRegular)?)
             .map_err(|_| "Failed to parse Noto Serif JP font")?;
-    let simplified_chinese_font = FontVec::try_from_vec(load_font_file("NotoSerifJP-Regular.ttf")?)
-        .map_err(|_| "Failed to parse Noto Serif JP font")?;
+    let simplified_chinese_font =
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::NotoSerifJpRegular)?)
+            .map_err(|_| "Failed to parse Noto Serif JP font")?;
 
     let fonts = Fonts {
         japanese: japanese_font,
@@ -62,6 +69,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     )?;
 
     let mut app = App::new(fonts);
+    app.set_available_fonts(asset_provider.list_fonts());
     app.on_event(AppEvent::Start);
 
     let mut last_frame_time = Instant::now();
@@ -156,14 +164,27 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                         .add_filter("Typing Problem", &["ntq"])
                         .pick_file()
                     {
-                        if let Ok(content) = std::fs::read_to_string(&path) {
-                            let name = path
-                                .file_name()
-                                .and_then(|name| name.to_str())
-                                .unwrap_or("unknown.ntq")
-                                .to_string();
-                            app.add_custom_problem(name, content, 0);
+                        match DesktopProblemSourceProvider::load_file(&path, 0) {
+                            Ok(problem) => {
+                                app.add_custom_problem(
+                                    problem.name,
+                                    problem.content,
+                                    problem.timestamp_ms,
+                                );
+                            }
+                            Err(err) => eprintln!("{err}"),
                         }
+                    }
+                }
+
+                if let Some(request) = app.take_font_load_request() {
+                    match asset_provider.load_font(request.font_id) {
+                        Ok(bytes) => {
+                            if let Err(err) = app.apply_font_bytes(request.script, bytes) {
+                                eprintln!("Failed to apply font: {err:?}");
+                            }
+                        }
+                        Err(err) => eprintln!("{err}"),
                     }
                 }
 
@@ -519,20 +540,6 @@ fn present_frame(
         .render()
         .map_err(|err| -> Box<dyn Error> { format!("{err}").into() })?;
     Ok(())
-}
-
-#[cfg(not(feature = "uefi"))]
-fn load_font_file(name: &str) -> Result<Vec<u8>, Box<dyn Error>> {
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let path = dir.join("fonts").join(name);
-            if let Ok(data) = std::fs::read(&path) {
-                return Ok(data);
-            }
-        }
-    }
-    let path = std::path::PathBuf::from("fonts").join(name);
-    Ok(std::fs::read(&path)?)
 }
 
 #[cfg(feature = "uefi")]

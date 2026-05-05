@@ -93,6 +93,12 @@ NEPLg2 の loader は compiler の import/include を扱うため `PathBuf` が�
 
 また、NEPLg2 の CLI は WASI runtime host を厚く持つ。typingmp では同じ厚さの runtime host は不要だが、preopen root のような capability 制限は desktop file picker や dev server に応用できる。
 
+## 実装進捗: T05
+
+`src/io.rs` に provider 境界を追加し、problem source、font asset、persistent store、clock、logger を trait と typed id で表現した。`App` は `ProblemRepository` と font catalog / load request を保持し、desktop filesystem path や web localStorage の詳細は backend provider 実装に閉じた。
+
+この段階では parser diagnostic の source span と backend visible error は未完了であり、T08 / T12 / T14 の対象として残す。
+
 ## 関連 issue
 
 - `TP-ARCH-005`

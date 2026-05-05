@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::app::{App, AppEvent, Fonts};
+use crate::io::{AssetProvider, BundledFont, DesktopAssetProvider};
 use crate::renderer::{calculate_pixel_font_size, gui_renderer};
 use crate::ui::{self, ActiveLowerElement, LowerTypingSegment, Renderable, UpperSegmentState};
 
@@ -271,35 +272,26 @@ fn canvas_physical_size(win: &AppWindow) -> Option<(usize, usize)> {
     Some((phys.width as usize, h as usize))
 }
 
-/// 実行バイナリのディレクトリまたはカレントディレクトリの `fonts/` からフォントファイルを読み込む
-fn load_font_file(name: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let path = dir.join("fonts").join(name);
-            if let Ok(data) = std::fs::read(&path) {
-                return Ok(data);
-            }
-        }
-    }
-    let path = std::path::PathBuf::from("fonts").join(name);
-    Ok(std::fs::read(&path)?)
-}
-
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let japanese_font = FontVec::try_from_vec(load_font_file("YujiSyuku-Regular.ttf")?)
-        .map_err(|e| e.to_string())?;
-    let traditional_chinese_font =
-        FontVec::try_from_vec(load_font_file("NotoSerifJP-Regular.ttf")?)
+    let asset_provider = DesktopAssetProvider::discover();
+    let japanese_font =
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::YujiSyukuRegular)?)
             .map_err(|e| e.to_string())?;
-    let simplified_chinese_font = FontVec::try_from_vec(load_font_file("NotoSerifJP-Regular.ttf")?)
-        .map_err(|e| e.to_string())?;
+    let traditional_chinese_font =
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::NotoSerifJpRegular)?)
+            .map_err(|e| e.to_string())?;
+    let simplified_chinese_font =
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::NotoSerifJpRegular)?)
+            .map_err(|e| e.to_string())?;
 
     let fonts = Fonts {
         japanese: japanese_font,
         traditional_chinese: Some(traditional_chinese_font),
         simplified_chinese: Some(simplified_chinese_font),
     };
-    let app_state = Arc::new(Mutex::new(App::new(fonts)));
+    let mut app = App::new(fonts);
+    app.set_available_fonts(asset_provider.list_fonts());
+    let app_state = Arc::new(Mutex::new(app));
     {
         let mut a = app_state.lock().unwrap();
         a.on_event(AppEvent::ChangeScene);
@@ -377,6 +369,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let mut a = app.lock().unwrap();
                 // 実測 delta_ms を渡すことで app.fps が正確な値になる
                 a.update(w, h, delta_ms);
+                if let Some(request) = a.take_font_load_request() {
+                    match asset_provider.load_font(request.font_id) {
+                        Ok(bytes) => {
+                            let _ = a.apply_font_bytes(request.script, bytes);
+                        }
+                        Err(err) => eprintln!("{err}"),
+                    }
+                }
                 render_frame(&a, w, h, &mut pixel_buf);
                 win.set_keyboard_visible(a.state == crate::app::AppState::Typing);
             }

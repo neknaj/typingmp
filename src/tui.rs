@@ -3,6 +3,8 @@
 #[cfg(not(feature = "uefi"))]
 use crate::app::{App, AppEvent, Fonts, TuiDisplayMode};
 #[cfg(not(feature = "uefi"))]
+use crate::io::{AssetProvider, BundledFont, DesktopAssetProvider};
+#[cfg(not(feature = "uefi"))]
 use crate::model::Segment;
 #[cfg(not(feature = "uefi"))]
 use crate::renderer::{gui_renderer, tui_renderer}; // gui_renderer をインポート
@@ -57,31 +59,19 @@ fn u32_to_crossterm_color(c: u32) -> Color {
     Color::Rgb { r, g, b }
 }
 
-/// 実行バイナリのディレクトリまたはカレントディレクトリの `fonts/` からフォントファイルを読み込む
-#[cfg(not(feature = "uefi"))]
-fn load_font_file(name: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let path = dir.join("fonts").join(name);
-            if let Ok(data) = std::fs::read(&path) {
-                return Ok(data);
-            }
-        }
-    }
-    let path = std::path::PathBuf::from("fonts").join(name);
-    Ok(std::fs::read(&path)?)
-}
-
 /// TUIアプリケーションのメイン関数
 #[cfg(not(feature = "uefi"))]
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let japanese_font = FontVec::try_from_vec(load_font_file("YujiSyuku-Regular.ttf")?)
-        .map_err(|_| "Failed to parse Yuji Syuku font")?;
+    let asset_provider = DesktopAssetProvider::discover();
+    let japanese_font =
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::YujiSyukuRegular)?)
+            .map_err(|_| "Failed to parse Yuji Syuku font")?;
     let traditional_chinese_font =
-        FontVec::try_from_vec(load_font_file("NotoSerifJP-Regular.ttf")?)
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::NotoSerifJpRegular)?)
             .map_err(|_| "Failed to parse Noto Serif JP font")?;
-    let simplified_chinese_font = FontVec::try_from_vec(load_font_file("NotoSerifJP-Regular.ttf")?)
-        .map_err(|_| "Failed to parse Noto Serif JP font")?;
+    let simplified_chinese_font =
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::NotoSerifJpRegular)?)
+            .map_err(|_| "Failed to parse Noto Serif JP font")?;
 
     let fonts = Fonts {
         japanese: japanese_font,
@@ -94,6 +84,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     execute!(stdout, terminal::EnterAlternateScreen, cursor::Hide)?;
 
     let mut app = App::new(fonts);
+    app.set_available_fonts(asset_provider.list_fonts());
     app.on_event(AppEvent::Start);
 
     let mut previous_buffer = Vec::new();
@@ -119,6 +110,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         // app.updateには仮想ピクセルサイズを渡す
         app.update(TUI_VIRTUAL_PIXEL_WIDTH, virtual_height, delta_time);
+        if let Some(request) = app.take_font_load_request() {
+            match asset_provider.load_font(request.font_id) {
+                Ok(bytes) => {
+                    if let Err(err) = app.apply_font_bytes(request.script, bytes) {
+                        eprintln!("Failed to apply font: {err:?}");
+                    }
+                }
+                Err(err) => eprintln!("{err}"),
+            }
+        }
 
         // シーンが変更された場合、差分描画をスキップして全画面を再描画するようにする
         if app.state != previous_state {
