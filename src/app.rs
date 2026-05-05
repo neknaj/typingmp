@@ -5,7 +5,10 @@ extern crate alloc;
 #[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
 use crate::io::FontEntry;
 use crate::io::{FontAssetId, ProblemRepository, ProblemSourceProvider};
-use crate::model::{Model, ResultModel, Scroll, Segment, TypingModel, TypingStatus};
+use crate::model::{
+    CharIndex, LineIndex, Model, ResultModel, Scroll, Segment, SegmentIndex, TypingModel,
+    TypingStatus, WordIndex,
+};
 use alloc::{
     format,
     string::{String, ToString},
@@ -99,6 +102,93 @@ impl Script {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MainMenuItem {
+    Start,
+    HowToUse,
+    Settings,
+    Quit,
+}
+
+impl MainMenuItem {
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Start => 0,
+            Self::HowToUse => 1,
+            Self::Settings => 2,
+            Self::Quit => 3,
+        }
+    }
+
+    pub fn previous(self) -> Self {
+        match self {
+            Self::Start => Self::Start,
+            Self::HowToUse => Self::Start,
+            Self::Settings => Self::HowToUse,
+            Self::Quit => Self::Settings,
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Start => Self::HowToUse,
+            Self::HowToUse => Self::Settings,
+            Self::Settings => {
+                #[cfg(target_arch = "wasm32")]
+                {
+                    Self::Settings
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    Self::Quit
+                }
+            }
+            Self::Quit => Self::Quit,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsItem {
+    Japanese,
+    TraditionalChinese,
+    SimplifiedChinese,
+}
+
+impl SettingsItem {
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Japanese => 0,
+            Self::TraditionalChinese => 1,
+            Self::SimplifiedChinese => 2,
+        }
+    }
+
+    pub const fn script(self) -> Script {
+        match self {
+            Self::Japanese => Script::Japanese,
+            Self::TraditionalChinese => Script::TraditionalChinese,
+            Self::SimplifiedChinese => Script::SimplifiedChinese,
+        }
+    }
+
+    pub fn previous(self) -> Self {
+        match self {
+            Self::Japanese => Self::Japanese,
+            Self::TraditionalChinese => Self::Japanese,
+            Self::SimplifiedChinese => Self::TraditionalChinese,
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Japanese => Self::TraditionalChinese,
+            Self::TraditionalChinese => Self::SimplifiedChinese,
+            Self::SimplifiedChinese => Self::SimplifiedChinese,
+        }
+    }
+}
+
 /// ロードされたフォントデータ（スクリプト別）
 pub struct Fonts {
     pub japanese: FontVec,
@@ -124,12 +214,6 @@ impl Fonts {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-const MENU_ITEM_COUNT: usize = 3; // Quitなし
-
-#[cfg(not(target_arch = "wasm32"))]
-const MENU_ITEM_COUNT: usize = 4;
-
 /// アプリケーションで発生するイベントを定義するenum
 pub enum AppEvent {
     Start,
@@ -142,6 +226,53 @@ pub enum AppEvent {
     Escape,
     CycleTuiMode,
     Quit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiCommand {
+    Backspace,
+    Enter,
+    Escape,
+    Up,
+    Down,
+    CycleTuiMode,
+}
+
+impl UiCommand {
+    pub fn from_bridge_label(value: &str) -> Option<Self> {
+        match value {
+            "Backspace" => Some(Self::Backspace),
+            "Enter" => Some(Self::Enter),
+            "Escape" => Some(Self::Escape),
+            "Up" => Some(Self::Up),
+            "Down" => Some(Self::Down),
+            "CycleTuiMode" => Some(Self::CycleTuiMode),
+            _ => None,
+        }
+    }
+
+    pub fn from_web_key(value: &str) -> Option<Self> {
+        match value {
+            "ArrowUp" => Some(Self::Up),
+            "ArrowDown" => Some(Self::Down),
+            "Backspace" => Some(Self::Backspace),
+            "Enter" => Some(Self::Enter),
+            "Escape" => Some(Self::Escape),
+            "Tab" => Some(Self::CycleTuiMode),
+            _ => None,
+        }
+    }
+
+    pub const fn app_event(self) -> AppEvent {
+        match self {
+            Self::Backspace => AppEvent::Backspace,
+            Self::Enter => AppEvent::Enter,
+            Self::Escape => AppEvent::Escape,
+            Self::Up => AppEvent::Up,
+            Self::Down => AppEvent::Down,
+            Self::CycleTuiMode => AppEvent::CycleTuiMode,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,7 +302,7 @@ pub(crate) struct ScrollLineSegmentCache {
 
 #[derive(Clone)]
 pub(crate) struct ScrollLineCache {
-    pub line: i32,
+    pub line: LineIndex,
     pub total_width: f32,
     /// セグメントの累積幅（長さ = segments.len()+1）
     pub segment_prefix_width: Vec<f32>,
@@ -181,10 +312,10 @@ pub(crate) struct ScrollLineCache {
 
 #[derive(Clone)]
 struct ScrollCursorState {
-    pub line: i32,
-    pub word: i32,
-    pub segment: i32,
-    pub char_: i32,
+    pub line: LineIndex,
+    pub word: WordIndex,
+    pub segment: SegmentIndex,
+    pub char_: CharIndex,
 }
 
 #[derive(Clone)]
@@ -223,7 +354,7 @@ fn build_scroll_line_cache(
     line: &crate::model::Line,
     font: &FontVec,
     font_pixel_size: f32,
-    line_index: i32,
+    line_index: LineIndex,
 ) -> ScrollLineCache {
     let mut segments = Vec::new();
     let mut segment_prefix_width = Vec::new();
@@ -317,9 +448,7 @@ fn line_origin_from_previous(
     font_pixel_size: f32,
     gap_width: f32,
 ) -> f32 {
-    let Some(previous_line) = usize::try_from(previous.current.line).ok() else {
-        return line_origin_from_start(target_line, lines, font, font_pixel_size, gap_width);
-    };
+    let previous_line = previous.current.line.get();
 
     if target_line == previous_line {
         return previous.line_origin;
@@ -369,50 +498,48 @@ fn line_origin_from_previous(
 
 fn cursor_position_from_status(
     cache: &ScrollLineCache,
-    status_line: i32,
-    status_word: i32,
-    status_segment: i32,
-    status_char: i32,
+    status_line: LineIndex,
+    status_word: WordIndex,
+    status_segment: SegmentIndex,
+    status_char: CharIndex,
 ) -> (f32, ScrollCursorState) {
-    let status_word_usize = usize::try_from(status_word).ok();
-    let status_segment_usize = usize::try_from(status_segment).ok();
-    let status_char_usize = usize::try_from(status_char).ok().unwrap_or(0);
-    let mut cursor_in_line = cache.segment_prefix_width.last().copied().unwrap_or(0.0);
+    let status_word_usize = status_word.get();
+    let status_segment_usize = status_segment.get();
+    let status_char_usize = status_char.get();
 
-    if let Some(word_idx) = status_word_usize {
-        if word_idx < cache.word_segment_starts.len() {
-            let segment_start = cache.word_segment_starts[word_idx];
-            let segment_end = cache
-                .word_segment_starts
-                .get(word_idx + 1)
-                .copied()
-                .unwrap_or(cache.segments.len());
-            let segment_count = segment_end.saturating_sub(segment_start);
-            let segment_idx = if segment_count == 0 {
-                segment_start
-            } else {
-                segment_start + status_segment_usize.unwrap_or(0).min(segment_count - 1)
-            };
-            let base = cache
-                .segment_prefix_width
-                .get(segment_idx)
-                .copied()
-                .unwrap_or(0.0);
-            let mut typed_width = 0.0f32;
-            if let Some(seg_cache) = cache.segments.get(segment_idx) {
-                let typed_len =
-                    status_char_usize.min(seg_cache.reading_width_prefix.len().saturating_sub(1));
-                typed_width = seg_cache
-                    .reading_width_prefix
-                    .get(typed_len)
-                    .copied()
-                    .unwrap_or(0.0);
-            }
-            cursor_in_line = (base + typed_width).min(cache.total_width);
+    let cursor_in_line = if status_word_usize < cache.word_segment_starts.len() {
+        let segment_start = cache.word_segment_starts[status_word_usize];
+        let segment_end = cache
+            .word_segment_starts
+            .get(status_word_usize + 1)
+            .copied()
+            .unwrap_or(cache.segments.len());
+        let segment_count = segment_end.saturating_sub(segment_start);
+        let segment_idx = if segment_count == 0 {
+            segment_start
         } else {
-            cursor_in_line = cache.total_width;
-        }
-    }
+            segment_start + status_segment_usize.min(segment_count - 1)
+        };
+        let base = cache
+            .segment_prefix_width
+            .get(segment_idx)
+            .copied()
+            .unwrap_or(0.0);
+        let typed_width = if let Some(seg_cache) = cache.segments.get(segment_idx) {
+            let typed_len =
+                status_char_usize.min(seg_cache.reading_width_prefix.len().saturating_sub(1));
+            seg_cache
+                .reading_width_prefix
+                .get(typed_len)
+                .copied()
+                .unwrap_or(0.0)
+        } else {
+            0.0
+        };
+        (base + typed_width).min(cache.total_width)
+    } else {
+        cache.total_width
+    };
 
     (
         cursor_in_line,
@@ -428,9 +555,9 @@ fn cursor_position_from_status(
 /// アプリケーション全体で共有される状態を保持する構造体
 pub struct App {
     pub state: AppState,
-    pub selected_main_menu_item: usize,
+    pub selected_main_menu_item: MainMenuItem,
     pub selected_problem_item: usize,
-    pub selected_settings_item: usize,
+    pub selected_settings_item: SettingsItem,
     problem_repository: ProblemRepository,
     pub typing_model: Option<TypingModel>,
     pub result_model: Option<ResultModel>,
@@ -483,9 +610,9 @@ impl App {
 
         Self {
             state: AppState::MainMenu,
-            selected_main_menu_item: 0,
+            selected_main_menu_item: MainMenuItem::Start,
             selected_problem_item: 0,
-            selected_settings_item: 0,
+            selected_settings_item: SettingsItem::Japanese,
             problem_repository,
             typing_model: None,
             result_model: None,
@@ -670,10 +797,10 @@ impl App {
         self.typing_model = Some(TypingModel {
             content,
             status: TypingStatus {
-                line: 0,
-                word: 0,
-                segment: 0,
-                char_: 0,
+                line: LineIndex::ZERO,
+                word: WordIndex::ZERO,
+                segment: SegmentIndex::ZERO,
+                char_: CharIndex::ZERO,
                 unconfirmed: Vec::new(),
                 last_wrong_keydown: None,
             },
@@ -726,10 +853,7 @@ impl App {
                 crate::renderer::calculate_pixel_font_size(base_font_size_enum, width, height);
             let gap_width = width as f32;
 
-            let line_idx = match usize::try_from(model.status.line) {
-                Ok(line_idx) => line_idx,
-                Err(_) => return,
-            };
+            let line_idx = model.status.line.get();
             if let Some(current_line_content) = model.content.lines.get(line_idx) {
                 let status = &model.status;
 
@@ -874,36 +998,31 @@ impl App {
                 self.status_text = "Welcome to Neknaj Typing Multi-Platform".to_string();
                 match event {
                     AppEvent::Up => {
-                        if self.selected_main_menu_item > 0 {
-                            self.selected_main_menu_item -= 1;
-                        }
+                        self.selected_main_menu_item = self.selected_main_menu_item.previous();
                     }
                     AppEvent::Down => {
-                        if self.selected_main_menu_item < MENU_ITEM_COUNT - 1 {
-                            self.selected_main_menu_item += 1;
-                        }
+                        self.selected_main_menu_item = self.selected_main_menu_item.next();
                     }
                     AppEvent::Enter => match self.selected_main_menu_item {
-                        0 => {
+                        MainMenuItem::Start => {
                             self.state = AppState::ProblemSelection;
                             self.on_event(AppEvent::ChangeScene);
                         }
-                        1 => {
+                        MainMenuItem::HowToUse => {
                             self.how_to_use_scroll = 0;
                             self.state = AppState::HowToUse;
                             self.on_event(AppEvent::ChangeScene);
                         }
-                        2 => {
+                        MainMenuItem::Settings => {
                             self.state = AppState::Settings;
                             self.on_event(AppEvent::ChangeScene);
                         }
-                        3 => {
+                        MainMenuItem::Quit => {
                             #[cfg(not(target_arch = "wasm32"))]
                             {
                                 self.should_quit = true;
                             }
                         }
-                        _ => {}
                     },
                     _ => {}
                 }
@@ -912,27 +1031,14 @@ impl App {
                 self.status_text = "Select a font for each script.".to_string();
                 if !self.settings_picking_font {
                     // スクリプト選択モード: Up/Down で 3 スクリプトをサイクル
-                    const SCRIPT_COUNT: usize = 3;
                     match event {
                         AppEvent::Up => {
-                            if self.selected_settings_item > 0 {
-                                self.selected_settings_item -= 1;
-                            }
-                            self.settings_script = match self.selected_settings_item {
-                                0 => Script::Japanese,
-                                1 => Script::TraditionalChinese,
-                                _ => Script::SimplifiedChinese,
-                            };
+                            self.selected_settings_item = self.selected_settings_item.previous();
+                            self.settings_script = self.selected_settings_item.script();
                         }
                         AppEvent::Down => {
-                            if self.selected_settings_item < SCRIPT_COUNT - 1 {
-                                self.selected_settings_item += 1;
-                            }
-                            self.settings_script = match self.selected_settings_item {
-                                0 => Script::Japanese,
-                                1 => Script::TraditionalChinese,
-                                _ => Script::SimplifiedChinese,
-                            };
+                            self.selected_settings_item = self.selected_settings_item.next();
+                            self.settings_script = self.selected_settings_item.script();
                         }
                         AppEvent::Enter => {
                             // 選択スクリプトのフォントピッカーを開く
@@ -1122,10 +1228,10 @@ impl App {
                     AppEvent::Backspace => {
                         if let Some(model) = self.typing_model.as_mut() {
                             if model.status.last_wrong_keydown.is_some() {
-                                let line = model.status.line as usize;
-                                let word = model.status.word as usize;
-                                let seg = model.status.segment as usize;
-                                let char_i = model.status.char_ as usize;
+                                let line = model.status.line.get();
+                                let word = model.status.word.get();
+                                let seg = model.status.segment.get();
+                                let char_i = model.status.char_.get();
                                 if let Some(c) = model
                                     .typing_correctness
                                     .lines

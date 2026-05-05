@@ -7,7 +7,7 @@ resolved: false
 priority: P1
 type: architecture
 created: 2026-05-05
-updated: 2026-05-05
+updated: 2026-05-06
 target: "src/renderer.rs, src/gui.rs, src/wasm.rs, src/mobile.rs, src/uefi.rs"
 legacy_id: TP-ARCH-002
 source: "doc/fullreview20260505/architecture/rendering.md"
@@ -32,3 +32,7 @@ renderer bug fix や性能改善が backend 間で反映漏れしやすい。tar
 
 - GUI / WASM / mobile / UEFI の compile check
 - representative scene の pixel smoke test
+
+## 追加観測: 2026-05-06
+
+play 画面で、上段の typing target 表示と下段の入力表示における同じ文字範囲の色状態が一致していない。これは view / renderer が同じ progress state を同じ規則で描画できていない問題として扱い、T17 で上下表示の色を揃える。

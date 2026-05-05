@@ -1,6 +1,6 @@
 // src/wasm.rs
 
-use crate::app::{App, AppEvent, CustomProblem, Fonts};
+use crate::app::{App, AppEvent, CustomProblem, Fonts, UiCommand};
 use crate::io::{PersistentStore, ProviderError, ProviderErrorKind};
 use crate::renderer::{calculate_pixel_font_size, gui_renderer};
 use crate::ui::{self, ActiveLowerElement, LowerTypingSegment, Renderable, UpperSegmentState};
@@ -221,13 +221,8 @@ pub fn trigger_event(event_type: &str) {
     APP_INSTANCE.with(|instance| {
         if let Some(app_rc) = instance.borrow().as_ref() {
             let mut app = app_rc.borrow_mut();
-            match event_type {
-                "Up" => app.on_event(AppEvent::Up),
-                "Down" => app.on_event(AppEvent::Down),
-                "Enter" => app.on_event(AppEvent::Enter),
-                "Backspace" => app.on_event(AppEvent::Backspace),
-                "Escape" => app.on_event(AppEvent::Escape),
-                _ => {}
+            if let Some(command) = UiCommand::from_bridge_label(event_type) {
+                app.on_event(command.app_event());
             }
         }
     });
@@ -536,33 +531,13 @@ async fn start_async() -> Result<(), JsValue> {
                 event.is_composing()
             ));
 
-            match event.key().as_str() {
-                "ArrowUp" => {
-                    event.prevent_default();
-                    app_clone.borrow_mut().on_event(AppEvent::Up)
+            if let Some(command) = UiCommand::from_web_key(event.key().as_str()) {
+                event.prevent_default();
+                app_clone.borrow_mut().on_event(command.app_event());
+                if command == UiCommand::Enter && app_clone.borrow().should_open_file_dialog {
+                    app_clone.borrow_mut().should_open_file_dialog = false;
+                    let _ = file_input_clone.click();
                 }
-                "ArrowDown" => {
-                    event.prevent_default();
-                    app_clone.borrow_mut().on_event(AppEvent::Down)
-                }
-                "Backspace" => {
-                    event.prevent_default();
-                    app_clone.borrow_mut().on_event(AppEvent::Backspace)
-                }
-                "Enter" => {
-                    event.prevent_default();
-                    app_clone.borrow_mut().on_event(AppEvent::Enter);
-                    // ファイルダイアログ要求フラグを確認し、ユーザージェスチャのコールスタック内で click() を呼ぶ
-                    if app_clone.borrow().should_open_file_dialog {
-                        app_clone.borrow_mut().should_open_file_dialog = false;
-                        let _ = file_input_clone.click();
-                    }
-                }
-                "Escape" => {
-                    event.prevent_default();
-                    app_clone.borrow_mut().on_event(AppEvent::Escape)
-                }
-                _ => {}
             }
         });
         document.add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref())?;

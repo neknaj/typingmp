@@ -7,8 +7,8 @@ generated_at: `2026-05-05T00:00:00Z`
 | key | count |
 |---|---:|
 | total | 29 |
-| open | 28 |
-| resolved | 1 |
+| open | 26 |
+| resolved | 3 |
 | P0 | 1 |
 | P1 | 17 |
 | P2 | 10 |
@@ -73,3 +73,5 @@ generated_at: `2026-05-05T00:00:00Z`
 | status | legacy id | title | file |
 |---|---|---|---|
 | verified | TP-CI-001 | WASM debug buildがWEBSOCKET_ADDRESS未設定でcompile不能になる | [item](./items/ISS-20260505T000000Z-TP-CI-001-WASM-DEBUG-ENV.md) |
+| verified | TP-STATIC-001 | 状態とcommandがraw number/raw stringに依存しenumとmatchの網羅性検査が効いていない | [item](./items/ISS-20260505T000000Z-TP-STATIC-001-ENUM-MATCH-STATE.md) |
+| verified | TP-TYPE-001 | typing stateがi32 indexとunchecked castに依存している | [item](./items/ISS-20260505T000000Z-TP-TYPE-001-I32-CURSOR-INDICES.md) |

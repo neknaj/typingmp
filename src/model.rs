@@ -88,19 +88,123 @@ pub struct ResultModel {
     pub typing_model: TypingModel,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct LineIndex(usize);
+
+impl LineIndex {
+    pub const ZERO: Self = Self(0);
+
+    pub const fn new(value: usize) -> Self {
+        Self(value)
+    }
+
+    pub const fn get(self) -> usize {
+        self.0
+    }
+
+    pub fn advance(&mut self) {
+        self.0 += 1;
+    }
+}
+
+impl fmt::Display for LineIndex {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct WordIndex(usize);
+
+impl WordIndex {
+    pub const ZERO: Self = Self(0);
+
+    pub const fn new(value: usize) -> Self {
+        Self(value)
+    }
+
+    pub const fn get(self) -> usize {
+        self.0
+    }
+
+    pub fn advance(&mut self) {
+        self.0 += 1;
+    }
+
+    pub fn reset(&mut self) {
+        self.0 = 0;
+    }
+}
+
+impl fmt::Display for WordIndex {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SegmentIndex(usize);
+
+impl SegmentIndex {
+    pub const ZERO: Self = Self(0);
+
+    pub const fn new(value: usize) -> Self {
+        Self(value)
+    }
+
+    pub const fn get(self) -> usize {
+        self.0
+    }
+
+    pub fn reset(&mut self) {
+        self.0 = 0;
+    }
+}
+
+impl fmt::Display for SegmentIndex {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CharIndex(usize);
+
+impl CharIndex {
+    pub const ZERO: Self = Self(0);
+
+    pub const fn new(value: usize) -> Self {
+        Self(value)
+    }
+
+    pub const fn get(self) -> usize {
+        self.0
+    }
+
+    pub fn reset(&mut self) {
+        self.0 = 0;
+    }
+}
+
+impl fmt::Display for CharIndex {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TypingStatus {
-    pub line: i32,
-    pub word: i32,
-    pub segment: i32,
-    pub char_: i32,
+    pub line: LineIndex,
+    pub word: WordIndex,
+    pub segment: SegmentIndex,
+    pub char_: CharIndex,
     pub unconfirmed: Vec<char>,
     pub last_wrong_keydown: Option<char>,
 }
 
 #[derive(Debug, Clone)]
 pub struct TypingSession {
-    pub line: i32,
+    pub line: LineIndex,
     pub inputs: Vec<TypingInput>,
 }
 

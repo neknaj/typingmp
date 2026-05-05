@@ -6,7 +6,7 @@ use slint::{Image, Rgb8Pixel, SharedPixelBuffer};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use crate::app::{App, AppEvent, Fonts};
+use crate::app::{App, AppEvent, Fonts, UiCommand};
 use crate::io::{AssetProvider, BundledFont, DesktopAssetProvider};
 use crate::renderer::{calculate_pixel_font_size, gui_renderer};
 use crate::ui::{self, ActiveLowerElement, LowerTypingSegment, Renderable, UpperSegmentState};
@@ -321,13 +321,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         let win = window.as_weak();
         window.on_special_input(move |action| {
             let mut a = app.lock().unwrap();
-            match action.as_str() {
-                "Backspace" => a.on_event(AppEvent::Backspace),
-                "Enter" => a.on_event(AppEvent::Enter),
-                "Escape" => a.on_event(AppEvent::Escape),
-                "Up" => a.on_event(AppEvent::Up),
-                "Down" => a.on_event(AppEvent::Down),
-                _ => {}
+            if let Some(command) = UiCommand::from_bridge_label(action.as_str()) {
+                a.on_event(command.app_event());
             }
             if let Some(w) = win.upgrade() {
                 w.set_keyboard_visible(a.state == crate::app::AppState::Typing);

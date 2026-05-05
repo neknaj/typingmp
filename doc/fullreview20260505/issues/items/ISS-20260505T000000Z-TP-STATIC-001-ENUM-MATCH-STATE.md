@@ -2,12 +2,12 @@
 id: ISS-20260505T000000Z-TP-STATIC-001-ENUM-MATCH-STATE
 title: "状態とcommandがraw number/raw stringに依存しenumとmatchの網羅性検査が効いていない"
 area: static-safety
-status: open
-resolved: false
+status: verified
+resolved: true
 priority: P1
 type: type-safety
 created: 2026-05-05
-updated: 2026-05-05
+updated: 2026-05-06
 target: "src/app.rs, src/model.rs, src/typing.rs, src/mobile.rs, src/wasm.rs"
 legacy_id: TP-STATIC-001
 source: "doc/fullreview20260505/quality/static-safety.md"
@@ -33,3 +33,18 @@ typing cursor、menu selection、problem source badge、UI action bridge など�
 
 - `cargo clippy` で unchecked cast と magic string 分岐を減らす。
 - enum variant 追加時に compile error が出る構造になっていること。
+
+## 修正結果
+
+typing cursor は `LineIndex` / `WordIndex` / `SegmentIndex` / `CharIndex` newtype に移行した。main menu と settings selection は enum にし、adapter bridge 由来の string command は `UiCommand` で parse してから `AppEvent` に変換するようにした。problem source は T05 で typed `ProblemId` / `ProblemSourceKind` を導入済み。
+
+検証:
+
+- `cargo fmt --check`: pass
+- `cargo test --no-default-features`: pass
+- `cargo clippy --no-default-features --all-targets -- -W clippy::all`: pass
+- `cargo check --no-default-features --features gui`: pass
+- `cargo check --no-default-features --features tui`: pass
+- `cargo check --no-default-features --features mobile`: pass
+- `cargo check --no-default-features --features wasm --target wasm32-unknown-unknown`: pass
+- `cargo check --no-default-features --features uefi --target x86_64-unknown-uefi`: pass

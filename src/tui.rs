@@ -415,8 +415,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             };
 
                             let full_line_words = &app.typing_model.as_ref().unwrap().content.lines
-                                [app.typing_model.as_ref().unwrap().status.line as usize]
-                                .words;
+                                [app.typing_model.as_ref().unwrap().status.line.get()]
+                            .words;
 
                             let (total_width_cells, total_width_pixels) = full_line_words
                                 .iter()
@@ -647,8 +647,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         TuiDisplayMode::SimpleText => {
                             // First, calculate the total width of the line in characters for centering.
                             let full_line_words = &app.typing_model.as_ref().unwrap().content.lines
-                                [app.typing_model.as_ref().unwrap().status.line as usize]
-                                .words;
+                                [app.typing_model.as_ref().unwrap().status.line.get()]
+                            .words;
                             let total_width_chars = full_line_words
                                 .iter()
                                 .flat_map(|w| &w.segments)

@@ -361,7 +361,7 @@ fn build_main_menu_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gr
         color: 0xFF_FFFFFF,
     });
     for (i, item) in MENU_ITEMS.iter().enumerate() {
-        let (text, color) = if i == app.selected_main_menu_item {
+        let (text, color) = if i == app.selected_main_menu_item.index() {
             (format!("> {} <", item), 0xFF_FFFF00)
         } else {
             (item.to_string(), 0xFF_FFFFFF)
@@ -404,7 +404,7 @@ fn build_settings_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gra
     ];
 
     for (i, (font_choice, name)) in fonts.iter().enumerate() {
-        let is_selected = i == app.selected_settings_item;
+        let is_selected = i == app.selected_settings_item.index();
         let is_active = *font_choice == app.settings_script;
 
         let mut display_text = if is_selected {
@@ -806,7 +806,7 @@ fn build_typing_ui(
 
         let base_font_size = FontSize::WindowHeight(BASE_FONT_SIZE_RATIO);
         let base_pixel_font_size = calculate_pixel_font_size(base_font_size, width, height);
-        let line_idx = model.status.line as usize;
+        let line_idx = model.status.line.get();
         let content_line = if let Some(line) = model.content.lines.get(line_idx) {
             line
         } else {
@@ -849,14 +849,14 @@ fn build_typing_ui(
         let mut upper_segments = Vec::new();
         for (word_idx, word) in content_line.words.iter().enumerate() {
             for (seg_idx, seg) in word.segments.iter().enumerate() {
-                let state = if (word_idx as i32) < status.word {
+                let state = if word_idx < status.word.get() {
                     if is_word_correct(&correctness_line.words[word_idx]) {
                         UpperSegmentState::Correct
                     } else {
                         UpperSegmentState::Incorrect
                     }
-                } else if (word_idx as i32) == status.word {
-                    if (seg_idx as i32) < status.segment {
+                } else if word_idx == status.word.get() {
+                    if seg_idx < status.segment.get() {
                         let is_current_segment_correct = correctness_line
                             .words
                             .get(word_idx)
@@ -867,7 +867,7 @@ fn build_typing_ui(
                         } else {
                             UpperSegmentState::Incorrect
                         }
-                    } else if (seg_idx as i32) == status.segment {
+                    } else if seg_idx == status.segment.get() {
                         UpperSegmentState::Active
                     } else {
                         UpperSegmentState::Pending
@@ -904,37 +904,33 @@ fn build_typing_ui(
 
         // --- 髣包ｽｳ陋ｹ・ｺ繝ｻ・ｮ繝ｻ・ｵ郢晢ｽｻ闔・･郢晢ｽｻ髯ｷ迚呻ｽｸ蜷ｶﾎ倬Δ・ｧ繝ｻ・ｭ驛｢・ｧ繝ｻ・ｹ驛｢譎∬か繝ｻ・ｼ陝ｲ・ｨ郢晢ｽｻ髫ｶ蝣､霍昴・・ｯ郢晢ｽｻ---
         let mut lower_segments = Vec::new();
-        let status_word = usize::try_from(status.word).ok();
-        let status_segment = usize::try_from(status.segment).ok().unwrap_or(0);
-        let status_segment_opt = usize::try_from(status.segment).ok();
+        let status_word = status.word.get();
+        let status_segment = status.segment.get();
 
         if let Some(state) = cached_cache {
             let current_cache = &state.current;
-            let status_word_idx = status_word.unwrap_or(usize::MAX);
+            let status_word_idx = status_word;
             let cursor_x = state.cursor_in_line.max(0.0);
             let viewport = width as f32;
             let left_bound = (cursor_x - viewport).max(0.0);
             let right_bound = cursor_x + viewport;
 
-            let active_segment_idx = match (status_word, status_segment_opt) {
-                (Some(word_idx), Some(segment_idx))
-                    if word_idx < current_cache.word_segment_starts.len() =>
-                {
-                    let word_start = current_cache
-                        .word_segment_starts
-                        .get(word_idx)
-                        .copied()
-                        .unwrap_or(current_cache.segments.len());
-                    let word_end = current_cache
-                        .word_segment_starts
-                        .get(word_idx + 1)
-                        .copied()
-                        .unwrap_or(current_cache.segments.len());
-                    let segment_count = word_end.saturating_sub(word_start);
-                    let status_offset = segment_idx.min(segment_count);
-                    word_start + status_offset
-                }
-                _ => current_cache.segments.len(),
+            let active_segment_idx = if status_word < current_cache.word_segment_starts.len() {
+                let word_start = current_cache
+                    .word_segment_starts
+                    .get(status_word)
+                    .copied()
+                    .unwrap_or(current_cache.segments.len());
+                let word_end = current_cache
+                    .word_segment_starts
+                    .get(status_word + 1)
+                    .copied()
+                    .unwrap_or(current_cache.segments.len());
+                let segment_count = word_end.saturating_sub(word_start);
+                let status_offset = status_segment.min(segment_count);
+                word_start + status_offset
+            } else {
+                current_cache.segments.len()
             };
 
             let mut visible_start = current_cache
@@ -960,16 +956,11 @@ fn build_typing_ui(
 
             for cache_index in visible_start..visible_end {
                 if let Some(cache_seg) = current_cache.segments.get(cache_index) {
-                    let is_correct = match (
-                        status_word,
-                        correctness_line.words.get(cache_seg.word_index),
-                    ) {
-                        (Some(current_status_word), Some(correctness_word))
-                            if cache_seg.word_index < current_status_word =>
-                        {
+                    let is_correct = match correctness_line.words.get(cache_seg.word_index) {
+                        Some(correctness_word) if cache_seg.word_index < status_word => {
                             is_word_correct(correctness_word)
                         }
-                        (_, Some(correctness_word)) if cache_seg.word_index == status_word_idx => {
+                        Some(correctness_word) if cache_seg.word_index == status_word_idx => {
                             correctness_word
                                 .segments
                                 .get(cache_seg.segment_index)
@@ -987,10 +978,8 @@ fn build_typing_ui(
                 }
             }
 
-            if let Some(active_word_content) =
-                content_line.words.get(status_word.unwrap_or(usize::MAX))
-            {
-                let active_word_idx = status_word.unwrap_or(0);
+            if let Some(active_word_content) = content_line.words.get(status_word) {
+                let active_word_idx = status_word;
                 if active_word_idx < correctness_line.words.len() {
                     let active_correctness_word = &correctness_line.words[active_word_idx];
                     if let Some(active_seg_content) =
@@ -1001,7 +990,7 @@ fn build_typing_ui(
 
                         let correctness_seg = &active_correctness_word.segments[status_segment];
                         for (char_idx, character) in
-                            reading_text.chars().enumerate().take(status.char_ as usize)
+                            reading_text.chars().enumerate().take(status.char_.get())
                         {
                             let is_correct =
                                 correctness_seg.chars[char_idx] != TypingCorrectnessChar::Incorrect;
@@ -1030,7 +1019,7 @@ fn build_typing_ui(
                 }
             }
         } else {
-            for word_idx in 0..status_word.unwrap_or(0) {
+            for word_idx in 0..status_word {
                 if let (Some(word), Some(correctness_word)) = (
                     content_line.words.get(word_idx),
                     correctness_line.words.get(word_idx),
@@ -1050,8 +1039,8 @@ fn build_typing_ui(
             }
 
             if let (Some(active_word_content), Some(active_correctness_word)) = (
-                status_word.and_then(|word_idx| content_line.words.get(word_idx)),
-                status_word.and_then(|word_idx| correctness_line.words.get(word_idx)),
+                content_line.words.get(status_word),
+                correctness_line.words.get(status_word),
             ) {
                 for seg_idx in 0..status_segment {
                     if let Some(seg) = active_word_content.segments.get(seg_idx) {
@@ -1077,7 +1066,7 @@ fn build_typing_ui(
 
                     let correctness_seg = &active_correctness_word.segments[status_segment];
                     for (char_idx, character) in
-                        reading_text.chars().enumerate().take(status.char_ as usize)
+                        reading_text.chars().enumerate().take(status.char_.get())
                     {
                         let is_correct =
                             correctness_seg.chars[char_idx] != TypingCorrectnessChar::Incorrect;
@@ -1125,7 +1114,7 @@ fn build_typing_ui(
         // --- 驛｢・ｧ繝ｻ・ｳ驛｢譎｢・ｽ・ｳ驛｢譏ｴ繝ｻ邵ｺ蜀暦ｽｹ・ｧ繝ｻ・ｹ驛｢譎槭Γ繝ｻ・｡鬲・ｼ夲ｽｽ・ｼ闔・･霎ｯ謌奇｣ｰ蜍滂ｽｾ蠕後・鬮ｯ・ｦ鬲・ｼ夲ｽｽ・ｼ陝ｲ・ｨ繝ｻ螳夲ｽｬ・ｰ陷諤懈・ ---
         let line_count = model.content.lines.len();
         for &offset in &[-1, 1] {
-            let line_to_display_signed = model.status.line + offset;
+            let line_to_display_signed = model.status.line.get() as isize + offset;
             if line_to_display_signed >= 0 && (line_to_display_signed as usize) < line_count {
                 let line_idx_context = line_to_display_signed as usize;
                 render_list.push(Renderable::Text {
@@ -1149,11 +1138,7 @@ fn build_typing_ui(
         let metrics = typing::calculate_total_metrics(model);
         let time = metrics.total_time / 1000.0;
         let status_items = [
-            format!(
-                "Progress: {} / {}",
-                model.status.line as usize + 1,
-                line_count
-            ),
+            format!("Progress: {} / {}", model.status.line.get() + 1, line_count),
             format!("Speed: {:.2} KPS", metrics.speed),
             format!("Accuracy: {:.1}%", metrics.accuracy * 100.0),
             format!("Misses: {}", metrics.miss_count),
@@ -1184,9 +1169,9 @@ fn build_typing_ui(
 
         // --- 鬯ｨ・ｾ繝ｻ・ｲ髫ｰ莉吝ｹｲ郢晢ｽｰ驛｢譎｢・ｽ・ｼ ---
         let char_progress_in_line =
-            model.status.word as f32 / content_line.words.len().max(1) as f32;
+            model.status.word.get() as f32 / content_line.words.len().max(1) as f32;
         let detailed_progress_ratio = if line_count > 0 {
-            (model.status.line as f32 + char_progress_in_line) / (line_count as f32)
+            (model.status.line.get() as f32 + char_progress_in_line) / (line_count as f32)
         } else {
             0.0
         };
