@@ -791,7 +791,14 @@ impl App {
         let Some(problem_text) = self.problem_repository.problem_content(problem_index) else {
             return;
         };
-        let content = parser::parse_problem(problem_text.as_ref());
+        let content = match parser::parse_problem(problem_text.as_ref()) {
+            Ok(content) => content,
+            Err(diagnostics) => {
+                self.status_text = format!("Problem parse error: {diagnostics}");
+                self.instructions_text = self.problem_selection_instructions();
+                return;
+            }
+        };
         let typing_correctness = typing::create_typing_correctness_model(&content);
 
         self.typing_model = Some(TypingModel {
@@ -1331,5 +1338,22 @@ mod tests {
         assert_eq!(app.state, AppState::ProblemSelection);
         assert!(app.typing_model.is_none());
         assert!(app.result_model.is_none());
+    }
+
+    #[test]
+    fn malformed_custom_problem_reports_parse_error() {
+        let mut app = App::new(test_fonts());
+
+        app.add_custom_problem(
+            "Broken".to_string(),
+            "#title Broken\n[未完了/みかんりょう".to_string(),
+            0,
+        );
+        app.on_event(AppEvent::Enter);
+
+        assert_eq!(app.state, AppState::ProblemSelection);
+        assert!(app.typing_model.is_none());
+        assert!(app.status_text.contains("Problem parse error"));
+        assert!(app.status_text.contains("missing closing"));
     }
 }

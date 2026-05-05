@@ -7,8 +7,8 @@ generated_at: `2026-05-05T00:00:00Z`
 | key | count |
 |---|---:|
 | total | 29 |
-| open | 25 |
-| resolved | 4 |
+| open | 23 |
+| resolved | 6 |
 | P0 | 1 |
 | P1 | 17 |
 | P2 | 10 |
@@ -46,7 +46,6 @@ generated_at: `2026-05-05T00:00:00Z`
 | P1 | TP-ARCH-001 | architecture | architecture | Appがscene/input/problem/scroll/fontを抱えすぎている | [item](./items/ISS-20260505T000000Z-TP-ARCH-001-APP-GOD-OBJECT.md) |
 | P1 | TP-ARCH-002 | architecture | architecture | backendごとにrendering pipelineが重複している | [item](./items/ISS-20260505T000000Z-TP-ARCH-002-RENDERER-DUPLICATION.md) |
 | P1 | TP-TYPE-001 | core | type-safety | typing stateがi32 indexとunchecked castに依存している | [item](./items/ISS-20260505T000000Z-TP-TYPE-001-I32-CURSOR-INDICES.md) |
-| P1 | TP-CORE-001 | core | bug | parserがmalformed inputをdiagnosticとして返せない | [item](./items/ISS-20260505T000000Z-TP-CORE-001-PARSER-DIAGNOSTICS.md) |
 | P1 | TP-CORE-002 | core | performance | typing inputがmodel値渡しと入力logに依存している | [item](./items/ISS-20260505T000000Z-TP-CORE-002-TYPING-MODEL-MOVE-LOGGING.md) |
 | P1 | TP-PERF-003 | performance | performance | UEFI backendがframeごとに大きなbufferを確保している | [item](./items/ISS-20260505T000000Z-TP-PERF-003-UEFI-FRAME-ALLOC.md) |
 | P1 | TP-ERR-001 | error-handling | bug | platform backendに環境依存unwrapが多い | [item](./items/ISS-20260505T000000Z-TP-ERR-001-BACKEND-UNWRAPS.md) |
@@ -60,7 +59,6 @@ generated_at: `2026-05-05T00:00:00Z`
 | P2 | TP-PERF-001 | performance | performance | Layout mappingがsessionごとに再構築される | [item](./items/ISS-20260505T000000Z-TP-PERF-001-LAYOUT-REBUILD.md) |
 | P2 | TP-PERF-002 | performance | performance | text measurementとrasterizationが再計算されやすい | [item](./items/ISS-20260505T000000Z-TP-PERF-002-TEXT-MEASURE-CACHE.md) |
 | P2 | TP-MOBILE-001 | mobile | architecture | mobile backendがUI callback内でArc<Mutex<App>>とunwrapに依存している | [item](./items/ISS-20260505T000000Z-TP-MOBILE-001-MUTEX-UI-STATE.md) |
-| P2 | TP-DOC-001 | docs | docs | READMEの問題記法が実装とずれている | [item](./items/ISS-20260505T000000Z-TP-DOC-001-README-NTQ-SYNTAX.md) |
 | P2 | TP-DOC-002 | docs | docs | 生成物とsource artifactの管理境界が曖昧 | [item](./items/ISS-20260505T000000Z-TP-DOC-002-GENERATED-ARTIFACTS.md) |
 | P2 | TP-SEC-002 | security | security | debug logger serverにdev-only境界と上限がない | [item](./items/ISS-20260505T000000Z-TP-SEC-002-LOGGER-SERVER-DEV-ONLY.md) |
 | P2 | TP-BUILD-001 | build | build | build.rsがunwrapとrerun-if-changed不足に依存している | [item](./items/ISS-20260505T000000Z-TP-BUILD-001-BUILD-RS-UNWRAP-RERUN.md) |
@@ -73,5 +71,7 @@ generated_at: `2026-05-05T00:00:00Z`
 |---|---|---|---|
 | verified | TP-CI-001 | WASM debug buildがWEBSOCKET_ADDRESS未設定でcompile不能になる | [item](./items/ISS-20260505T000000Z-TP-CI-001-WASM-DEBUG-ENV.md) |
 | verified | TP-CORE-003 | parser以外のcore regression testが不足している | [item](./items/ISS-20260505T000000Z-TP-CORE-003-TEST-COVERAGE-GAP.md) |
+| verified | TP-CORE-001 | parserがmalformed inputをdiagnosticとして返せない | [item](./items/ISS-20260505T000000Z-TP-CORE-001-PARSER-DIAGNOSTICS.md) |
+| verified | TP-DOC-001 | READMEの問題記法が実装とずれている | [item](./items/ISS-20260505T000000Z-TP-DOC-001-README-NTQ-SYNTAX.md) |
 | verified | TP-STATIC-001 | 状態とcommandがraw number/raw stringに依存しenumとmatchの網羅性検査が効いていない | [item](./items/ISS-20260505T000000Z-TP-STATIC-001-ENUM-MATCH-STATE.md) |
 | verified | TP-TYPE-001 | typing stateがi32 indexとunchecked castに依存している | [item](./items/ISS-20260505T000000Z-TP-TYPE-001-I32-CURSOR-INDICES.md) |

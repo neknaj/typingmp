@@ -166,9 +166,9 @@ Problem files are simple UTF-8 encoded text files that define the typing challen
 2.  **Problem Text**: Subsequent lines each represent one typing problem.
 
 ```
-#title (サンプル/さんぷる)問題集
-(吾輩/わがはい)は(猫/ねこ)である。/(名前/なまえ)はまだ(無/な)い。
-(走/はし)れメロス
+#title [サンプル/さんぷる]問題集
+[吾輩/わがはい]は[猫/ねこ]である。/[名前/なまえ]はまだ[無/な]い。
+[走/はし]-れメロス
 ```
 
 ### Syntax Rules
@@ -184,11 +184,11 @@ This is standard text without a specified reading. It's typed as written.
 
 Use this to assign a specific reading (the characters to be typed) to displayed text, such as Kanji.
 
-**Format:** `(base_text/reading_text)`
+**Format:** `[base_text/reading_text]`
 
 **Examples:**
-*   `(漢字/かんじ)` -> Displays "漢字", requires typing "かんじ".
-*   `(Destiny/さだめ)` -> Displays "Destiny", requires typing "さだめ".
+*   `[漢字/かんじ]` -> Displays "漢字", requires typing "かんじ".
+*   `[Destiny/さだめ]` -> Displays "Destiny", requires typing "さだめ".
 
 ---
 
@@ -201,7 +201,7 @@ Correctly defining word boundaries is crucial for scoring and metrics.
 Words can be separated in the following ways:
 
 *   **By Default**: Segments are treated as separate words by default.
-    *   **Input:** `(吾輩/わがはい)は(猫/ねこ)である。`
+    *   **Input:** `[吾輩/わがはい]は[猫/ねこ]である。`
     *   **Parsed as:** Four words: `吾輩`, `は`, `猫`, `である。`
 
 *   **Slash `/`**: Use a slash to explicitly separate words.
@@ -209,7 +209,7 @@ Words can be separated in the following ways:
     *   **Parsed as:** Three words: `とま`, `を`, `あらみ`
 
 *   **Space ` `**: A space acts as a delimiter and is treated as its own word.
-    *   **Input:** `(Good/ぐっど) (Morning/もーにんぐ)`
+    *   **Input:** `[Good/ぐっど] [Morning/もーにんぐ]`
     *   **Parsed as:** Three words: `Good`, ` ` (space), `Morning`
 
 #### Connecting (Joining) Words
@@ -217,29 +217,29 @@ Words can be separated in the following ways:
 To treat multiple segments as a single word (e.g., for words with okurigana or compound words), connect them with a hyphen `-`.
 
 *   **Okurigana Example:**
-    *   **Input:** `(悲/かな)-しき`
+    *   **Input:** `[悲/かな]-しき`
     *   **Parsed as:** The single word `悲しき`. The required typing is "かなしき".
 
 *   **Compound Word Example:**
-    *   **Input:** `ふみ-(分/わ)-け`
+    *   **Input:** `ふみ-[分/わ]-け`
     *   **Parsed as:** The single word `ふみ分け`. The required typing is "ふみわけ".
 
 *   **Multiple Annotated Segments:**
-    *   **Input:** `(天/あま)-の-(香具山/かぐやま)`
+    *   **Input:** `[天/あま]-の-[香具山/かぐやま]`
     *   **Parsed as:** The single word `天の香具山`. The required typing is "あまのかぐやま".
 
 ---
 
 ### Escaping Special Characters
 
-To use the special characters `(`, `)`, `/`, `-`, or `\` as literal text, prefix them with a backslash `\`.
+To use the special characters `[`, `]`, `{`, `}`, `/`, `-`, or `\` as literal text, prefix them with a backslash `\`.
 
-*   **Example 1: Literal Parentheses**
-    *   **Input:** `\\(エスケープ\\)`
-    *   **Result:** Parsed as the plain text `(エスケープ)`.
+*   **Example 1: Literal Brackets**
+    *   **Input:** `\[エスケープ\]`
+    *   **Result:** Parsed as the plain text `[エスケープ]`.
 
 *   **Example 2: Literal Slash within Annotated Text**
-    *   **Input:** `(A\\/B/えーぶんのびー)`
+    *   **Input:** `[A\/B/えーぶんのびー]`
     *   **Result:** Displays as `A/B`, requires typing `えーぶんのびー`.
 
 ## 📜 License

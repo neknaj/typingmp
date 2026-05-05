@@ -7,7 +7,7 @@ use alloc::{
     vec,
     vec::Vec,
 };
-use core::mem;
+use core::{fmt, mem};
 
 use crate::model::{Content, Line, Segment, Word};
 
@@ -21,8 +21,103 @@ enum Token {
     Space,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseDiagnostics {
+    errors: Vec<ParseDiagnostic>,
+}
+
+impl ParseDiagnostics {
+    fn new() -> Self {
+        Self { errors: Vec::new() }
+    }
+
+    fn push(&mut self, line: usize, column: usize, kind: ParseDiagnosticKind) {
+        self.errors.push(ParseDiagnostic { line, column, kind });
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.errors.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.errors.len()
+    }
+
+    pub fn first(&self) -> Option<&ParseDiagnostic> {
+        self.errors.first()
+    }
+
+    pub fn errors(&self) -> &[ParseDiagnostic] {
+        &self.errors
+    }
+}
+
+impl fmt::Display for ParseDiagnostics {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Some(first) = self.first() else {
+            return write!(f, "no parser diagnostics");
+        };
+
+        write!(f, "{first}")?;
+        if self.len() > 1 {
+            write!(f, " (+{} more)", self.len() - 1)?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseDiagnostic {
+    pub line: usize,
+    pub column: usize,
+    pub kind: ParseDiagnosticKind,
+}
+
+impl fmt::Display for ParseDiagnostic {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "line {}, column {}: {}",
+            self.line, self.column, self.kind
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParseDiagnosticKind {
+    EmptyRubyBase,
+    EmptyRubyReading,
+    MissingRubySeparator,
+    UnclosedRuby,
+    EmptyAnnotationInner,
+    EmptyAnnotation,
+    MissingAnnotationSeparator,
+    UnclosedAnnotation,
+    NestedSyntax,
+    UnexpectedClosingBracket,
+}
+
+impl fmt::Display for ParseDiagnosticKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyRubyBase => write!(f, "ruby base is empty"),
+            Self::EmptyRubyReading => write!(f, "ruby reading is empty"),
+            Self::MissingRubySeparator => write!(f, "ruby segment is missing '/' separator"),
+            Self::UnclosedRuby => write!(f, "ruby segment is missing closing ']'"),
+            Self::EmptyAnnotationInner => write!(f, "annotation inner text is empty"),
+            Self::EmptyAnnotation => write!(f, "annotation text is empty"),
+            Self::MissingAnnotationSeparator => {
+                write!(f, "annotation segment is missing '/' separator")
+            }
+            Self::UnclosedAnnotation => write!(f, "annotation segment is missing closing '}}'"),
+            Self::NestedSyntax => write!(f, "nested syntax is not supported"),
+            Self::UnexpectedClosingBracket => write!(f, "unexpected closing bracket"),
+        }
+    }
+}
+
 // Stage 1: 入力行をトークン列に変換する
-fn tokenize_line(line: &str) -> Vec<Token> {
+fn tokenize_line(line: &str, line_number: usize, diagnostics: &mut ParseDiagnostics) -> Vec<Token> {
     let mut tokens = Vec::new();
     let chars: Vec<char> = line.chars().collect();
     let mut pos = 0;
@@ -48,7 +143,7 @@ fn tokenize_line(line: &str) -> Vec<Token> {
             '[' => {
                 // ruby記法の開始 [base/reading]
                 flush_plain(&mut plain_text, &mut tokens);
-                let (segment, new_pos) = parse_ruby(&chars, pos);
+                let (segment, new_pos) = parse_ruby(&chars, pos, line_number, diagnostics);
                 tokens.push(Token::Segment(segment));
                 pos = new_pos;
                 continue;
@@ -56,10 +151,18 @@ fn tokenize_line(line: &str) -> Vec<Token> {
             '{' => {
                 // anno記法の開始 {inner/annotation}
                 flush_plain(&mut plain_text, &mut tokens);
-                let (segment, new_pos) = parse_anno(&chars, pos);
+                let (segment, new_pos) = parse_anno(&chars, pos, line_number, diagnostics);
                 tokens.push(Token::Segment(segment));
                 pos = new_pos;
                 continue;
+            }
+            ']' | '}' => {
+                diagnostics.push(
+                    line_number,
+                    pos + 1,
+                    ParseDiagnosticKind::UnexpectedClosingBracket,
+                );
+                plain_text.push(chars[pos]);
             }
             '-' => {
                 // ハイフン（連結子の候補）
@@ -89,41 +192,81 @@ fn tokenize_line(line: &str) -> Vec<Token> {
 }
 
 // ruby記法 [base/reading] をパースする。pos は '[' の位置を指す
-fn parse_ruby(chars: &[char], start: usize) -> (Segment, usize) {
+fn parse_ruby(
+    chars: &[char],
+    start: usize,
+    line_number: usize,
+    diagnostics: &mut ParseDiagnostics,
+) -> (Segment, usize) {
     let mut pos = start + 1; // '[' をスキップ
     let mut base = String::new();
+    let mut has_separator = false;
     while pos < chars.len() {
         if chars[pos] == '\\' {
             pos += 1;
             if pos < chars.len() {
                 base.push(chars[pos]);
             }
-        } else if chars[pos] == '/' || chars[pos] == ']' {
+        } else if chars[pos] == '/' {
+            has_separator = true;
             break;
+        } else if chars[pos] == ']' {
+            break;
+        } else if matches!(chars[pos], '[' | '{') {
+            diagnostics.push(line_number, pos + 1, ParseDiagnosticKind::NestedSyntax);
+            base.push(chars[pos]);
         } else {
             base.push(chars[pos]);
         }
         pos += 1;
     }
+
+    if base.is_empty() {
+        diagnostics.push(line_number, start + 1, ParseDiagnosticKind::EmptyRubyBase);
+    }
+
     if pos < chars.len() && chars[pos] == '/' {
         pos += 1;
+    } else {
+        diagnostics.push(
+            line_number,
+            pos.saturating_add(1),
+            ParseDiagnosticKind::MissingRubySeparator,
+        );
     }
+
     let mut reading = String::new();
-    while pos < chars.len() {
-        if chars[pos] == '\\' {
-            pos += 1;
-            if pos < chars.len() {
+    if has_separator {
+        while pos < chars.len() {
+            if chars[pos] == '\\' {
+                pos += 1;
+                if pos < chars.len() {
+                    reading.push(chars[pos]);
+                }
+            } else if chars[pos] == ']' {
+                break;
+            } else if matches!(chars[pos], '[' | '{') {
+                diagnostics.push(line_number, pos + 1, ParseDiagnosticKind::NestedSyntax);
+                reading.push(chars[pos]);
+            } else {
                 reading.push(chars[pos]);
             }
-        } else if chars[pos] == ']' {
-            break;
-        } else {
-            reading.push(chars[pos]);
+            pos += 1;
         }
-        pos += 1;
     }
+
+    if reading.is_empty() {
+        diagnostics.push(
+            line_number,
+            pos.saturating_add(1),
+            ParseDiagnosticKind::EmptyRubyReading,
+        );
+    }
+
     if pos < chars.len() && chars[pos] == ']' {
         pos += 1;
+    } else {
+        diagnostics.push(line_number, start + 1, ParseDiagnosticKind::UnclosedRuby);
     }
     (Segment::Annotated { base, reading }, pos)
 }
@@ -131,10 +274,16 @@ fn parse_ruby(chars: &[char], start: usize) -> (Segment, usize) {
 // anno記法 {inner/annotation} をパースする。pos は '{' の位置を指す
 // inner は ruby ([base/reading]) とプレーンテキストの混合を許容する
 // '[...]' の内部の '/' は anno の区切りとして扱わない
-fn parse_anno(chars: &[char], start: usize) -> (Segment, usize) {
+fn parse_anno(
+    chars: &[char],
+    start: usize,
+    line_number: usize,
+    diagnostics: &mut ParseDiagnostics,
+) -> (Segment, usize) {
     let mut pos = start + 1; // '{' をスキップ
     let mut inner: Vec<Segment> = Vec::new();
     let mut plain_buf = String::new();
+    let mut has_separator = false;
 
     let flush_plain_buf = |buf: &mut String, inner: &mut Vec<Segment>| {
         if !buf.is_empty() {
@@ -156,14 +305,22 @@ fn parse_anno(chars: &[char], start: usize) -> (Segment, usize) {
             '[' => {
                 // ruby セグメントとしてパース
                 flush_plain_buf(&mut plain_buf, &mut inner);
-                let (seg, new_pos) = parse_ruby(chars, pos);
+                let (seg, new_pos) = parse_ruby(chars, pos, line_number, diagnostics);
                 inner.push(seg);
                 pos = new_pos;
                 continue;
             }
-            '/' | '}' => {
+            '/' => {
+                has_separator = true;
+                break;
+            }
+            '}' => {
                 // inner の終端
                 break;
+            }
+            '{' => {
+                diagnostics.push(line_number, pos + 1, ParseDiagnosticKind::NestedSyntax);
+                plain_buf.push(chars[pos]);
             }
             c => {
                 plain_buf.push(c);
@@ -173,27 +330,61 @@ fn parse_anno(chars: &[char], start: usize) -> (Segment, usize) {
     }
     flush_plain_buf(&mut plain_buf, &mut inner);
 
+    if inner.is_empty() {
+        diagnostics.push(
+            line_number,
+            start + 1,
+            ParseDiagnosticKind::EmptyAnnotationInner,
+        );
+    }
+
     // '/' をスキップして annotation 部分へ
     if pos < chars.len() && chars[pos] == '/' {
         pos += 1;
+    } else {
+        diagnostics.push(
+            line_number,
+            pos.saturating_add(1),
+            ParseDiagnosticKind::MissingAnnotationSeparator,
+        );
     }
 
     let mut annotation = String::new();
-    while pos < chars.len() {
-        if chars[pos] == '\\' {
-            pos += 1;
-            if pos < chars.len() {
+    if has_separator {
+        while pos < chars.len() {
+            if chars[pos] == '\\' {
+                pos += 1;
+                if pos < chars.len() {
+                    annotation.push(chars[pos]);
+                }
+            } else if chars[pos] == '}' {
+                break;
+            } else if matches!(chars[pos], '[' | '{') {
+                diagnostics.push(line_number, pos + 1, ParseDiagnosticKind::NestedSyntax);
+                annotation.push(chars[pos]);
+            } else {
                 annotation.push(chars[pos]);
             }
-        } else if chars[pos] == '}' {
-            break;
-        } else {
-            annotation.push(chars[pos]);
+            pos += 1;
         }
-        pos += 1;
     }
+
+    if annotation.is_empty() {
+        diagnostics.push(
+            line_number,
+            pos.saturating_add(1),
+            ParseDiagnosticKind::EmptyAnnotation,
+        );
+    }
+
     if pos < chars.len() && chars[pos] == '}' {
         pos += 1;
+    } else {
+        diagnostics.push(
+            line_number,
+            start + 1,
+            ParseDiagnosticKind::UnclosedAnnotation,
+        );
     }
 
     (Segment::Anno { inner, annotation }, pos)
@@ -268,7 +459,8 @@ fn group_tokens_into_words(tokens: Vec<Token>) -> Vec<Word> {
 }
 
 // アプリケーションから呼び出されるメインのパーサー関数
-pub fn parse_problem(input: &str) -> Content {
+pub fn parse_problem(input: &str) -> Result<Content, ParseDiagnostics> {
+    let mut diagnostics = ParseDiagnostics::new();
     let mut lines_iter = input.lines();
 
     // タイトル行を解析
@@ -276,7 +468,7 @@ pub fn parse_problem(input: &str) -> Content {
     let title = if title_line_str.starts_with("#title") {
         let content = title_line_str.trim_start_matches("#title").trim();
         // タイトル行も本文と同様にトークン化し、単語にグループ化する
-        let tokens = tokenize_line(content);
+        let tokens = tokenize_line(content, 1, &mut diagnostics);
         let words = group_tokens_into_words(tokens);
         Line { words }
     } else {
@@ -285,16 +477,20 @@ pub fn parse_problem(input: &str) -> Content {
 
     // 残りの本文行を解析
     let mut lines = Vec::new();
-    for line_str in lines_iter {
+    for (line_offset, line_str) in lines_iter.enumerate() {
         if line_str.trim().is_empty() {
             continue;
         }
-        let tokens = tokenize_line(line_str);
+        let tokens = tokenize_line(line_str, line_offset + 2, &mut diagnostics);
         let words = group_tokens_into_words(tokens);
         lines.push(Line { words });
     }
 
-    Content { title, lines }
+    if diagnostics.is_empty() {
+        Ok(Content { title, lines })
+    } else {
+        Err(diagnostics)
+    }
 }
 
 #[cfg(test)]
@@ -304,12 +500,28 @@ mod tests {
 
     // テスト用ヘルパー: 行文字列を受け取り、解析されたWordのベクタを返す
     fn parse_line_to_words(line: &str) -> Vec<Word> {
-        let tokens = tokenize_line(line);
+        let mut diagnostics = ParseDiagnostics::new();
+        let tokens = tokenize_line(line, 1, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "valid fixture should not emit diagnostics: {diagnostics:?}"
+        );
         println!("Testing line: '{}'", line);
         println!("Tokens: {:?}", tokens);
         let words = group_tokens_into_words(tokens);
         println!("Resulting words: {:?}\n", words);
         words
+    }
+
+    fn diagnostic_kinds_for_line(line: &str) -> Vec<ParseDiagnosticKind> {
+        let mut diagnostics = ParseDiagnostics::new();
+        let tokens = tokenize_line(line, 1, &mut diagnostics);
+        let _ = group_tokens_into_words(tokens);
+        diagnostics
+            .errors()
+            .iter()
+            .map(|diagnostic| diagnostic.kind.clone())
+            .collect()
     }
 
     #[test]
@@ -643,49 +855,54 @@ mod tests {
     }
 
     #[test]
-    fn test_malformed_ruby() {
-        // 閉じられていない括弧や、スラッシュがないなどの不正な形式でもパニックしないことを確認
-        let line = "[未完了/みかんりょう";
-        let expected = vec![Word {
-            segments: vec![Segment::Annotated {
-                base: "未完了".to_string(),
-                reading: "みかんりょう".to_string(),
-            }],
-        }];
-        assert_eq!(parse_line_to_words(line), expected, "Unclosed bracket");
+    fn test_malformed_ruby_reports_diagnostics() {
+        let unclosed = diagnostic_kinds_for_line("[未完了/みかんりょう");
+        assert!(unclosed.contains(&ParseDiagnosticKind::UnclosedRuby));
 
-        let line_no_slash = "[ベースのみ]";
-        let expected_no_slash = vec![Word {
-            segments: vec![Segment::Annotated {
-                base: "ベースのみ".to_string(),
-                reading: "".to_string(),
-            }],
-        }];
-        assert_eq!(
-            parse_line_to_words(line_no_slash),
-            expected_no_slash,
-            "No slash in ruby"
-        );
+        let missing_separator = diagnostic_kinds_for_line("[ベースのみ]");
+        assert!(missing_separator.contains(&ParseDiagnosticKind::MissingRubySeparator));
 
-        let line_empty = "[]";
-        let expected_empty = vec![Word {
-            segments: vec![Segment::Annotated {
-                base: "".to_string(),
-                reading: "".to_string(),
-            }],
-        }];
-        assert_eq!(
-            parse_line_to_words(line_empty),
-            expected_empty,
-            "Empty ruby"
-        );
+        let empty = diagnostic_kinds_for_line("[]");
+        assert!(empty.contains(&ParseDiagnosticKind::EmptyRubyBase));
+        assert!(empty.contains(&ParseDiagnosticKind::EmptyRubyReading));
+
+        let empty_reading = diagnostic_kinds_for_line("[色/]");
+        assert!(empty_reading.contains(&ParseDiagnosticKind::EmptyRubyReading));
+
+        let nested = diagnostic_kinds_for_line("[色/{いろ}]");
+        assert!(nested.contains(&ParseDiagnosticKind::NestedSyntax));
+
+        let unexpected_closing = diagnostic_kinds_for_line("色]");
+        assert!(unexpected_closing.contains(&ParseDiagnosticKind::UnexpectedClosingBracket));
+    }
+
+    #[test]
+    fn test_parse_problem_returns_diagnostics_with_line_position() {
+        let diagnostics = parse_problem("#title Valid\n[未完了/みかんりょう")
+            .expect_err("malformed body line should fail");
+
+        assert_eq!(diagnostics.len(), 1);
+        let diagnostic = diagnostics.first().expect("one diagnostic");
+        assert_eq!(diagnostic.line, 2);
+        assert_eq!(diagnostic.column, 1);
+        assert_eq!(diagnostic.kind, ParseDiagnosticKind::UnclosedRuby);
+    }
+
+    #[test]
+    fn test_readme_sample_parses() {
+        let sample = "#title [サンプル/さんぷる]問題集\n[吾輩/わがはい]は[猫/ねこ]である。/[名前/なまえ]はまだ[無/な]い。\n[走/はし]-れメロス";
+
+        let content = parse_problem(sample).expect("README sample should parse");
+
+        assert_eq!(content.lines.len(), 2);
+        assert_eq!(content.title.words.len(), 2);
     }
 
     #[test]
     fn test_title_line_parsing() {
         // `#title` 行でも本文と同じルールで区切り文字や接続子が扱われることを確認
         let full_problem = "#title [Rust/ラスト]で-[書/か]-かれた/パーサー\n[本文/ほんぶん]";
-        let content = parse_problem(full_problem);
+        let content = parse_problem(full_problem).expect("valid problem should parse");
 
         let expected_title_words = vec![
             Word {

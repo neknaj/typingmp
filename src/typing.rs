@@ -481,7 +481,7 @@ mod tests {
     };
 
     fn typing_model_from_problem(source: &str) -> TypingModel {
-        let content = crate::parser::parse_problem(source);
+        let content = crate::parser::parse_problem(source).expect("test problem should parse");
         let typing_correctness = create_typing_correctness_model(&content);
 
         TypingModel {
