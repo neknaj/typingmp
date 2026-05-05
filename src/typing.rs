@@ -66,13 +66,15 @@ fn match_romaji_mapping(
 ) -> KeystrokeMatch {
     let candidate_indexes: &[usize] = match target_slice.as_bytes().first() {
         Some(first_byte) => {
-            &layout.normalized_mapping_by_first_char[first_byte.to_ascii_lowercase() as usize]
+            layout.normalized_mapping_by_first_byte(first_byte.to_ascii_lowercase())
         }
         None => &[],
     };
 
     for mapping_index in candidate_indexes {
-        let (key, values) = &layout.normalized_mapping[*mapping_index];
+        let Some((key, values)) = layout.normalized_mapping_at(*mapping_index) else {
+            continue;
+        };
         if !target_slice.starts_with(key) {
             continue;
         }
@@ -271,7 +273,7 @@ pub fn key_input(model: &mut TypingModel, input: char, timestamp: f64) -> Typing
 
     let current_segment = model.status.segment.get();
     let current_char = model.status.char_.get();
-    let max_key_len = model.layout.normalized_mapping_max_key_len.max(1);
+    let max_key_len = model.layout.normalized_mapping_max_key_len().max(1);
     let target_slice = segment_prefix_chars(
         &word_content.segments,
         current_segment,

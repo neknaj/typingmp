@@ -40,3 +40,9 @@
 
 - `TP-TYPE-001`
 - `TP-PERF-001`
+
+## 対応状況: 2026-05-06
+
+- default `Layout` は `spin::Once` で初期化した共有 `LayoutData` を参照する軽量な `Copy` 型にした。
+- session ごとの `Layout::default()` は mapping / normalized mapping / first-byte index を再構築しない。
+- typing lookup は `Layout` method 経由に閉じ、内部表現の public mutable exposure を減らした。

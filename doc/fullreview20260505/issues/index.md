@@ -7,8 +7,8 @@ generated_at: `2026-05-05T00:00:00Z`
 | key | count |
 |---|---:|
 | total | 29 |
-| open | 22 |
-| resolved | 7 |
+| open | 21 |
+| resolved | 8 |
 | P0 | 1 |
 | P1 | 17 |
 | P2 | 10 |
@@ -55,7 +55,6 @@ generated_at: `2026-05-05T00:00:00Z`
 | P1 | TP-SEC-001 | security | security | serve.jsのpath traversal guardがprefix checkに依存している | [item](./items/ISS-20260505T000000Z-TP-SEC-001-DEV-SERVER-PATH.md) |
 | P2 | TP-CI-003 | ci | quality | CI workflowがmulti-target feature matrixを十分に固定していない | [item](./items/ISS-20260505T000000Z-TP-CI-003-WORKFLOW-MATRIX-ACTIONS.md) |
 | P2 | TP-ARCH-003 | architecture | architecture | public fieldがprivate型を露出しAPI境界が崩れている | [item](./items/ISS-20260505T000000Z-TP-ARCH-003-PUBLIC-PRIVATE-INTERFACE.md) |
-| P2 | TP-PERF-001 | performance | performance | Layout mappingがsessionごとに再構築される | [item](./items/ISS-20260505T000000Z-TP-PERF-001-LAYOUT-REBUILD.md) |
 | P2 | TP-PERF-002 | performance | performance | text measurementとrasterizationが再計算されやすい | [item](./items/ISS-20260505T000000Z-TP-PERF-002-TEXT-MEASURE-CACHE.md) |
 | P2 | TP-MOBILE-001 | mobile | architecture | mobile backendがUI callback内でArc<Mutex<App>>とunwrapに依存している | [item](./items/ISS-20260505T000000Z-TP-MOBILE-001-MUTEX-UI-STATE.md) |
 | P2 | TP-DOC-002 | docs | docs | 生成物とsource artifactの管理境界が曖昧 | [item](./items/ISS-20260505T000000Z-TP-DOC-002-GENERATED-ARTIFACTS.md) |
@@ -73,5 +72,6 @@ generated_at: `2026-05-05T00:00:00Z`
 | verified | TP-CORE-001 | parserがmalformed inputをdiagnosticとして返せない | [item](./items/ISS-20260505T000000Z-TP-CORE-001-PARSER-DIAGNOSTICS.md) |
 | verified | TP-CORE-002 | typing inputがmodel値渡しと入力logに依存している | [item](./items/ISS-20260505T000000Z-TP-CORE-002-TYPING-MODEL-MOVE-LOGGING.md) |
 | verified | TP-DOC-001 | READMEの問題記法が実装とずれている | [item](./items/ISS-20260505T000000Z-TP-DOC-001-README-NTQ-SYNTAX.md) |
+| verified | TP-PERF-001 | Layout mappingがsessionごとに再構築される | [item](./items/ISS-20260505T000000Z-TP-PERF-001-LAYOUT-REBUILD.md) |
 | verified | TP-STATIC-001 | 状態とcommandがraw number/raw stringに依存しenumとmatchの網羅性検査が効いていない | [item](./items/ISS-20260505T000000Z-TP-STATIC-001-ENUM-MATCH-STATE.md) |
 | verified | TP-TYPE-001 | typing stateがi32 indexとunchecked castに依存している | [item](./items/ISS-20260505T000000Z-TP-TYPE-001-I32-CURSOR-INDICES.md) |

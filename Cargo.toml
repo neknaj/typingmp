@@ -34,6 +34,7 @@ mobile = ["dep:slint"]
 ab_glyph = { version = "0.2.31", default-features = false, features = ["libm"] }
 slint = { version = "1", optional = true }
 phf = { version = "0.13", features = ["macros"], default-features = false }
+spin = { version = "0.9.8", default-features = false, features = ["once"] }
 
 # 繝舌ャ繧ｯ繧ｨ繝ｳ繝峨＃縺ｨ縺ｮ繧ｪ繝励す繝ｧ繝翫Ν縺ｪ萓晏ｭ倬未菫・
 rfd = { version = "0.15", optional = true, default-features = false, features = ["xdg-portal", "async-std"] }

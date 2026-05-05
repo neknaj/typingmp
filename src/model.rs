@@ -6,6 +6,7 @@ use alloc::{string::String, vec, vec::Vec};
 use core::fmt;
 
 use crate::layout_data;
+use spin::Once;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Content {
@@ -245,12 +246,17 @@ pub struct TypingMetrics {
     pub speed: f64, // Chars per second
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
+pub struct LayoutData {
+    mapping: Vec<(String, Vec<String>)>,
+    normalized_mapping: Vec<(String, Vec<String>)>,
+    normalized_mapping_max_key_len: usize,
+    normalized_mapping_by_first_char: Vec<Vec<usize>>,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct Layout {
-    pub mapping: Vec<(String, Vec<String>)>,
-    pub normalized_mapping: Vec<(String, Vec<String>)>,
-    pub normalized_mapping_max_key_len: usize,
-    pub normalized_mapping_by_first_char: Vec<Vec<usize>>,
+    data: &'static LayoutData,
 }
 
 #[derive(Debug, Clone)]
@@ -259,8 +265,10 @@ pub struct Scroll {
     pub max: f64,
 }
 
-impl Default for Layout {
-    fn default() -> Self {
+static DEFAULT_LAYOUT_DATA: Once<LayoutData> = Once::new();
+
+impl LayoutData {
+    fn build_default() -> Self {
         let mapping: Vec<(String, Vec<String>)> = layout_data::get_layout();
         let normalized_mapping: Vec<(String, Vec<String>)> = mapping
             .iter()
@@ -289,11 +297,68 @@ impl Default for Layout {
             }
         }
 
-        Layout {
+        Self {
             mapping,
             normalized_mapping,
             normalized_mapping_max_key_len,
             normalized_mapping_by_first_char,
         }
+    }
+}
+
+impl Layout {
+    pub fn mapping(&self) -> &[(String, Vec<String>)] {
+        &self.data.mapping
+    }
+
+    pub fn normalized_mapping_max_key_len(&self) -> usize {
+        self.data.normalized_mapping_max_key_len
+    }
+
+    pub fn normalized_mapping_at(&self, index: usize) -> Option<(&str, &[String])> {
+        self.data
+            .normalized_mapping
+            .get(index)
+            .map(|(key, values)| (key.as_str(), values.as_slice()))
+    }
+
+    pub fn normalized_mapping_by_first_byte(&self, first_byte: u8) -> &[usize] {
+        &self.data.normalized_mapping_by_first_char[first_byte as usize]
+    }
+}
+
+impl Default for Layout {
+    fn default() -> Self {
+        Self {
+            data: DEFAULT_LAYOUT_DATA.call_once(LayoutData::build_default),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Layout;
+
+    #[test]
+    fn default_layout_reuses_static_data() {
+        let first = Layout::default();
+        let second = Layout::default();
+
+        assert!(core::ptr::eq(first.data, second.data));
+    }
+
+    #[test]
+    fn default_layout_keeps_prefix_lookup() {
+        let layout = Layout::default();
+        let candidates = layout.normalized_mapping_by_first_byte("し".as_bytes()[0]);
+        let has_shi = candidates.iter().any(|index| {
+            layout
+                .normalized_mapping_at(*index)
+                .is_some_and(|(key, values)| {
+                    key == "し" && values.iter().any(|value| value == "shi")
+                })
+        });
+
+        assert!(has_shi);
     }
 }

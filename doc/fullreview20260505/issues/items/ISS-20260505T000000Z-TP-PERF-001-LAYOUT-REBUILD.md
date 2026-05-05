@@ -2,12 +2,12 @@
 id: ISS-20260505T000000Z-TP-PERF-001-LAYOUT-REBUILD
 title: "Layout mappingがsessionごとに再構築される"
 area: performance
-status: open
-resolved: false
+status: verified
+resolved: true
 priority: P2
 type: performance
 created: 2026-05-05
-updated: 2026-05-05
+updated: 2026-05-06
 target: "src/model.rs, src/layout_data.rs"
 legacy_id: TP-PERF-001
 source: "doc/fullreview20260505/core/model-layout.md"
@@ -32,3 +32,20 @@ source: "doc/fullreview20260505/core/model-layout.md"
 
 - layout mapping test
 - allocation 回数の比較
+
+## 対応: 2026-05-06
+
+- `LayoutData` を導入し、default layout mapping / normalized lookup / first-byte index を `spin::Once` で lazy 初期化するようにした。
+- `Layout` は `&'static LayoutData` を持つ軽量な `Copy` 型に変更し、typing session ごとの mapping 再構築を避けるようにした。
+- lookup は `normalized_mapping_by_first_byte` / `normalized_mapping_at` method 経由に閉じた。
+
+## 検証: 2026-05-06
+
+- `cargo fmt --check`
+- `cargo test --no-default-features`
+- `cargo clippy --no-default-features --all-targets -- -W clippy::all`
+- `cargo check --no-default-features --features gui`
+- `cargo check --no-default-features --features tui`
+- `cargo check --no-default-features --features wasm --target wasm32-unknown-unknown`
+- `cargo check --no-default-features --features mobile`
+- `cargo check --no-default-features --features uefi --target x86_64-unknown-uefi`
