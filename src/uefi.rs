@@ -55,7 +55,7 @@ pub fn run() -> Status {
 
     let mut events = [timer_event];
 
-    while !app.should_quit {
+    while !app.snapshot().should_quit {
         uefi::boot::wait_for_event(&mut events).unwrap();
 
         let keys: Vec<Key> = uefi::system::with_stdin(|stdin| {

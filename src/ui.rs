@@ -23,7 +23,7 @@ use alloc::{
 #[cfg(not(feature = "uefi"))]
 use std::string::{String, ToString};
 
-use crate::app::{App, AppState, Script, ScrollCache};
+use crate::app::{App, AppSnapshot, AppState, Script, ScrollCache};
 use crate::model::{
     Segment, TypingCorrectnessChar, TypingCorrectnessSegment, TypingCorrectnessWord,
 };
@@ -240,6 +240,7 @@ pub const UNCONFIRMED_COLOR: u32 = 0xFF_CCCCCC;
 /// App驍ｵ・ｺ繝ｻ・ｮ髴托ｽ･繝ｻ・ｶ髫ｲ・ｷ闕ｵ譎｢・ｽ螳壽╂陷会ｽｱ繝ｻ・ｰ髯ｷ・ｿ隰費ｽｶ繝ｻ鬘費ｽｸ・ｲ遶擾ｽｵ驍ｱ蟶敖蛹・ｽｽ・ｻ驛｢譎｢・ｽ・ｪ驛｢・ｧ繝ｻ・ｹ驛｢譎∬か繝ｻ・ｼ郢晢ｽｻI驛｢譎｢・ｽ・ｬ驛｢・ｧ繝ｻ・､驛｢・ｧ繝ｻ・｢驛｢・ｧ繝ｻ・ｦ驛｢譎∬か繝ｻ・ｼ陝ｲ・ｨ繝ｻ螳夲ｽｮ蝣､霍昴・・ｯ陝ｲ・ｨ隨倥・・ｹ・ｧ郢晢ｽｻ
 pub fn build_ui(app: &App, font: &FontVec, width: usize, height: usize) -> Vec<Renderable> {
     let mut render_list = Vec::new();
+    let snapshot = app.snapshot();
 
     let menu_gradient = Gradient {
         start_color: 0xFF_000010,
@@ -258,23 +259,25 @@ pub fn build_ui(app: &App, font: &FontVec, width: usize, height: usize) -> Vec<R
         end_color: 0xFF_000000,
     };
 
-    match app.state {
-        AppState::MainMenu => build_main_menu_ui(app, &mut render_list, menu_gradient),
+    match snapshot.state {
+        AppState::MainMenu => build_main_menu_ui(snapshot, &mut render_list, menu_gradient),
         AppState::Typing => {
             build_typing_ui(app, &mut render_list, typing_gradient, font, width, height)
         }
         AppState::ProblemSelection => {
-            build_problem_selection_ui(app, &mut render_list, menu_gradient)
+            build_problem_selection_ui(app, snapshot, &mut render_list, menu_gradient)
         }
-        AppState::ProblemSource => build_problem_source_ui(app, &mut render_list, menu_gradient),
+        AppState::ProblemSource => {
+            build_problem_source_ui(app, snapshot, &mut render_list, menu_gradient)
+        }
         AppState::Result => build_result_ui(app, &mut render_list, result_gradient),
-        AppState::Settings => build_settings_ui(app, &mut render_list, settings_gradient),
-        AppState::HowToUse => build_how_to_use_ui(app, &mut render_list, menu_gradient),
+        AppState::Settings => build_settings_ui(snapshot, &mut render_list, settings_gradient),
+        AppState::HowToUse => build_how_to_use_ui(snapshot, &mut render_list, menu_gradient),
     }
 
-    if app.state != AppState::Typing {
+    if snapshot.state != AppState::Typing {
         render_list.push(Renderable::Text {
-            text: app.status_text.clone(),
+            text: snapshot.status_text.to_string(),
             anchor: Anchor::BottomLeft,
             shift: Shift { x: 0.01, y: -0.02 },
             align: Align {
@@ -287,7 +290,7 @@ pub fn build_ui(app: &App, font: &FontVec, width: usize, height: usize) -> Vec<R
     }
 
     // --- 鬨ｾ蛹・ｽｽ・ｻ鬯ｮ・ｱ繝ｻ・｢髯ｷ・ｿ繝ｻ・ｳ髣包ｽｳ驗呻ｽｫ郢晢ｽｻFPS鬮ｯ・ｦ繝ｻ・ｨ鬩穂ｼ夲ｽｽ・ｺ ---
-    let fps_text = format!("FPS: {:.1}", app.fps);
+    let fps_text = format!("FPS: {:.1}", snapshot.fps);
     render_list.push(Renderable::Text {
         text: fps_text,
         anchor: Anchor::TopRight,
@@ -318,7 +321,7 @@ pub fn build_ui(app: &App, font: &FontVec, width: usize, height: usize) -> Vec<R
 
     #[cfg(all(feature = "tui", not(feature = "gui")))]
     {
-        let mode_text = format!("TUI {:?}", app.tui_display_mode);
+        let mode_text = format!("TUI {:?}", snapshot.tui_display_mode);
         render_list.push(Renderable::Text {
             text: mode_text,
             anchor: Anchor::BottomRight,
@@ -333,7 +336,7 @@ pub fn build_ui(app: &App, font: &FontVec, width: usize, height: usize) -> Vec<R
     }
 
     render_list.push(Renderable::Text {
-        text: app.instructions_text.clone(),
+        text: snapshot.instructions_text.to_string(),
         anchor: Anchor::BottomRight,
         shift: Shift { x: -0.01, y: -0.03 },
         align: Align {
@@ -347,7 +350,11 @@ pub fn build_ui(app: &App, font: &FontVec, width: usize, height: usize) -> Vec<R
     render_list
 }
 
-fn build_main_menu_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient) {
+fn build_main_menu_ui(
+    snapshot: AppSnapshot<'_>,
+    render_list: &mut Vec<Renderable>,
+    gradient: Gradient,
+) {
     render_list.push(Renderable::Background { gradient });
     render_list.push(Renderable::BigText {
         text: "Neknaj Typing MP".to_string(),
@@ -361,7 +368,7 @@ fn build_main_menu_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gr
         color: 0xFF_FFFFFF,
     });
     for (i, item) in MENU_ITEMS.iter().enumerate() {
-        let (text, color) = if i == app.selected_main_menu_item.index() {
+        let (text, color) = if i == snapshot.selected_main_menu_item.index() {
             (format!("> {} <", item), 0xFF_FFFF00)
         } else {
             (item.to_string(), 0xFF_FFFFFF)
@@ -383,7 +390,11 @@ fn build_main_menu_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gr
     }
 }
 
-fn build_settings_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient) {
+fn build_settings_ui(
+    snapshot: AppSnapshot<'_>,
+    render_list: &mut Vec<Renderable>,
+    gradient: Gradient,
+) {
     render_list.push(Renderable::Background { gradient });
     render_list.push(Renderable::BigText {
         text: "Settings".to_string(),
@@ -404,8 +415,8 @@ fn build_settings_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gra
     ];
 
     for (i, (font_choice, name)) in fonts.iter().enumerate() {
-        let is_selected = i == app.selected_settings_item.index();
-        let is_active = *font_choice == app.settings_script;
+        let is_selected = i == snapshot.selected_settings_item.index();
+        let is_active = *font_choice == snapshot.settings_script;
 
         let mut display_text = if is_selected {
             format!("> {}", name)
@@ -440,7 +451,12 @@ fn build_settings_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gra
     }
 }
 
-fn build_problem_selection_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient) {
+fn build_problem_selection_ui(
+    app: &App,
+    snapshot: AppSnapshot<'_>,
+    render_list: &mut Vec<Renderable>,
+    gradient: Gradient,
+) {
     render_list.push(Renderable::Background { gradient });
     render_list.push(Renderable::BigText {
         text: "Select Problem".to_string(),
@@ -460,8 +476,8 @@ fn build_problem_selection_ui(app: &App, render_list: &mut Vec<Renderable>, grad
     let items_per_screen = (list_height / item_height).floor() as usize;
 
     let mut start_index = 0;
-    if app.selected_problem_item >= items_per_screen {
-        start_index = app.selected_problem_item - items_per_screen + 1;
+    if snapshot.selected_problem_item >= items_per_screen {
+        start_index = snapshot.selected_problem_item - items_per_screen + 1;
     }
     let end_index = (start_index + items_per_screen).min(app.problem_count());
 
@@ -474,7 +490,7 @@ fn build_problem_selection_ui(app: &App, render_list: &mut Vec<Renderable>, grad
         } else {
             app.problem_source_label(i).to_string()
         };
-        let selected = i == app.selected_problem_item;
+        let selected = i == snapshot.selected_problem_item;
         let (text, color) = if selected {
             (format!(">[{}] {}", badge, item), 0xFF_FFFF00u32)
         } else if is_open_file {
@@ -532,10 +548,15 @@ fn build_problem_selection_ui(app: &App, render_list: &mut Vec<Renderable>, grad
 }
 
 /// 髯懶｣ｰ陜楢ｶ｣・ｽ・｡陟募ｾ湖ｨ驛｢・ｧ繝ｻ・｡驛｢・ｧ繝ｻ・､驛｢譎｢・ｽ・ｫ驍ｵ・ｺ繝ｻ・ｮ驛｢・ｧ繝ｻ・ｽ驛｢譎｢・ｽ・ｼ驛｢・ｧ繝ｻ・ｹ驛｢・ｧ繝ｻ・ｳ驛｢譎｢・ｽ・ｼ驛｢譎擾ｽｳ・ｨ繝ｻ蟶晢ｽｫ・｢繝ｻ・ｲ鬮ｫ蛹・ｽｽ・ｧ驍ｵ・ｺ陷ｷ・ｶ繝ｻ迢暦ｽｹ・ｧ繝ｻ・ｷ驛｢譎｢・ｽ・ｼ驛｢譎｢・ｽ・ｳ驛｢・ｧ陷ｻ閧ｲ・ｷ蟶敖蛹・ｽｽ・ｻ驍ｵ・ｺ陷ｷ・ｶ繝ｻ繝ｻ
-fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient) {
+fn build_problem_source_ui(
+    app: &App,
+    snapshot: AppSnapshot<'_>,
+    render_list: &mut Vec<Renderable>,
+    gradient: Gradient,
+) {
     render_list.push(Renderable::Background { gradient });
 
-    let idx = app.selected_problem_item;
+    let idx = snapshot.selected_problem_item;
     let label = app.problem_source_label(idx);
     let name = app.problem_name_at(idx);
 
@@ -561,7 +582,7 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
 
         for (i, line) in content
             .lines()
-            .skip(app.source_scroll)
+            .skip(snapshot.source_scroll)
             .take(max_lines)
             .enumerate()
         {
@@ -592,7 +613,7 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
         let scroll_text = if total_lines == 0 {
             "0/0".to_string()
         } else {
-            format!("{}/{}", app.source_scroll + 1, total_lines)
+            format!("{}/{}", snapshot.source_scroll + 1, total_lines)
         };
         render_list.push(Renderable::Text {
             text: scroll_text,
@@ -606,7 +627,7 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
             color: 0xFF_666688,
         });
 
-        if app.source_scroll > 0 {
+        if snapshot.source_scroll > 0 {
             render_list.push(Renderable::Text {
                 text: "↑".to_string(),
                 anchor: Anchor::TopCenter,
@@ -622,7 +643,7 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
                 color: 0xFF_888888,
             });
         }
-        if app.source_scroll + max_lines < total_lines {
+        if snapshot.source_scroll + max_lines < total_lines {
             render_list.push(Renderable::Text {
                 text: "↓".to_string(),
                 anchor: Anchor::TopCenter,
@@ -640,7 +661,11 @@ fn build_problem_source_ui(app: &App, render_list: &mut Vec<Renderable>, gradien
         }
     }
 }
-fn build_how_to_use_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradient) {
+fn build_how_to_use_ui(
+    snapshot: AppSnapshot<'_>,
+    render_list: &mut Vec<Renderable>,
+    gradient: Gradient,
+) {
     render_list.push(Renderable::Background { gradient });
 
     render_list.push(Renderable::BigText {
@@ -662,7 +687,7 @@ fn build_how_to_use_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: G
     let max_lines = ((1.0f32 - content_y - 0.12) / line_h).floor() as usize;
 
     let total_lines = HOW_TO_USE_CONTENT.len();
-    let scroll = app.how_to_use_scroll;
+    let scroll = snapshot.how_to_use_scroll;
 
     for (i, (text, color)) in HOW_TO_USE_CONTENT
         .iter()
@@ -791,7 +816,7 @@ fn build_typing_ui(
 ) {
     render_list.push(Renderable::Background { gradient });
 
-    if let Some(model) = &app.typing_model {
+    if let Some(model) = app.typing_model() {
         render_list.push(Renderable::BigText {
             text: model.content.title.to_string(),
             anchor: Anchor::TopCenter,
@@ -818,7 +843,7 @@ fn build_typing_ui(
             return;
         };
         let status = &model.status;
-        let cached_cache = match app.scroll_cache.as_ref() {
+        let cached_cache = match app.scroll_cache() {
             Some(ScrollCache::Ready(state)) if state.current.line == status.line => Some(state),
             _ => None,
         };
@@ -1202,7 +1227,7 @@ fn build_result_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
         color: 0xFF_FFFF00,
     });
 
-    if let Some(result) = &app.result_model {
+    if let Some(result) = app.result_model() {
         let metrics = crate::typing::calculate_total_metrics(&result.typing_model);
         let result_texts = [
             format!("Typed Chars: {}", metrics.type_count),

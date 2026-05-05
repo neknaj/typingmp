@@ -2,12 +2,19 @@
 
 extern crate alloc;
 
+mod problems;
+mod scroll;
+mod view;
+
+use crate::app::scroll::{
+    build_scroll_line_cache, cursor_position_from_status, line_origin_from_previous,
+    line_origin_from_start, ScrollCacheState,
+};
 #[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
 use crate::io::FontEntry;
-use crate::io::{FontAssetId, ProblemRepository, ProblemSourceProvider};
+use crate::io::{FontAssetId, ProblemRepository};
 use crate::model::{
-    CharIndex, LineIndex, ResultModel, Scroll, Segment, SegmentIndex, TypingModel, TypingStatus,
-    WordIndex,
+    CharIndex, LineIndex, ResultModel, Scroll, SegmentIndex, TypingModel, TypingStatus, WordIndex,
 };
 use alloc::{
     format,
@@ -16,50 +23,13 @@ use alloc::{
 };
 
 pub use crate::io::{CustomProblem, FontSource};
-
-// セグメントの base テキストを返す（Anno は inner を連結）
-fn seg_base_text_owned(seg: &Segment) -> String {
-    match seg {
-        Segment::Plain { text } => text.clone(),
-        Segment::Annotated { base, .. } => base.clone(),
-        Segment::Anno { inner, .. } => inner.iter().map(seg_base_text_owned).collect(),
-    }
-}
-
-// セグメントの reading テキストを返す（Anno は inner を連結）
-fn seg_reading_text_owned(seg: &Segment) -> String {
-    match seg {
-        Segment::Plain { text } => text.clone(),
-        Segment::Annotated { reading, .. } => reading.clone(),
-        Segment::Anno { inner, .. } => inner.iter().map(seg_reading_text_owned).collect(),
-    }
-}
-
-fn seg_ruby_text_owned(seg: &Segment) -> Option<String> {
-    match seg {
-        Segment::Plain { .. } => None,
-        Segment::Annotated { reading, .. } => {
-            if reading.is_empty() {
-                None
-            } else {
-                Some(reading.clone())
-            }
-        }
-        Segment::Anno { inner, .. } => {
-            let reading = inner.iter().map(seg_reading_text_owned).collect::<String>();
-            if reading.is_empty() {
-                None
-            } else {
-                Some(reading)
-            }
-        }
-    }
-}
 use crate::parser;
-use crate::renderer::gui_renderer;
 use crate::typing;
 use crate::ui; // typing_rendererの代わりにuiをインポート
 use ab_glyph::FontVec;
+
+pub(crate) use scroll::ScrollCache;
+pub use view::AppSnapshot;
 
 // ビルドスクリプトによってOUT_DIRに生成されたファイルを取り込む
 include!(concat!(env!("OUT_DIR"), "/problem_files.rs"));
@@ -286,306 +256,40 @@ pub enum FontApplyError {
     InvalidFontData,
 }
 
-/// スクロール計算結果のキャッシュ。毎フレームの全セグメント計測を回避する。
-/// カーソル位置・ウィンドウサイズが変わった場合のみ再計算する。
-/// スクロール計算結果のキャッシュ。毎フレームの全セグメント計測を回避する。
-#[derive(Clone)]
-pub(crate) struct ScrollLineSegmentCache {
-    pub base_text: String,
-    pub ruby_text: Option<String>,
-    pub reading_text: String,
-    pub base_width: f32,
-    pub reading_width_prefix: Vec<f32>,
-    pub word_index: usize,
-    pub segment_index: usize,
-}
-
-#[derive(Clone)]
-pub(crate) struct ScrollLineCache {
-    pub line: LineIndex,
-    pub total_width: f32,
-    /// セグメントの累積幅（長さ = segments.len()+1）
-    pub segment_prefix_width: Vec<f32>,
-    pub word_segment_starts: Vec<usize>,
-    pub segments: Vec<ScrollLineSegmentCache>,
-}
-
-#[derive(Clone)]
-struct ScrollCursorState {
-    pub line: LineIndex,
-    pub word: WordIndex,
-    pub segment: SegmentIndex,
-    pub char_: CharIndex,
-}
-
-#[derive(Clone)]
-pub(crate) struct ScrollCacheState {
-    pub width: usize,
-    pub height: usize,
-    pub font_pixel_size: f32,
-    pub gap_width: f32,
-    pub line_origin: f32,
-    pub cursor_in_line: f32,
-    pub cursor_world: f32,
-    pub cursor_state: ScrollCursorState,
-    pub current: ScrollLineCache,
-}
-
-#[derive(Clone)]
-pub(crate) enum ScrollCache {
-    Empty,
-    Ready(ScrollCacheState),
-}
-
-fn build_reading_width_prefix(font: &FontVec, text: &str, font_pixel_size: f32) -> Vec<f32> {
-    let mut prefix = Vec::with_capacity(text.chars().count() + 1);
-    prefix.push(0.0);
-    let mut total = 0.0f32;
-    for character in text.chars() {
-        let mut buf = [0u8; 4];
-        let ch = character.encode_utf8(&mut buf);
-        total += gui_renderer::measure_text(font, ch, font_pixel_size).0 as f32;
-        prefix.push(total);
-    }
-    prefix
-}
-
-fn build_scroll_line_cache(
-    line: &crate::model::Line,
-    font: &FontVec,
-    font_pixel_size: f32,
-    line_index: LineIndex,
-) -> ScrollLineCache {
-    let mut segments = Vec::new();
-    let mut segment_prefix_width = Vec::new();
-    segment_prefix_width.push(0.0);
-    let mut word_segment_starts = Vec::with_capacity(line.words.len());
-    let mut total_width = 0.0f32;
-
-    for word in &line.words {
-        word_segment_starts.push(segments.len());
-        for segment in &word.segments {
-            let base_text = seg_base_text_owned(segment);
-            let reading_text = seg_reading_text_owned(segment);
-            let ruby_text = seg_ruby_text_owned(segment);
-            let base_width = gui_renderer::measure_text(font, &base_text, font_pixel_size).0 as f32;
-            let reading_width_prefix =
-                build_reading_width_prefix(font, &reading_text, font_pixel_size);
-            total_width += base_width;
-            segment_prefix_width.push(total_width);
-            segments.push(ScrollLineSegmentCache {
-                base_text,
-                ruby_text,
-                reading_text,
-                base_width,
-                reading_width_prefix,
-                word_index: 0,
-                segment_index: 0,
-            });
-        }
-    }
-
-    for word_index in 0..line.words.len() {
-        let start = word_segment_starts.get(word_index).copied().unwrap_or(0);
-        let end = word_segment_starts
-            .get(word_index + 1)
-            .copied()
-            .unwrap_or(segments.len());
-        for segment_index in start..end {
-            if let Some(item) = segments.get_mut(segment_index) {
-                item.word_index = word_index;
-                item.segment_index = segment_index - start;
-            }
-        }
-    }
-
-    ScrollLineCache {
-        line: line_index,
-        total_width,
-        segment_prefix_width,
-        word_segment_starts,
-        segments,
-    }
-}
-
-fn line_total_width(line: &crate::model::Line, font: &FontVec, font_pixel_size: f32) -> f32 {
-    let mut total = 0.0f32;
-    for word in &line.words {
-        for segment in &word.segments {
-            total +=
-                gui_renderer::measure_text(font, &seg_base_text_owned(segment), font_pixel_size).0
-                    as f32;
-        }
-    }
-    total
-}
-
-fn line_origin_from_start(
-    target_line: usize,
-    lines: &[crate::model::Line],
-    font: &FontVec,
-    font_pixel_size: f32,
-    gap_width: f32,
-) -> f32 {
-    let mut origin = 0.0f32;
-    let max_line = target_line.min(lines.len());
-    for line_idx in 0..max_line {
-        let line = if let Some(line) = lines.get(line_idx) {
-            line
-        } else {
-            return origin;
-        };
-        origin += line_total_width(line, font, font_pixel_size) + gap_width;
-    }
-    origin
-}
-
-fn line_origin_from_previous(
-    previous: &ScrollCacheState,
-    target_line: usize,
-    lines: &[crate::model::Line],
-    font: &FontVec,
-    font_pixel_size: f32,
-    gap_width: f32,
-) -> f32 {
-    let previous_line = previous.current.line.get();
-
-    if target_line == previous_line {
-        return previous.line_origin;
-    }
-
-    let mut origin = previous.line_origin;
-    if target_line > previous_line {
-        for line_idx in previous_line..target_line {
-            let line = if let Some(line) = lines.get(line_idx) {
-                line
-            } else {
-                return line_origin_from_start(
-                    target_line,
-                    lines,
-                    font,
-                    font_pixel_size,
-                    gap_width,
-                );
-            };
-            let width = if line_idx == previous_line {
-                previous.current.total_width
-            } else {
-                line_total_width(line, font, font_pixel_size)
-            };
-            origin += width + gap_width;
-        }
-    } else {
-        for line_idx in target_line..previous_line {
-            let line = if let Some(line) = lines.get(line_idx) {
-                line
-            } else {
-                return line_origin_from_start(
-                    target_line,
-                    lines,
-                    font,
-                    font_pixel_size,
-                    gap_width,
-                );
-            };
-            let width = line_total_width(line, font, font_pixel_size);
-            origin -= width + gap_width;
-        }
-    }
-
-    origin
-}
-
-fn cursor_position_from_status(
-    cache: &ScrollLineCache,
-    status_line: LineIndex,
-    status_word: WordIndex,
-    status_segment: SegmentIndex,
-    status_char: CharIndex,
-) -> (f32, ScrollCursorState) {
-    let status_word_usize = status_word.get();
-    let status_segment_usize = status_segment.get();
-    let status_char_usize = status_char.get();
-
-    let cursor_in_line = if status_word_usize < cache.word_segment_starts.len() {
-        let segment_start = cache.word_segment_starts[status_word_usize];
-        let segment_end = cache
-            .word_segment_starts
-            .get(status_word_usize + 1)
-            .copied()
-            .unwrap_or(cache.segments.len());
-        let segment_count = segment_end.saturating_sub(segment_start);
-        let segment_idx = if segment_count == 0 {
-            segment_start
-        } else {
-            segment_start + status_segment_usize.min(segment_count - 1)
-        };
-        let base = cache
-            .segment_prefix_width
-            .get(segment_idx)
-            .copied()
-            .unwrap_or(0.0);
-        let typed_width = if let Some(seg_cache) = cache.segments.get(segment_idx) {
-            let typed_len =
-                status_char_usize.min(seg_cache.reading_width_prefix.len().saturating_sub(1));
-            seg_cache
-                .reading_width_prefix
-                .get(typed_len)
-                .copied()
-                .unwrap_or(0.0)
-        } else {
-            0.0
-        };
-        (base + typed_width).min(cache.total_width)
-    } else {
-        cache.total_width
-    };
-
-    (
-        cursor_in_line,
-        ScrollCursorState {
-            line: status_line,
-            word: status_word,
-            segment: status_segment,
-            char_: status_char,
-        },
-    )
-}
-
 /// アプリケーション全体で共有される状態を保持する構造体
 pub struct App {
-    pub state: AppState,
-    pub selected_main_menu_item: MainMenuItem,
-    pub selected_problem_item: usize,
-    pub selected_settings_item: SettingsItem,
+    pub(crate) state: AppState,
+    pub(crate) selected_main_menu_item: MainMenuItem,
+    pub(crate) selected_problem_item: usize,
+    pub(crate) selected_settings_item: SettingsItem,
     problem_repository: ProblemRepository,
-    pub typing_model: Option<TypingModel>,
-    pub result_model: Option<ResultModel>,
-    pub status_text: String,
-    pub instructions_text: String,
-    pub tui_display_mode: TuiDisplayMode,
-    pub should_quit: bool,
+    pub(crate) typing_model: Option<TypingModel>,
+    pub(crate) result_model: Option<ResultModel>,
+    pub(crate) status_text: String,
+    pub(crate) instructions_text: String,
+    pub(crate) tui_display_mode: TuiDisplayMode,
+    pub(crate) should_quit: bool,
     /// ファイルダイアログを開く要求フラグ（gui/wasm のみ）
-    pub should_open_file_dialog: bool,
-    pub fonts: Fonts,
+    pub(crate) should_open_file_dialog: bool,
+    pub(crate) fonts: Fonts,
     /// Settings画面で選択中のスクリプト
-    pub settings_script: Script,
+    pub(crate) settings_script: Script,
     /// フォントピッカーを開いているか
-    pub settings_picking_font: bool,
+    pub(crate) settings_picking_font: bool,
     /// フォントピッカー内の選択インデックス
-    pub selected_font_item: usize,
+    pub(crate) selected_font_item: usize,
     /// 発見されたフォント一覧（起動時にディスカバリー）
     #[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
-    pub available_fonts: Vec<FontEntry>,
+    pub(crate) available_fonts: Vec<FontEntry>,
     requested_font_load: Option<FontLoadRequest>,
-    pub fps: f64,
-    pub source_scroll: usize,     // ProblemSource でのスクロール行数
-    pub how_to_use_scroll: usize, // HowToUse でのスクロール行数
-    pub scroll_cache: Option<ScrollCache>,
+    pub(crate) fps: f64,
+    pub(crate) source_scroll: usize, // ProblemSource でのスクロール行数
+    pub(crate) how_to_use_scroll: usize, // HowToUse でのスクロール行数
+    scroll_cache: Option<ScrollCache>,
     #[cfg(target_arch = "wasm32")]
-    pub should_reset_ime: bool,
+    pub(crate) should_reset_ime: bool,
     #[cfg(target_arch = "wasm32")]
-    pub should_save_custom_problems: bool, // localStorage への保存要求フラグ
+    pub(crate) should_save_custom_problems: bool, // localStorage への保存要求フラグ
 }
 
 impl App {
@@ -639,48 +343,42 @@ impl App {
         }
     }
 
-    /// 組み込み問題 + カスタム問題 + (gui/wasm では「Open File」エントリ1件) の合計数
-    pub fn problem_count(&self) -> usize {
-        self.problem_repository.problem_count()
+    pub fn typing_model(&self) -> Option<&TypingModel> {
+        self.typing_model.as_ref()
     }
 
-    /// インデックスに対応する表示名を返す
-    pub fn problem_name_at(&self, idx: usize) -> &str {
-        self.problem_repository
-            .problem_name_at(idx)
-            .unwrap_or("[ Unknown ]")
+    pub fn result_model(&self) -> Option<&ResultModel> {
+        self.result_model.as_ref()
     }
 
-    /// そのインデックスが「Open File」エントリかどうか
-    pub fn is_open_file_entry(&self, idx: usize) -> bool {
-        self.problem_repository.is_open_file_entry(idx)
+    pub fn is_typing_active(&self) -> bool {
+        self.state == AppState::Typing
     }
 
-    /// カスタム問題を追加し、そのインデックスを選択状態にする
-    pub fn add_custom_problem(&mut self, name: String, content: String, timestamp_ms: u64) {
-        let selected_index = self.problem_repository.add_custom_problem(CustomProblem {
-            name,
-            content,
-            timestamp_ms,
-        });
-        // 追加された問題のインデックスを選択
-        self.selected_problem_item = selected_index;
-        if self.state != AppState::ProblemSelection {
-            self.state = AppState::ProblemSelection;
-            self.on_event(AppEvent::ChangeScene);
-        }
+    pub fn has_pending_input_correction(&self) -> bool {
+        self.typing_model.as_ref().is_some_and(|model| {
+            model.status.last_wrong_keydown.is_some() || !model.status.unconfirmed.is_empty()
+        })
     }
 
-    pub fn set_custom_problems(&mut self, problems: Vec<CustomProblem>) {
-        self.problem_repository.set_custom_problems(problems);
-        let count = self.problem_count();
-        if count > 0 && self.selected_problem_item >= count {
-            self.selected_problem_item = count - 1;
-        }
+    pub fn take_file_open_request(&mut self) -> bool {
+        let should_open = self.should_open_file_dialog;
+        self.should_open_file_dialog = false;
+        should_open
     }
 
-    pub fn custom_problems(&self) -> &[CustomProblem] {
-        self.problem_repository.custom_problems()
+    #[cfg(target_arch = "wasm32")]
+    pub fn take_ime_reset_request(&mut self) -> bool {
+        let should_reset = self.should_reset_ime;
+        self.should_reset_ime = false;
+        should_reset
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn take_custom_problem_save_request(&mut self) -> bool {
+        let should_save = self.should_save_custom_problems;
+        self.should_save_custom_problems = false;
+        should_save
     }
 
     /// 現在の設定言語に合わせたメインフォントへの参照を取得する
@@ -688,83 +386,8 @@ impl App {
         self.fonts.get_for_script(self.settings_script)
     }
 
-    /// インデックスがカスタム問題（builtin でも open-file エントリでもない）かどうか
-    pub fn is_custom_problem(&self, idx: usize) -> bool {
-        self.problem_repository.is_custom_problem(idx)
-    }
-
-    /// 問題のソース種別バッジ文字を返す: "B" = builtin, "W" = web(wasm), "F" = file(non-wasm)
-    pub fn problem_source_label(&self, idx: usize) -> &str {
-        self.problem_repository.problem_source_label(idx)
-    }
-
-    /// 問題のソーステキストを返す（builtin / custom 両対応、open-file は None）
-    pub fn get_problem_source(&self, idx: usize) -> Option<&str> {
-        self.problem_repository
-            .problem_content(idx)
-            .map(|content| match content {
-                alloc::borrow::Cow::Borrowed(content) => content,
-                alloc::borrow::Cow::Owned(_) => {
-                    unreachable!("problem repository returns borrowed text")
-                }
-            })
-    }
-
-    /// カスタム問題を削除する。選択カーソルを調整する。
-    pub fn delete_custom_problem_at(&mut self, idx: usize) {
-        if self.problem_repository.delete_custom_problem_at(idx) {
-            // 削除後に problem_count を超えていれば一つ前に移動
-            let count = self.problem_count();
-            if count > 0 && self.selected_problem_item >= count {
-                self.selected_problem_item = count - 1;
-            }
-            #[cfg(target_arch = "wasm32")]
-            {
-                self.should_save_custom_problems = true;
-            }
-        }
-    }
-
-    /// カスタム問題を一つ上（インデックスを小さく）に移動する。選択カーソルも追従する。
-    pub fn move_custom_problem_up_at(&mut self, idx: usize) {
-        if self.problem_repository.move_custom_problem_up_at(idx) {
-            self.selected_problem_item -= 1;
-            #[cfg(target_arch = "wasm32")]
-            {
-                self.should_save_custom_problems = true;
-            }
-        }
-    }
-
-    /// カスタム問題を一つ下（インデックスを大きく）に移動する。選択カーソルも追従する。
-    pub fn move_custom_problem_down_at(&mut self, idx: usize) {
-        if self.problem_repository.move_custom_problem_down_at(idx) {
-            self.selected_problem_item += 1;
-            #[cfg(target_arch = "wasm32")]
-            {
-                self.should_save_custom_problems = true;
-            }
-        }
-    }
-
-    /// ProblemSelection の操作説明を、選択中アイテムに応じて動的に返す
-    pub fn problem_selection_instructions(&self) -> String {
-        let idx = self.selected_problem_item;
-        if self.is_open_file_entry(idx) {
-            "Enter: Open | ESC: Back".to_string()
-        } else if self.is_custom_problem(idx) {
-            "Enter: Start | V: Source | X: Delete | U: Move↑ | D: Move↓ | ESC: Back".to_string()
-        } else {
-            "Enter: Start | V: Source | ESC: Back".to_string()
-        }
-    }
-
-    #[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
-    pub fn set_available_fonts(&mut self, entries: Vec<FontEntry>) {
-        self.available_fonts = entries;
-        if self.selected_font_item >= self.available_fonts.len() {
-            self.selected_font_item = 0;
-        }
+    pub(crate) fn scroll_cache(&self) -> Option<&ScrollCache> {
+        self.scroll_cache.as_ref()
     }
 
     pub fn take_font_load_request(&mut self) -> Option<FontLoadRequest> {
@@ -865,7 +488,6 @@ impl App {
                 let status = &model.status;
 
                 let rebuild_cache = self.scroll_cache.as_ref().is_none_or(|cache| match cache {
-                    ScrollCache::Empty => true,
                     ScrollCache::Ready(ready) => {
                         ready.width != width
                             || ready.height != height
@@ -916,9 +538,8 @@ impl App {
                     ),
                 };
 
-                let (cursor_in_line, cursor_state) = cursor_position_from_status(
+                let cursor_in_line = cursor_position_from_status(
                     &current_cache,
-                    status.line,
                     status.word,
                     status.segment,
                     status.char_,
@@ -954,7 +575,6 @@ impl App {
                     line_origin,
                     cursor_in_line,
                     cursor_world,
-                    cursor_state,
                     current: current_cache,
                 }));
             }
@@ -1365,5 +985,23 @@ mod tests {
         assert!(app.typing_model.is_none());
         assert!(app.status_text.contains("Problem parse error"));
         assert!(app.status_text.contains("missing closing"));
+    }
+
+    #[test]
+    fn snapshot_exposes_immutable_view_state() {
+        let mut app = App::new(test_fonts());
+
+        app.on_event(AppEvent::Start);
+        app.on_event(AppEvent::Down);
+
+        let snapshot = app.snapshot();
+        assert_eq!(snapshot.state, AppState::MainMenu);
+        assert_eq!(snapshot.selected_main_menu_item, MainMenuItem::HowToUse);
+        assert_eq!(
+            snapshot.status_text,
+            "Welcome to Neknaj Typing Multi-Platform"
+        );
+        assert!(!snapshot.should_quit);
+        assert!(!snapshot.should_open_file_dialog);
     }
 }

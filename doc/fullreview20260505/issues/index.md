@@ -7,8 +7,8 @@ generated_at: `2026-05-05T00:00:00Z`
 | key | count |
 |---|---:|
 | total | 29 |
-| open | 21 |
-| resolved | 8 |
+| open | 19 |
+| resolved | 10 |
 | P0 | 1 |
 | P1 | 17 |
 | P2 | 10 |
@@ -68,6 +68,8 @@ generated_at: `2026-05-05T00:00:00Z`
 | status | legacy id | title | file |
 |---|---|---|---|
 | verified | TP-CI-001 | WASM debug buildがWEBSOCKET_ADDRESS未設定でcompile不能になる | [item](./items/ISS-20260505T000000Z-TP-CI-001-WASM-DEBUG-ENV.md) |
+| verified | TP-ARCH-001 | Appがscene/input/problem/scroll/fontを抱えすぎている | [item](./items/ISS-20260505T000000Z-TP-ARCH-001-APP-GOD-OBJECT.md) |
+| verified | TP-ARCH-003 | public fieldがprivate型を露出しAPI境界が崩れている | [item](./items/ISS-20260505T000000Z-TP-ARCH-003-PUBLIC-PRIVATE-INTERFACE.md) |
 | verified | TP-CORE-003 | parser以外のcore regression testが不足している | [item](./items/ISS-20260505T000000Z-TP-CORE-003-TEST-COVERAGE-GAP.md) |
 | verified | TP-CORE-001 | parserがmalformed inputをdiagnosticとして返せない | [item](./items/ISS-20260505T000000Z-TP-CORE-001-PARSER-DIAGNOSTICS.md) |
 | verified | TP-CORE-002 | typing inputがmodel値渡しと入力logに依存している | [item](./items/ISS-20260505T000000Z-TP-CORE-002-TYPING-MODEL-MOVE-LOGGING.md) |

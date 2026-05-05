@@ -62,3 +62,7 @@ backend 側の接続:
 
 - parser diagnostic の source label / span は T08 で扱う。
 - backend error contract と visible error 化は T12 / T14 で扱う。
+
+## 進捗: T11
+
+`AppSnapshot` と problem repository module 分離により、backend / UI は `App` の mutable field ではなく query method と immutable snapshot を読む形へ寄せた。I/O provider 自体の残作業は backend error contract と web visible error 化に残るため、この issue は T12 / T14 まで open のままとする。

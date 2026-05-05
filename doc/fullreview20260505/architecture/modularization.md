@@ -60,3 +60,11 @@
 - `TP-ARCH-001`
 - `TP-ARCH-003`
 - `TP-CORE-002`
+
+## 実装進捗: T11
+
+`src/app/view.rs` に `AppSnapshot` を追加し、menu / settings / problem source / status / fps などの描画入力を immutable snapshot として読める境界にした。GUI / TUI / UEFI / WASM の一部状態参照は snapshot / query method / drain method 経由へ寄せた。
+
+`src/app/problems.rs` に problem repository 操作を移し、builtin / custom / open-file の選択と表示 label 管理を `app.rs` 本体から分離した。`src/app/scroll.rs` には scroll cache、line origin、cursor position 計算を移し、render cache の型は app module 内部に閉じた。
+
+`App` の mutable field は `pub(crate)` に落とし、外部 API は `AppSnapshot`、`typing_model()`、`result_model()`、`take_file_open_request()` などの method へ整理した。これにより private-interface warning は消え、以降の backend error contract / renderer surface 分離で `App` internals に触る範囲を狭められる。

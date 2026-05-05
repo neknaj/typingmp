@@ -158,8 +158,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                 next_frame = now + FRAME_DURATION;
 
                 #[cfg(feature = "gui-file")]
-                if app.should_open_file_dialog {
-                    app.should_open_file_dialog = false;
+                if app.take_file_open_request() {
                     if let Some(path) = FileDialog::new()
                         .add_filter("Typing Problem", &["ntq"])
                         .pick_file()
@@ -188,14 +187,14 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                     }
                 }
 
-                if app.should_quit {
+                if app.snapshot().should_quit {
                     *control_flow = ControlFlow::Exit;
                     return;
                 }
 
                 render_frame(&mut app, width, height, &mut pixel_buffer, &mut pixels);
 
-                if app.should_quit {
+                if app.snapshot().should_quit {
                     *control_flow = ControlFlow::Exit;
                 }
 

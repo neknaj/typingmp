@@ -174,9 +174,10 @@ pub fn send_char(c: String) {
 #[wasm_bindgen]
 pub fn is_typing_active() -> bool {
     APP_INSTANCE.with(|instance| {
-        instance.borrow().as_ref().map_or(false, |app_rc| {
-            app_rc.borrow().state == crate::app::AppState::Typing
-        })
+        instance
+            .borrow()
+            .as_ref()
+            .map_or(false, |app_rc| app_rc.borrow().is_typing_active())
     })
 }
 
@@ -188,12 +189,7 @@ pub fn is_typing_active() -> bool {
 pub fn has_wrong_input() -> bool {
     APP_INSTANCE.with(|instance| {
         instance.borrow().as_ref().map_or(false, |app_rc| {
-            let app = app_rc.borrow();
-            if let Some(model) = &app.typing_model {
-                model.status.last_wrong_keydown.is_some() || !model.status.unconfirmed.is_empty()
-            } else {
-                false
-            }
+            app_rc.borrow().has_pending_input_correction()
         })
     })
 }
@@ -206,10 +202,7 @@ pub fn take_file_open_request() -> bool {
     APP_INSTANCE.with(|instance| {
         if let Some(app_rc) = instance.borrow().as_ref() {
             let mut app = app_rc.borrow_mut();
-            if app.should_open_file_dialog {
-                app.should_open_file_dialog = false;
-                return true;
-            }
+            return app.take_file_open_request();
         }
         false
     })
@@ -448,8 +441,7 @@ async fn start_async() -> Result<(), JsValue> {
                 if dist < TAP_MAX_DIST {
                     // タップ → Enter
                     app_clone.borrow_mut().on_event(AppEvent::Enter);
-                    if app_clone.borrow().should_open_file_dialog {
-                        app_clone.borrow_mut().should_open_file_dialog = false;
+                    if app_clone.borrow_mut().take_file_open_request() {
                         let _ = file_input_clone.click();
                     }
                 } else if dist >= SWIPE_MIN_DIST && dy.abs() > dx.abs() {
@@ -534,8 +526,7 @@ async fn start_async() -> Result<(), JsValue> {
             if let Some(command) = UiCommand::from_web_key(event.key().as_str()) {
                 event.prevent_default();
                 app_clone.borrow_mut().on_event(command.app_event());
-                if command == UiCommand::Enter && app_clone.borrow().should_open_file_dialog {
-                    app_clone.borrow_mut().should_open_file_dialog = false;
+                if command == UiCommand::Enter && app_clone.borrow_mut().take_file_open_request() {
                     let _ = file_input_clone.click();
                 }
             }
@@ -571,13 +562,12 @@ async fn start_async() -> Result<(), JsValue> {
                         });
                     }
                     // ProblemSelection での削除・並び替えが発生した場合 localStorage に保存
-                    if app.should_save_custom_problems {
+                    if app.take_custom_problem_save_request() {
                         if let Err(err) =
                             WebCustomProblemStore.save_custom_problems(app.custom_problems())
                         {
                             web_sys::console::warn_1(&JsValue::from_str(&err.to_string()));
                         }
-                        app.should_save_custom_problems = false;
                     }
                 }
             }
@@ -964,10 +954,9 @@ async fn start_async() -> Result<(), JsValue> {
 
         // --- IMEリセット処理（可変借用） ---
         let mut app_borrow_mut = app.borrow_mut();
-        if app_borrow_mut.should_reset_ime {
+        if app_borrow_mut.take_ime_reset_request() {
             let _ = ime_input_element.blur();
             let _ = ime_input_element.focus();
-            app_borrow_mut.should_reset_ime = false;
         }
 
         request_animation_frame(f.borrow().as_ref().unwrap());

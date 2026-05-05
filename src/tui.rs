@@ -88,10 +88,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     app.on_event(AppEvent::Start);
 
     let mut previous_buffer = Vec::new();
-    let mut previous_state = app.state;
+    let mut previous_state = app.snapshot().state;
     let mut last_frame_time = Instant::now();
 
-    while !app.should_quit {
+    while !app.snapshot().should_quit {
         let (cols, rows) = terminal::size()?;
         let (cols, rows) = (cols as usize, rows as usize);
 
@@ -122,7 +122,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // シーンが変更された場合、差分描画をスキップして全画面を再描画するようにする
-        if app.state != previous_state {
+        let snapshot = app.snapshot();
+        let display_mode = snapshot.tui_display_mode;
+
+        if snapshot.state != previous_state {
             previous_buffer.clear();
             execute!(stdout, terminal::Clear(terminal::ClearType::All))?;
         }
@@ -146,9 +149,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     ..
                 } => {
                     let crossterm_color = u32_to_crossterm_color(color);
-                    match app.tui_display_mode {
+                    match display_mode {
                         TuiDisplayMode::AsciiArt | TuiDisplayMode::Braille => {
-                            let is_braille = app.tui_display_mode == TuiDisplayMode::Braille;
+                            let is_braille = display_mode == TuiDisplayMode::Braille;
                             draw_art_text(
                                 &mut current_buffer,
                                 current_font,
@@ -203,9 +206,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     align,
                     font_size,
                 } => {
-                    match app.tui_display_mode {
+                    match display_mode {
                         TuiDisplayMode::AsciiArt | TuiDisplayMode::Braille => {
-                            let is_braille = app.tui_display_mode == TuiDisplayMode::Braille;
+                            let is_braille = display_mode == TuiDisplayMode::Braille;
                             let font_size_px = crate::renderer::calculate_pixel_font_size(
                                 font_size,
                                 TUI_VIRTUAL_PIXEL_WIDTH,
@@ -247,15 +250,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             } else {
                                 1.0
                             };
-                            let scroll_offset_cells = (app
-                                .typing_model
-                                .as_ref()
-                                .unwrap()
-                                .scroll
-                                .scroll
-                                / pixels_per_cell)
-                                .round()
-                                as i32;
+                            let typing_model = app.typing_model().unwrap();
+                            let scroll_offset_cells =
+                                (typing_model.scroll.scroll / pixels_per_cell).round() as i32;
 
                             let (_, _, line_total_height, line_ascent) =
                                 renderer(current_font, "|", render_font_size);
@@ -396,9 +393,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     font_size,
                     ..
                 } => {
-                    match app.tui_display_mode {
+                    match display_mode {
                         TuiDisplayMode::AsciiArt | TuiDisplayMode::Braille => {
-                            let is_braille = app.tui_display_mode == TuiDisplayMode::Braille;
+                            let is_braille = display_mode == TuiDisplayMode::Braille;
                             let font_size_px = crate::renderer::calculate_pixel_font_size(
                                 font_size,
                                 TUI_VIRTUAL_PIXEL_WIDTH,
@@ -414,9 +411,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 tui_renderer::render_text_to_art
                             };
 
-                            let full_line_words = &app.typing_model.as_ref().unwrap().content.lines
-                                [app.typing_model.as_ref().unwrap().status.line.get()]
-                            .words;
+                            let typing_model = app.typing_model().unwrap();
+                            let full_line_words =
+                                &typing_model.content.lines[typing_model.status.line.get()].words;
 
                             let (total_width_cells, total_width_pixels) = full_line_words
                                 .iter()
@@ -454,15 +451,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             } else {
                                 1.0
                             };
-                            let scroll_offset_cells = (app
-                                .typing_model
-                                .as_ref()
-                                .unwrap()
-                                .scroll
-                                .scroll
-                                / pixels_per_cell)
-                                .round()
-                                as i32;
+                            let scroll_offset_cells =
+                                (typing_model.scroll.scroll / pixels_per_cell).round() as i32;
 
                             let (_, _, line_total_height, line_ascent) =
                                 renderer(current_font, "|", render_font_size);
@@ -646,9 +636,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         TuiDisplayMode::SimpleText => {
                             // First, calculate the total width of the line in characters for centering.
-                            let full_line_words = &app.typing_model.as_ref().unwrap().content.lines
-                                [app.typing_model.as_ref().unwrap().status.line.get()]
-                            .words;
+                            let typing_model = app.typing_model().unwrap();
+                            let full_line_words =
+                                &typing_model.content.lines[typing_model.status.line.get()].words;
                             let total_width_chars = full_line_words
                                 .iter()
                                 .flat_map(|w| &w.segments)
@@ -792,7 +782,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         draw_buffer_to_terminal(&mut stdout, &current_buffer, &previous_buffer, cols, rows)?;
 
         previous_buffer = current_buffer;
-        previous_state = app.state;
+        previous_state = app.snapshot().state;
 
         handle_input(&mut app)?;
     }
