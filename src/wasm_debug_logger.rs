@@ -23,18 +23,30 @@ thread_local! {
 pub fn init() {
     console_log("[WASM Logger] Initializing...");
 
+    let Some(server_address) =
+        option_env!("WEBSOCKET_ADDRESS").filter(|address| !address.trim().is_empty())
+    else {
+        console_log_styled(
+            "[WASM Logger] WEBSOCKET_ADDRESS is not set. WebSocket logging is disabled.",
+            "color: gray;",
+        );
+        return;
+    };
+
     let mut buf = [0u8; 16];
-    getrandom::getrandom(&mut buf).expect("Failed to get random bytes");
+    if let Err(error) = getrandom::getrandom(&mut buf) {
+        console_log_styled(
+            &format!(
+                "[WASM Logger] Failed to get random bytes. WebSocket logging is disabled: {:?}",
+                error
+            ),
+            "color: red; font-weight: bold;",
+        );
+        return;
+    }
     let id = buf.iter().map(|b| format!("{:02x}", b)).collect::<String>();
     CONNECTION_ID.with(|cell| *cell.borrow_mut() = id.clone());
     console_log(&format!("[WASM Logger] Generated Connection ID: {}", id));
-
-    // env!マクロを使い、ビルド時に環境変数 WEBSOCKET_ADDRESS を読み込む
-    // もし環境変数が設定されていない場合、ビルドはエラーで失敗する
-    let server_address = env!(
-        "WEBSOCKET_ADDRESS",
-        "Build-time environment variable WEBSOCKET_ADDRESS is not set."
-    );
 
     console_log(&format!(
         "[WASM Logger] Attempting to connect to: {}",

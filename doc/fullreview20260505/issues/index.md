@@ -7,8 +7,8 @@ generated_at: `2026-05-05T00:00:00Z`
 | key | count |
 |---|---:|
 | total | 29 |
-| open | 29 |
-| resolved | 0 |
+| open | 28 |
+| resolved | 1 |
 | P0 | 1 |
 | P1 | 17 |
 | P2 | 10 |
@@ -67,3 +67,9 @@ generated_at: `2026-05-05T00:00:00Z`
 | P2 | TP-BUILD-001 | build | build | build.rsがunwrapとrerun-if-changed不足に依存している | [item](./items/ISS-20260505T000000Z-TP-BUILD-001-BUILD-RS-UNWRAP-RERUN.md) |
 | P2 | TP-BUILD-002 | build | build | UEFI実行scriptsのpath解決と破壊的操作が安全境界として弱い | [item](./items/ISS-20260505T000000Z-TP-BUILD-002-UEFI-SCRIPTS-SAFETY.md) |
 | P3 | TP-DOC-003 | docs | docs | Cargo.tomlやsource commentsがmojibakeしている | [item](./items/ISS-20260505T000000Z-TP-DOC-003-CARGO-COMMENT-MOJIBAKE.md) |
+
+## resolved
+
+| status | legacy id | title | file |
+|---|---|---|---|
+| verified | TP-CI-001 | WASM debug buildがWEBSOCKET_ADDRESS未設定でcompile不能になる | [item](./items/ISS-20260505T000000Z-TP-CI-001-WASM-DEBUG-ENV.md) |
