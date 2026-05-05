@@ -12,6 +12,7 @@ parser test と主要 feature の `cargo check` は概ね通る。一方で、WA
 |---|---:|---|
 | `cargo test --no-default-features` | pass | parser test 22 件のみで、core typing / app / backend coverage は不足している。 |
 | `cargo check --no-default-features --features gui` | pass with warnings | GUI 固有の unused / unreachable / needless warning が残る。 |
+| `cargo check --no-default-features --features tui` | pass with warnings | terminal guard、unused function、private interface、mojibake comment などの課題は残る。 |
 | `cargo check --no-default-features --features wasm --target wasm32-unknown-unknown` | fail | debug logger が build-time env `WEBSOCKET_ADDRESS` を要求する。 |
 | `WEBSOCKET_ADDRESS=... cargo check --features wasm` | pass with warnings | env を与えれば通るが CI / release workflow との整合がない。 |
 | `cargo check --no-default-features --features mobile` | pass with warnings | Slint / Android path の `unwrap()` と duplicate renderer は残る。 |

@@ -27,6 +27,7 @@ git status --short --branch
 git rev-parse HEAD
 cargo test --no-default-features
 cargo check --no-default-features --features gui
+cargo check --no-default-features --features tui
 cargo check --no-default-features --features wasm --target wasm32-unknown-unknown
 $env:WEBSOCKET_ADDRESS='ws://localhost:8081'; cargo check --no-default-features --features wasm --target wasm32-unknown-unknown
 cargo check --no-default-features --features mobile

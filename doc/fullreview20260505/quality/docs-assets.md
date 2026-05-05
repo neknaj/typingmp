@@ -18,7 +18,7 @@ README は ruby annotation を `(base/reading)` と説明している箇所が�
 
 ## mojibake / comment hygiene
 
-`Cargo.toml` のコメントに mojibake している箇所がある。source comment は build には影響しないが、feature の意図を誤読させる。
+`Cargo.toml` や `src/ui.rs` などのコメントに mojibake している箇所がある。source comment は build には影響しないが、feature や layout 意図を誤読させる。
 
 修正方針:
 
