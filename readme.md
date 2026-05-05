@@ -156,6 +156,20 @@ Running the UEFI version requires an emulator like QEMU and the OVMF firmware. C
         2.  Copying the compiled EFI application (`.efi` file) to `\EFI\BOOT\BOOTX64.EFI` on the image.
         3.  Launching QEMU with a UEFI firmware file (OVMF) and the disk image.
 
+## Generated Artifacts
+
+Build outputs are not source files and are intentionally left out of Git. Regenerate them from the source tree instead of editing or committing them.
+
+| Path | Producer |
+|---|---|
+| `target/` | Cargo builds |
+| `pkg/` | `wasm-pack build --target web ...` |
+| `uefi_image/` | `run_uefi.ps1` |
+| `rust_multibackend_app.efi` | copied UEFI executable output |
+| `uefi_disk.vhdx` | `run_uefi_hyperv.ps1` |
+| `src.txt` | local source snapshot helper |
+| `logs/`, `.playwright-mcp/` | local development and test tools |
+
 ## Creating Problem Files
 
 Problem files are simple UTF-8 encoded text files that define the typing challenges.

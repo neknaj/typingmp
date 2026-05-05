@@ -2,12 +2,12 @@
 id: ISS-20260505T000000Z-TP-DOC-003-CARGO-COMMENT-MOJIBAKE
 title: "Cargo.tomlやsource commentsがmojibakeしている"
 area: docs
-status: open
-resolved: false
+status: verified
+resolved: true
 priority: P3
 type: docs
 created: 2026-05-05
-updated: 2026-05-05
+updated: 2026-05-06
 target: "Cargo.toml, src/ui.rs, src/**/*.rs"
 legacy_id: TP-DOC-003
 source: "doc/fullreview20260505/quality/docs-assets.md"

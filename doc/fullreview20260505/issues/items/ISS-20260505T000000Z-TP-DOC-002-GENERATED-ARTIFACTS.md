@@ -2,12 +2,12 @@
 id: ISS-20260505T000000Z-TP-DOC-002-GENERATED-ARTIFACTS
 title: "生成物とsource artifactの管理境界が曖昧"
 area: docs
-status: open
-resolved: false
+status: verified
+resolved: true
 priority: P2
 type: docs
 created: 2026-05-05
-updated: 2026-05-05
+updated: 2026-05-06
 target: "rust_multibackend_app.efi, pkg/, .playwright-mcp, .gitignore"
 legacy_id: TP-DOC-002
 source: "doc/fullreview20260505/quality/docs-assets.md"

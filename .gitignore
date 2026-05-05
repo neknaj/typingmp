@@ -1,6 +1,8 @@
 /target
 /pkg
 /src.txt
+/rust_multibackend_app.efi
+/uefi_disk.vhdx
 /uefi_image
 /node_modules
 /logs
