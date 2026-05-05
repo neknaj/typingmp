@@ -39,3 +39,7 @@ input polling は 100ms cadence で、typing application としては反応が�
 backend 共通の `BackendError` を導入し、TUI の font parse failure は typed error として `run()` から返すようにした。runtime font load failure は `App::report_visible_error()` 経由で画面 status へ流す。
 
 typing scene の render path で `typing_model().unwrap()` していた箇所は、model がない場合に該当 frame を描画しない形へ変更した。terminal raw mode / alternate screen の RAII guard は T13 で実装する。
+
+## 実装進捗: T13
+
+`TerminalGuard` を導入し、raw mode、alternate screen、cursor hidden の有効化状態を個別に保持して `Drop` で復旧するようにした。setup 途中で失敗しても既に有効化された state は戻す。通常終了時の末尾 cleanup 依存をなくしたため、loop 中の `?` で抜けた場合も復旧処理が走る。

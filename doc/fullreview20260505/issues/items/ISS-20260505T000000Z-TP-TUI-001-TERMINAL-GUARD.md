@@ -2,12 +2,12 @@
 id: ISS-20260505T000000Z-TP-TUI-001-TERMINAL-GUARD
 title: "TUI raw modeとalternate screenの復旧がRAII化されていない"
 area: tui
-status: open
-resolved: false
+status: verified
+resolved: true
 priority: P1
 type: bug
 created: 2026-05-05
-updated: 2026-05-05
+updated: 2026-05-06
 target: "src/tui.rs"
 legacy_id: TP-TUI-001
 source: "doc/fullreview20260505/platforms/tui.md"
@@ -33,3 +33,16 @@ typing game の TUI は key input を多用するため、raw mode 復旧失敗�
 - setup failure simulation
 - panic path smoke
 - normal exit で alternate screen / raw mode が戻ること。
+
+## 対応: 2026-05-06
+
+- `TerminalGuard` を導入し、raw mode、alternate screen、cursor hidden の有効化状態を個別に記録するようにした。
+- setup 中に alternate screen / cursor hide のどちらかで失敗しても、既に有効化された状態を `restore()` で戻す。
+- 通常終了時の明示 cleanup を `Drop` に移し、loop 中の `?` で戻っても terminal state が復旧する構造にした。
+- 未使用だった `draw_simple_typing_text` を削除し、TUI feature check の warning を消した。
+
+## 検証: 2026-05-06
+
+- `cargo fmt --check`
+- `cargo check --no-default-features`
+- `cargo check --no-default-features --features tui`

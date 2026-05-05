@@ -52,6 +52,57 @@ impl Default for Cell {
     }
 }
 
+#[cfg(not(feature = "uefi"))]
+struct TerminalGuard {
+    raw_mode_enabled: bool,
+    alternate_screen_enabled: bool,
+    cursor_hidden: bool,
+}
+
+#[cfg(not(feature = "uefi"))]
+impl TerminalGuard {
+    fn enter(stdout: &mut impl Write) -> Result<Self, Box<dyn std::error::Error>> {
+        terminal::enable_raw_mode()?;
+        let mut guard = Self {
+            raw_mode_enabled: true,
+            alternate_screen_enabled: false,
+            cursor_hidden: false,
+        };
+
+        if let Err(error) = execute!(stdout, terminal::EnterAlternateScreen) {
+            guard.restore(stdout);
+            return Err(error.into());
+        }
+        guard.alternate_screen_enabled = true;
+        if let Err(error) = execute!(stdout, cursor::Hide) {
+            guard.restore(stdout);
+            return Err(error.into());
+        }
+        guard.cursor_hidden = true;
+        Ok(guard)
+    }
+
+    fn restore(&mut self, stdout: &mut impl Write) {
+        if self.cursor_hidden || self.alternate_screen_enabled {
+            let _ = execute!(stdout, cursor::Show, terminal::LeaveAlternateScreen);
+            self.cursor_hidden = false;
+            self.alternate_screen_enabled = false;
+        }
+        if self.raw_mode_enabled {
+            let _ = terminal::disable_raw_mode();
+            self.raw_mode_enabled = false;
+        }
+    }
+}
+
+#[cfg(not(feature = "uefi"))]
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let mut stdout = stdout();
+        self.restore(&mut stdout);
+    }
+}
+
 /// u32形式のRGBカラーコードをcrosstermのColor::Rgbに変換する
 #[cfg(not(feature = "uefi"))]
 fn u32_to_crossterm_color(c: u32) -> Color {
@@ -82,8 +133,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let mut stdout = stdout();
-    terminal::enable_raw_mode()?;
-    execute!(stdout, terminal::EnterAlternateScreen, cursor::Hide)?;
+    let _terminal_guard = TerminalGuard::enter(&mut stdout)?;
 
     let mut app = App::new(fonts);
     app.set_available_fonts(asset_provider.list_fonts());
@@ -795,8 +845,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         handle_input(&mut app)?;
     }
 
-    execute!(stdout, cursor::Show, terminal::LeaveAlternateScreen)?;
-    terminal::disable_raw_mode()?;
     Ok(())
 }
 
@@ -1037,19 +1085,4 @@ fn handle_input(app: &mut App) -> std::io::Result<()> {
         }
     }
     Ok(())
-}
-
-/// シンプルモード用にテキストを描画するヘルパー関数
-#[cfg(not(feature = "uefi"))]
-fn draw_simple_typing_text(
-    buffer: &mut [Cell],
-    text: &str,
-    anchor: Anchor,
-    shift: Shift,
-    align: Align,
-    width: usize,
-    height: usize,
-    color: Color,
-) {
-    draw_plain_text(buffer, text, anchor, shift, align, width, height, color);
 }

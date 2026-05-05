@@ -7,8 +7,8 @@ generated_at: `2026-05-05T00:00:00Z`
 | key | count |
 |---|---:|
 | total | 29 |
-| open | 19 |
-| resolved | 10 |
+| open | 18 |
+| resolved | 11 |
 | P0 | 1 |
 | P1 | 17 |
 | P2 | 10 |
@@ -76,4 +76,5 @@ generated_at: `2026-05-05T00:00:00Z`
 | verified | TP-DOC-001 | READMEの問題記法が実装とずれている | [item](./items/ISS-20260505T000000Z-TP-DOC-001-README-NTQ-SYNTAX.md) |
 | verified | TP-PERF-001 | Layout mappingがsessionごとに再構築される | [item](./items/ISS-20260505T000000Z-TP-PERF-001-LAYOUT-REBUILD.md) |
 | verified | TP-STATIC-001 | 状態とcommandがraw number/raw stringに依存しenumとmatchの網羅性検査が効いていない | [item](./items/ISS-20260505T000000Z-TP-STATIC-001-ENUM-MATCH-STATE.md) |
+| verified | TP-TUI-001 | TUI raw modeとalternate screenの復旧がRAII化されていない | [item](./items/ISS-20260505T000000Z-TP-TUI-001-TERMINAL-GUARD.md) |
 | verified | TP-TYPE-001 | typing stateがi32 indexとunchecked castに依存している | [item](./items/ISS-20260505T000000Z-TP-TYPE-001-I32-CURSOR-INDICES.md) |
