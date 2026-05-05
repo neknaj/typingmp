@@ -2,12 +2,12 @@
 id: ISS-20260505T000000Z-TP-CI-002-FMT-CLIPPY-GATE
 title: "cargo fmtとclippy warningが品質gateになっていない"
 area: ci
-status: open
-resolved: false
+status: verified
+resolved: true
 priority: P1
 type: quality
 created: 2026-05-05
-updated: 2026-05-05
+updated: 2026-05-06
 target: "Cargo.toml, src/**/*.rs, .github/workflows/*.yml"
 legacy_id: TP-CI-002
 source: "doc/fullreview20260505/quality/static-validation.md"

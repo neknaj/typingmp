@@ -2,12 +2,12 @@
 id: ISS-20260505T000000Z-TP-CI-003-WORKFLOW-MATRIX-ACTIONS
 title: "CI workflowがmulti-target feature matrixを十分に固定していない"
 area: ci
-status: open
-resolved: false
+status: verified
+resolved: true
 priority: P2
 type: quality
 created: 2026-05-05
-updated: 2026-05-05
+updated: 2026-05-06
 target: ".github/workflows/release.yml"
 legacy_id: TP-CI-003
 source: "doc/fullreview20260505/project/verification-status.md"
