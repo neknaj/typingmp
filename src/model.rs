@@ -64,12 +64,6 @@ impl fmt::Display for Segment {
 }
 
 #[derive(Debug, Clone)]
-pub enum Model {
-    Typing(TypingModel),
-    Result(ResultModel),
-}
-
-#[derive(Debug, Clone)]
 pub struct TypingModel {
     pub content: Content,
     pub status: TypingStatus,

@@ -6,8 +6,8 @@ extern crate alloc;
 use crate::io::FontEntry;
 use crate::io::{FontAssetId, ProblemRepository, ProblemSourceProvider};
 use crate::model::{
-    CharIndex, LineIndex, Model, ResultModel, Scroll, Segment, SegmentIndex, TypingModel,
-    TypingStatus, WordIndex,
+    CharIndex, LineIndex, ResultModel, Scroll, Segment, SegmentIndex, TypingModel, TypingStatus,
+    WordIndex,
 };
 use alloc::{
     format,
@@ -1208,27 +1208,37 @@ impl App {
                 self.status_text = "Start typing!".to_string();
                 match event {
                     AppEvent::Char { c, timestamp } => {
-                        if let Some(model) = self.typing_model.take() {
+                        let mut finished = false;
+                        #[cfg(target_arch = "wasm32")]
+                        let mut reset_ime = false;
+
+                        if let Some(model) = self.typing_model.as_mut() {
                             #[cfg(target_arch = "wasm32")]
                             let old_position = (model.status.line, model.status.word);
 
-                            match typing::key_input(model, c, timestamp) {
-                                Model::Typing(new_model) => {
-                                    #[cfg(target_arch = "wasm32")]
-                                    {
-                                        if (new_model.status.line, new_model.status.word)
-                                            != old_position
-                                        {
-                                            self.should_reset_ime = true;
-                                        }
-                                    }
-                                    self.typing_model = Some(new_model)
-                                }
-                                Model::Result(result_model) => {
-                                    self.result_model = Some(result_model);
-                                    self.state = AppState::Result;
-                                    self.on_event(AppEvent::ChangeScene);
-                                }
+                            finished = matches!(
+                                typing::key_input(model, c, timestamp),
+                                typing::TypingTransition::Finished
+                            );
+
+                            #[cfg(target_arch = "wasm32")]
+                            {
+                                reset_ime = (model.status.line, model.status.word) != old_position;
+                            }
+                        }
+
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            if reset_ime {
+                                self.should_reset_ime = true;
+                            }
+                        }
+
+                        if finished {
+                            if let Some(typing_model) = self.typing_model.take() {
+                                self.result_model = Some(ResultModel { typing_model });
+                                self.state = AppState::Result;
+                                self.on_event(AppEvent::ChangeScene);
                             }
                         }
                     }

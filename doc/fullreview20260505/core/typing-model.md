@@ -45,3 +45,10 @@ typing logic は core として分離されているが、model を値で受け�
 - `TP-CORE-002`
 - `TP-TYPE-001`
 - `TP-CORE-003`
+
+## 対応状況: 2026-05-06
+
+- `TypingModel` の cursor は `LineIndex` / `WordIndex` / `SegmentIndex` / `CharIndex` に移行済み。
+- `key_input` は `&mut TypingModel` を更新して `TypingTransition` を返す形に変更済み。
+- default build の typing input path では入力文字の debug log / `format!` allocation を行わない。
+- `ん` 自動確定は内部合成 key を user input log と type count に含めない。

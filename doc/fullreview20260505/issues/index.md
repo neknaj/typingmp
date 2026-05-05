@@ -7,8 +7,8 @@ generated_at: `2026-05-05T00:00:00Z`
 | key | count |
 |---|---:|
 | total | 29 |
-| open | 23 |
-| resolved | 6 |
+| open | 22 |
+| resolved | 7 |
 | P0 | 1 |
 | P1 | 17 |
 | P2 | 10 |
@@ -46,7 +46,6 @@ generated_at: `2026-05-05T00:00:00Z`
 | P1 | TP-ARCH-001 | architecture | architecture | Appがscene/input/problem/scroll/fontを抱えすぎている | [item](./items/ISS-20260505T000000Z-TP-ARCH-001-APP-GOD-OBJECT.md) |
 | P1 | TP-ARCH-002 | architecture | architecture | backendごとにrendering pipelineが重複している | [item](./items/ISS-20260505T000000Z-TP-ARCH-002-RENDERER-DUPLICATION.md) |
 | P1 | TP-TYPE-001 | core | type-safety | typing stateがi32 indexとunchecked castに依存している | [item](./items/ISS-20260505T000000Z-TP-TYPE-001-I32-CURSOR-INDICES.md) |
-| P1 | TP-CORE-002 | core | performance | typing inputがmodel値渡しと入力logに依存している | [item](./items/ISS-20260505T000000Z-TP-CORE-002-TYPING-MODEL-MOVE-LOGGING.md) |
 | P1 | TP-PERF-003 | performance | performance | UEFI backendがframeごとに大きなbufferを確保している | [item](./items/ISS-20260505T000000Z-TP-PERF-003-UEFI-FRAME-ALLOC.md) |
 | P1 | TP-ERR-001 | error-handling | bug | platform backendに環境依存unwrapが多い | [item](./items/ISS-20260505T000000Z-TP-ERR-001-BACKEND-UNWRAPS.md) |
 | P1 | TP-TUI-001 | tui | bug | TUI raw modeとalternate screenの復旧がRAII化されていない | [item](./items/ISS-20260505T000000Z-TP-TUI-001-TERMINAL-GUARD.md) |
@@ -72,6 +71,7 @@ generated_at: `2026-05-05T00:00:00Z`
 | verified | TP-CI-001 | WASM debug buildがWEBSOCKET_ADDRESS未設定でcompile不能になる | [item](./items/ISS-20260505T000000Z-TP-CI-001-WASM-DEBUG-ENV.md) |
 | verified | TP-CORE-003 | parser以外のcore regression testが不足している | [item](./items/ISS-20260505T000000Z-TP-CORE-003-TEST-COVERAGE-GAP.md) |
 | verified | TP-CORE-001 | parserがmalformed inputをdiagnosticとして返せない | [item](./items/ISS-20260505T000000Z-TP-CORE-001-PARSER-DIAGNOSTICS.md) |
+| verified | TP-CORE-002 | typing inputがmodel値渡しと入力logに依存している | [item](./items/ISS-20260505T000000Z-TP-CORE-002-TYPING-MODEL-MOVE-LOGGING.md) |
 | verified | TP-DOC-001 | READMEの問題記法が実装とずれている | [item](./items/ISS-20260505T000000Z-TP-DOC-001-README-NTQ-SYNTAX.md) |
 | verified | TP-STATIC-001 | 状態とcommandがraw number/raw stringに依存しenumとmatchの網羅性検査が効いていない | [item](./items/ISS-20260505T000000Z-TP-STATIC-001-ENUM-MATCH-STATE.md) |
 | verified | TP-TYPE-001 | typing stateがi32 indexとunchecked castに依存している | [item](./items/ISS-20260505T000000Z-TP-TYPE-001-I32-CURSOR-INDICES.md) |

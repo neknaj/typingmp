@@ -2,12 +2,12 @@
 
 extern crate alloc;
 
-use alloc::{format, string::String, vec::Vec};
+use alloc::{string::String, vec::Vec};
 
 use crate::model::{
-    CharIndex, Content, Model, ResultModel, Segment, SegmentIndex, TypingCorrectnessChar,
-    TypingCorrectnessContent, TypingCorrectnessLine, TypingCorrectnessSegment,
-    TypingCorrectnessWord, TypingInput, TypingMetrics, TypingModel, TypingSession,
+    CharIndex, Content, Segment, SegmentIndex, TypingCorrectnessChar, TypingCorrectnessContent,
+    TypingCorrectnessLine, TypingCorrectnessSegment, TypingCorrectnessWord, TypingInput,
+    TypingMetrics, TypingModel, TypingSession,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -18,13 +18,12 @@ enum KeystrokeMatch {
     Miss,
 }
 
-#[derive(Debug, Clone, Copy)]
-enum TypingCompletion {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypingTransition {
+    Ignored,
     Continue,
     Finished,
 }
-
-fn log(_message: &str) {}
 
 fn normalize_typing_char(c: char) -> char {
     // 古典かなの代替入力: ゐ・ヰ は「い」、ゑ・ヱ は「え」として扱う。
@@ -179,29 +178,94 @@ fn segment_prefix_chars_inner(
     skipped
 }
 
-pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
-    log(&format!("\n--- key_input: '{}' --- typing.rs", input));
-    log(&format!(
-        "  [State Before] line: {}, word: {}, seg: {}, char: {}, unconfirmed: {:?}",
-        model.status.line,
-        model.status.word,
-        model.status.segment,
-        model.status.char_,
-        model.status.unconfirmed
-    ));
+fn apply_correct_advance(
+    model: &mut TypingModel,
+    current_line_idx: usize,
+    current_word_idx: usize,
+    advance_chars: usize,
+) {
+    let mut remaining_advance = advance_chars;
+    let mut current_seg_idx = model.status.segment.get();
+    let mut current_char_idx = model.status.char_.get();
 
+    while remaining_advance > 0 {
+        let Some(correctness_word) = model
+            .typing_correctness
+            .lines
+            .get_mut(current_line_idx)
+            .and_then(|line| line.words.get_mut(current_word_idx))
+        else {
+            break;
+        };
+        let Some(correctness_segment) = correctness_word.segments.get_mut(current_seg_idx) else {
+            break;
+        };
+        let current_seg_len = correctness_segment.chars.len();
+
+        let chars_to_advance_in_seg = (current_seg_len - current_char_idx).min(remaining_advance);
+
+        // 正誤情報を更新
+        for i in 0..chars_to_advance_in_seg {
+            if correctness_segment.chars[current_char_idx + i] != TypingCorrectnessChar::Incorrect {
+                correctness_segment.chars[current_char_idx + i] = TypingCorrectnessChar::Correct;
+            }
+        }
+
+        remaining_advance -= chars_to_advance_in_seg;
+        current_char_idx += chars_to_advance_in_seg;
+
+        if current_char_idx >= current_seg_len {
+            current_seg_idx += 1;
+            current_char_idx = 0;
+        }
+    }
+
+    model.status.segment = SegmentIndex::new(current_seg_idx);
+    model.status.char_ = CharIndex::new(current_char_idx);
+}
+
+fn update_completion(model: &mut TypingModel) -> TypingTransition {
+    let current_line_idx = model.status.line.get();
+    let Some(line_content) = model.content.lines.get(current_line_idx) else {
+        return TypingTransition::Ignored;
+    };
+    let current_word_idx = model.status.word.get();
+    let Some(word_content) = line_content.words.get(current_word_idx) else {
+        return TypingTransition::Ignored;
+    };
+
+    if model.status.segment.get() < word_content.segments.len() {
+        return TypingTransition::Continue;
+    }
+
+    model.status.segment.reset();
+    model.status.char_.reset();
+    model.status.word.advance();
+    if model.status.word.get() < line_content.words.len() {
+        return TypingTransition::Continue;
+    }
+
+    model.status.word.reset();
+    model.status.line.advance();
+    if model.status.line.get() >= model.content.lines.len() {
+        TypingTransition::Finished
+    } else {
+        TypingTransition::Continue
+    }
+}
+
+pub fn key_input(model: &mut TypingModel, input: char, timestamp: f64) -> TypingTransition {
     let current_time = timestamp;
     let current_line_idx = model.status.line.get();
 
     if model.content.lines.len() <= current_line_idx {
-        log("  [Result] Typing already finished. No action.");
-        return Model::Typing(model);
+        return TypingTransition::Ignored;
     }
 
     let line_content = &model.content.lines[current_line_idx];
     let current_word_idx = model.status.word.get();
     if line_content.words.len() <= current_word_idx {
-        return Model::Typing(model);
+        return TypingTransition::Ignored;
     }
     let word_content = &line_content.words[current_word_idx];
 
@@ -228,11 +292,13 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
             &target_slice,
         );
         if is_n_commit_trigger {
-            log("  [ん auto-commit] triggering 'n' then original input");
-            return match key_input(model, 'n', timestamp) {
-                Model::Typing(m) => key_input(m, input, timestamp),
-                Model::Result(r) => Model::Result(r),
-            };
+            model.status.unconfirmed.clear();
+            model.status.last_wrong_keydown = None;
+            apply_correct_advance(model, current_line_idx, current_word_idx, 1);
+            if matches!(update_completion(model), TypingTransition::Finished) {
+                return TypingTransition::Finished;
+            }
+            return key_input(model, input, timestamp);
         }
     }
 
@@ -278,48 +344,7 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     if is_correct {
         model.status.last_wrong_keydown = None;
         if !is_romaji_in_progress {
-            let mut remaining_advance = advance_chars;
-            let mut current_seg_idx = model.status.segment.get();
-            let mut current_char_idx = model.status.char_.get();
-
-            while remaining_advance > 0 && current_seg_idx < word_content.segments.len() {
-                let Some(correctness_word) = model
-                    .typing_correctness
-                    .lines
-                    .get_mut(current_line_idx)
-                    .and_then(|l| l.words.get_mut(current_word_idx))
-                else {
-                    break;
-                };
-                let Some(correctness_segment) = correctness_word.segments.get_mut(current_seg_idx)
-                else {
-                    break;
-                };
-                let current_seg_len = correctness_segment.chars.len();
-
-                let chars_to_advance_in_seg =
-                    (current_seg_len - current_char_idx).min(remaining_advance);
-
-                // 正誤情報を更新
-                for i in 0..chars_to_advance_in_seg {
-                    if correctness_segment.chars[current_char_idx + i]
-                        != TypingCorrectnessChar::Incorrect
-                    {
-                        correctness_segment.chars[current_char_idx + i] =
-                            TypingCorrectnessChar::Correct;
-                    }
-                }
-
-                remaining_advance -= chars_to_advance_in_seg;
-                current_char_idx += chars_to_advance_in_seg;
-
-                if current_char_idx >= current_seg_len {
-                    current_seg_idx += 1;
-                    current_char_idx = 0;
-                }
-            }
-            model.status.segment = SegmentIndex::new(current_seg_idx);
-            model.status.char_ = CharIndex::new(current_char_idx);
+            apply_correct_advance(model, current_line_idx, current_word_idx, advance_chars);
         }
     } else {
         model.status.last_wrong_keydown = Some(input);
@@ -331,7 +356,7 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
             .and_then(|l| l.words.get_mut(current_word_idx))
             .and_then(|w| w.segments.get_mut(model.status.segment.get()))
         else {
-            return Model::Typing(model);
+            return TypingTransition::Continue;
         };
         if let Some(c) = correctness_segment.chars.get_mut(model.status.char_.get()) {
             *c = TypingCorrectnessChar::Incorrect;
@@ -363,46 +388,7 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     );
 
     // 4. セグメント、単語、行、全体の完了チェック
-    let completion = if model.status.segment.get() >= word_content.segments.len() {
-        model.status.segment.reset();
-        model.status.char_.reset();
-        model.status.word.advance();
-        if model.status.word.get() >= line_content.words.len() {
-            model.status.word.reset();
-            model.status.line.advance();
-            if model.status.line.get() >= model.content.lines.len() {
-                TypingCompletion::Finished
-            } else {
-                TypingCompletion::Continue
-            }
-        } else {
-            TypingCompletion::Continue
-        }
-    } else {
-        TypingCompletion::Continue
-    };
-
-    log(&format!(
-        "  [Result] is_correct: {}, is_finished: {}",
-        is_correct,
-        matches!(completion, TypingCompletion::Finished)
-    ));
-    log(&format!(
-        "  [State After] line: {}, word: {}, seg: {}, char: {}, unconfirmed: {:?}",
-        model.status.line,
-        model.status.word,
-        model.status.segment,
-        model.status.char_,
-        model.status.unconfirmed
-    ));
-
-    if matches!(completion, TypingCompletion::Finished) {
-        Model::Result(ResultModel {
-            typing_model: model,
-        })
-    } else {
-        Model::Typing(model)
-    }
+    update_completion(model)
 }
 
 // セグメントのタイプ対象文字列を返す（Anno は inner を再帰的に連結）
@@ -476,7 +462,7 @@ pub fn calculate_total_metrics(model: &TypingModel) -> TypingMetrics {
 mod tests {
     use super::*;
     use crate::model::{
-        CharIndex, LineIndex, Model, Scroll, SegmentIndex, TypingCorrectnessChar, TypingModel,
+        CharIndex, LineIndex, Scroll, SegmentIndex, TypingCorrectnessChar, TypingModel,
         TypingStatus, WordIndex,
     };
 
@@ -510,37 +496,33 @@ mod tests {
 
     #[test]
     fn direct_kana_input_finishes_single_character_problem() {
-        let model = typing_model_from_problem("#title Test\nあ");
+        let mut model = typing_model_from_problem("#title Test\nあ");
 
-        let result = key_input(model, 'あ', 10.0);
+        let result = key_input(&mut model, 'あ', 10.0);
 
-        let Model::Result(result) = result else {
-            panic!("single direct kana input should finish the problem");
-        };
-        assert_eq!(result.typing_model.total_type_count, 1);
-        assert_eq!(result.typing_model.total_miss_count, 0);
+        assert_eq!(result, TypingTransition::Finished);
+        assert_eq!(model.total_type_count, 1);
+        assert_eq!(model.total_miss_count, 0);
         assert_eq!(
-            result.typing_model.typing_correctness.lines[0].words[0].segments[0].chars[0],
+            model.typing_correctness.lines[0].words[0].segments[0].chars[0],
             TypingCorrectnessChar::Correct
         );
     }
 
     #[test]
     fn romaji_prefix_keeps_cursor_until_mapping_is_complete() {
-        let model = typing_model_from_problem("#title Test\n[色/し]あ");
+        let mut model = typing_model_from_problem("#title Test\n[色/し]あ");
 
-        let model = match key_input(model, 's', 10.0) {
-            Model::Typing(model) => model,
-            Model::Result(_) => panic!("romaji prefix should not finish input"),
-        };
+        let result = key_input(&mut model, 's', 10.0);
+
+        assert_eq!(result, TypingTransition::Continue);
         assert_eq!(model.status.unconfirmed, ['s']);
         assert_eq!(model.status.segment, SegmentIndex::ZERO);
         assert_eq!(model.status.char_, CharIndex::ZERO);
 
-        let model = match key_input(model, 'i', 20.0) {
-            Model::Typing(model) => model,
-            Model::Result(_) => panic!("remaining segment should keep the session active"),
-        };
+        let result = key_input(&mut model, 'i', 20.0);
+
+        assert_eq!(result, TypingTransition::Continue);
         assert!(model.status.unconfirmed.is_empty());
         assert_eq!(model.status.word, WordIndex::new(1));
         assert_eq!(model.status.segment, SegmentIndex::ZERO);
@@ -553,13 +535,11 @@ mod tests {
 
     #[test]
     fn miss_marks_current_character_without_advancing_cursor() {
-        let model = typing_model_from_problem("#title Test\nあ");
+        let mut model = typing_model_from_problem("#title Test\nあ");
 
-        let model = match key_input(model, 'x', 10.0) {
-            Model::Typing(model) => model,
-            Model::Result(_) => panic!("miss should keep the session active"),
-        };
+        let result = key_input(&mut model, 'x', 10.0);
 
+        assert_eq!(result, TypingTransition::Continue);
         assert_eq!(model.total_type_count, 0);
         assert_eq!(model.total_miss_count, 1);
         assert_eq!(model.status.last_wrong_keydown, Some('x'));
@@ -569,5 +549,19 @@ mod tests {
             model.typing_correctness.lines[0].words[0].segments[0].chars[0],
             TypingCorrectnessChar::Incorrect
         );
+    }
+
+    #[test]
+    fn n_auto_commit_mutates_in_place_before_original_key() {
+        let mut model = typing_model_from_problem("#title Test\nんか");
+
+        assert_eq!(key_input(&mut model, 'n', 10.0), TypingTransition::Continue);
+        assert_eq!(model.status.unconfirmed, ['n']);
+        assert_eq!(model.status.char_, CharIndex::ZERO);
+
+        assert_eq!(key_input(&mut model, 'k', 20.0), TypingTransition::Continue);
+        assert_eq!(model.status.unconfirmed, ['k']);
+        assert_eq!(model.status.char_, CharIndex::new(1));
+        assert_eq!(model.total_type_count, 2);
     }
 }
