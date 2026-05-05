@@ -7,8 +7,8 @@ generated_at: `2026-05-05T00:00:00Z`
 | key | count |
 |---|---:|
 | total | 29 |
-| open | 16 |
-| resolved | 13 |
+| open | 15 |
+| resolved | 14 |
 | P0 | 1 |
 | P1 | 17 |
 | P2 | 10 |
@@ -80,3 +80,4 @@ generated_at: `2026-05-05T00:00:00Z`
 | verified | TP-TYPE-001 | typing stateがi32 indexとunchecked castに依存している | [item](./items/ISS-20260505T000000Z-TP-TYPE-001-I32-CURSOR-INDICES.md) |
 | verified | TP-WASM-001 | WASM/webがDOMとstorage失敗をunwrapまたはsilent fallbackにしている | [item](./items/ISS-20260505T000000Z-TP-WASM-001-DOM-STORAGE-ERRORS.md) |
 | verified | TP-WEB-001 | web版が初回pointerdownでclipboardを書き換える | [item](./items/ISS-20260505T000000Z-TP-WEB-001-CLIPBOARD-SIDE-EFFECT.md) |
+| verified | TP-MOBILE-001 | mobile backendがUI callback内でArc<Mutex<App>>とunwrapに依存している | [item](./items/ISS-20260505T000000Z-TP-MOBILE-001-MUTEX-UI-STATE.md) |

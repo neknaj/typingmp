@@ -3,7 +3,8 @@
 
 use ab_glyph::FontVec;
 use slint::{Image, Rgb8Pixel, SharedPixelBuffer};
-use std::sync::{Arc, Mutex};
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::time::Instant;
 
 use crate::app::{App, AppEvent, Fonts, UiCommand};
@@ -292,11 +293,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     let mut app = App::new(fonts);
     app.set_available_fonts(asset_provider.list_fonts());
-    let app_state = Arc::new(Mutex::new(app));
+    let app_state = Rc::new(RefCell::new(app));
     {
         let mut a = app_state
-            .lock()
-            .map_err(|_| BackendError::state("mobile app state mutex is poisoned"))?;
+            .try_borrow_mut()
+            .map_err(|_| BackendError::state("mobile app state is already borrowed"))?;
         a.on_event(AppEvent::ChangeScene);
     }
 
@@ -304,11 +305,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // --- コールバック: フリック文字 ---
     {
-        let app = Arc::clone(&app_state);
+        let app = Rc::clone(&app_state);
         let win = window.as_weak();
         window.on_char_input(move |c| {
             let timestamp = crate::timestamp::now();
-            let Ok(mut a) = app.lock() else {
+            let Ok(mut a) = app.try_borrow_mut() else {
                 return;
             };
             for ch in c.chars() {
@@ -322,10 +323,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // --- コールバック: 特殊キー ---
     {
-        let app = Arc::clone(&app_state);
+        let app = Rc::clone(&app_state);
         let win = window.as_weak();
         window.on_special_input(move |action| {
-            let Ok(mut a) = app.lock() else {
+            let Ok(mut a) = app.try_borrow_mut() else {
                 return;
             };
             if let Some(command) = UiCommand::from_bridge_label(action.as_str()) {
@@ -343,7 +344,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     // アスペクト比が一致するため歪みは発生しない。
     let mut pixel_buf: Vec<u32> = Vec::new();
     let win_weak = window.as_weak();
-    let app = Arc::clone(&app_state);
+    let app = Rc::clone(&app_state);
     let mut last_frame = Instant::now();
 
     let timer = slint::Timer::default();
@@ -368,7 +369,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             {
-                let Ok(mut a) = app.lock() else {
+                let Ok(mut a) = app.try_borrow_mut() else {
                     return;
                 };
                 // 実測 delta_ms を渡すことで app.fps が正確な値になる

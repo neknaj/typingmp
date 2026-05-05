@@ -4,7 +4,7 @@
 
 ## 結論
 
-mobile backend は Slint UI callback の中で `Arc<Mutex<App>>` を使っている。single-threaded UI callback で mutex を多用すると、panic poison や lock ordering の問題だけが残り、設計上の利点は薄い。
+mobile backend の Slint UI callback state は `Rc<RefCell<App>>` に寄せた。single-threaded UI callback で不要だった `Arc<Mutex<App>>` と `.lock().unwrap()` は解消済みで、panic poison による二次 crash 経路はなくなった。
 
 ## state ownership
 
@@ -12,13 +12,13 @@ Slint UI 側が単一 thread で `App` を操作するなら、`Rc<RefCell<App>>
 
 修正方針:
 
-- UI callback 内の `.lock().unwrap()` をなくす。
-- panic poison による二次 crash を避ける。
+- UI callback 内の `.lock().unwrap()` は解消済み。
+- panic poison による二次 crash 経路は解消済み。
 - rendering snapshot を作り、UI callback が `App` internals を直接触らないようにする。
 
 ## Android entrypoint
 
-Android main path に `unwrap()` がある。mobile は device / permission / surface lifecycle の失敗が起きやすいため、init error を user-visible にする必要がある。
+Android main path の `unwrap()` は解消済み。mobile は device / permission / surface lifecycle の失敗が起きやすいため、init error はログとして返す。
 
 ## rendering duplication
 
