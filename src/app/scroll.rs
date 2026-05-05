@@ -68,7 +68,6 @@ pub(crate) struct ScrollCacheState {
     pub width: usize,
     pub height: usize,
     pub font_pixel_size: f32,
-    pub gap_width: f32,
     pub line_origin: f32,
     pub cursor_in_line: f32,
     pub cursor_world: f32,
@@ -78,6 +77,81 @@ pub(crate) struct ScrollCacheState {
 #[derive(Clone)]
 pub(crate) enum ScrollCache {
     Ready(ScrollCacheState),
+}
+
+pub(crate) const TYPING_FOCUS_X_RATIO: f32 = 0.42;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct TypingLineScrollPosition {
+    pub target: f64,
+    pub min: f64,
+    pub max: f64,
+}
+
+pub(crate) fn typing_focus_x(viewport_width: usize) -> f32 {
+    viewport_width as f32 * TYPING_FOCUS_X_RATIO
+}
+
+pub(crate) fn typing_line_scroll_offset(
+    line_width: f32,
+    cursor_in_line: f32,
+    viewport_width: usize,
+) -> f32 {
+    let viewport_width_f32 = viewport_width as f32;
+    if viewport_width_f32 <= 0.0 {
+        return 0.0;
+    }
+
+    let line_width = line_width.max(0.0);
+    let cursor_in_line = cursor_in_line.max(0.0).min(line_width);
+    if line_width <= viewport_width_f32 {
+        return -((viewport_width_f32 - line_width) * 0.5);
+    }
+
+    let focus_x = typing_focus_x(viewport_width);
+    let min_offset = -focus_x;
+    let max_offset = line_width - viewport_width_f32;
+    (cursor_in_line - focus_x).max(min_offset).min(max_offset)
+}
+
+pub(crate) fn typing_line_scroll_position(
+    line_origin: f32,
+    line_width: f32,
+    cursor_in_line: f32,
+    viewport_width: usize,
+) -> TypingLineScrollPosition {
+    let line_width = line_width.max(0.0);
+    let viewport_width_f32 = viewport_width as f32;
+    if viewport_width_f32 <= 0.0 {
+        let target = f64::from(line_origin);
+        return TypingLineScrollPosition {
+            target,
+            min: target,
+            max: target,
+        };
+    }
+
+    if line_width <= viewport_width_f32 {
+        let target = f64::from(line_origin - ((viewport_width_f32 - line_width) * 0.5));
+        return TypingLineScrollPosition {
+            target,
+            min: target,
+            max: target,
+        };
+    }
+
+    let focus_x = typing_focus_x(viewport_width);
+    let min = f64::from(line_origin - focus_x);
+    let max = f64::from(line_origin + line_width - viewport_width_f32);
+    let target = f64::from(
+        line_origin + typing_line_scroll_offset(line_width, cursor_in_line, viewport_width),
+    );
+
+    TypingLineScrollPosition {
+        target: target.max(min).min(max),
+        min,
+        max,
+    }
 }
 
 fn build_reading_width_prefix(font: &FontVec, text: &str, font_pixel_size: f32) -> Vec<f32> {
@@ -280,5 +354,52 @@ pub(crate) fn cursor_position_from_status(
         (base + typed_width).min(cache.total_width)
     } else {
         cache.total_width
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_close(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() < 0.001,
+            "actual {actual} should be close to expected {expected}"
+        );
+    }
+
+    #[test]
+    fn scroll_position_centers_short_lines() {
+        let position = typing_line_scroll_position(100.0, 200.0, 0.0, 800);
+
+        assert_close(position.target, -200.0);
+        assert_close(100.0 - position.target, 300.0);
+        assert_eq!(position.min, position.target);
+        assert_eq!(position.max, position.target);
+    }
+
+    #[test]
+    fn scroll_position_places_long_line_start_at_focus() {
+        let position = typing_line_scroll_position(0.0, 2_000.0, 0.0, 1_000);
+        let focus_x = f64::from(typing_focus_x(1_000));
+
+        assert_close(position.target, -focus_x);
+        assert_close(0.0 - position.target, focus_x);
+    }
+
+    #[test]
+    fn scroll_position_keeps_long_line_cursor_near_focus() {
+        let position = typing_line_scroll_position(0.0, 2_000.0, 900.0, 1_000);
+        let focus_x = f64::from(typing_focus_x(1_000));
+
+        assert_close(900.0 - position.target, focus_x);
+    }
+
+    #[test]
+    fn scroll_position_clamps_long_line_end_to_viewport_right() {
+        let position = typing_line_scroll_position(0.0, 2_000.0, 2_000.0, 1_000);
+
+        assert_close(position.target, 1_000.0);
+        assert_close(2_000.0 - position.target, 1_000.0);
     }
 }

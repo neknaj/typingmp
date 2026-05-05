@@ -230,7 +230,7 @@ fn render_frame(
     render_cache: &mut RenderCache,
 ) {
     let current_font = app.get_current_font();
-    let render_list = ui::build_ui(&app, current_font, width, height);
+    let render_list = ui::build_ui(app, current_font, width, height);
     if let Some(mut surface) = ArgbSurface::new(width, height, pixel_buffer) {
         surface.render(current_font, &render_list, render_cache);
     }

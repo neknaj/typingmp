@@ -23,7 +23,7 @@ use alloc::{
 #[cfg(not(feature = "uefi"))]
 use std::string::{String, ToString};
 
-use crate::app::{App, AppSnapshot, AppState, Script, ScrollCache};
+use crate::app::{typing_line_scroll_offset, App, AppSnapshot, AppState, Script, ScrollCache};
 use crate::model::{
     Segment, TypingCorrectnessChar, TypingCorrectnessSegment, TypingCorrectnessWord,
 };
@@ -844,6 +844,29 @@ fn measure_line_base_width(line: &crate::model::Line, font: &FontVec, font_size:
         .sum()
 }
 
+const TYPING_SCROLL_OVERSCAN_RATIO: f32 = 0.25;
+
+fn typing_line_shift_x(scroll_offset: f32, width: usize) -> f32 {
+    if width == 0 {
+        0.0
+    } else {
+        (-scroll_offset - (width as f32 * 0.5)) / width as f32
+    }
+}
+
+fn typing_visible_line_bounds(scroll_offset: f32, width: usize) -> (f32, f32) {
+    let viewport = width as f32;
+    if viewport <= 0.0 {
+        return (0.0, 0.0);
+    }
+
+    let overscan = viewport * TYPING_SCROLL_OVERSCAN_RATIO;
+    (
+        (scroll_offset - overscan).max(0.0),
+        scroll_offset + viewport + overscan,
+    )
+}
+
 fn build_typing_ui(
     app: &App,
     render_list: &mut Vec<Renderable>,
@@ -895,8 +918,9 @@ fn build_typing_ui(
         let scroll_offset = if cached_cache.is_some() {
             (model.scroll.scroll - line_origin) as f32
         } else {
-            model.scroll.scroll as f32
+            typing_line_scroll_offset(full_line_width as f32, 0.0, width)
         };
+        let line_shift_x = typing_line_shift_x(scroll_offset, width);
         // --- 髣包ｽｳ鬯・汚・ｽ・ｮ繝ｻ・ｵ郢晢ｽｻ髢ｧ・ｲ陝ｯ・ｼ髫ｶ轣倡函郢晢ｽｦ驛｢・ｧ繝ｻ・ｭ驛｢・ｧ繝ｻ・ｹ驛｢譎∬か繝ｻ・ｼ陝ｲ・ｨ郢晢ｽｻ髫ｶ蝣､霍昴・・ｯ郢晢ｽｻ---
         let mut upper_segments = Vec::new();
         for (word_idx, word) in content_line.words.iter().enumerate() {
@@ -980,11 +1004,11 @@ fn build_typing_ui(
             segments: upper_segments,
             anchor: Anchor::Center,
             shift: Shift {
-                x: -scroll_offset / width as f32,
+                x: line_shift_x,
                 y: upper_y_shift_from_center,
             },
             align: Align {
-                horizontal: HorizontalAlign::Center,
+                horizontal: HorizontalAlign::Left,
                 vertical: VerticalAlign::Center,
             },
             font_size: base_font_size,
@@ -1000,10 +1024,7 @@ fn build_typing_ui(
         if let Some(state) = cached_cache {
             let current_cache = &state.current;
             let status_word_idx = status_word;
-            let cursor_x = state.cursor_in_line.max(0.0);
-            let viewport = width as f32;
-            let left_bound = (cursor_x - viewport).max(0.0);
-            let right_bound = cursor_x + viewport;
+            let (left_bound, right_bound) = typing_visible_line_bounds(scroll_offset, width);
 
             let active_segment_idx = if status_word < current_cache.word_segment_starts.len() {
                 let word_start = current_cache
@@ -1025,7 +1046,9 @@ fn build_typing_ui(
 
             let mut visible_start = current_cache
                 .segment_prefix_width
-                .partition_point(|value| *value < left_bound);
+                .partition_point(|value| *value <= left_bound)
+                .saturating_sub(1)
+                .min(current_cache.segments.len());
             let mut visible_end = current_cache
                 .segment_prefix_width
                 .partition_point(|value| *value <= right_bound);
@@ -1196,11 +1219,11 @@ fn build_typing_ui(
             segments: lower_segments,
             anchor: Anchor::Center,
             shift: Shift {
-                x: -scroll_offset / width as f32,
+                x: line_shift_x,
                 y: lower_y_shift_from_center,
             },
             align: Align {
-                horizontal: HorizontalAlign::Center,
+                horizontal: HorizontalAlign::Left,
                 vertical: VerticalAlign::Top,
             },
             font_size: base_font_size,
@@ -1435,6 +1458,23 @@ mod tests {
         (upper_width, lower_alignment)
     }
 
+    fn assert_line_left_matches_scroll_offset(
+        anchor: Anchor,
+        shift: Shift,
+        align: Align,
+        line_width: u32,
+        scroll_offset: f32,
+    ) {
+        assert!(matches!(align.horizontal, HorizontalAlign::Left));
+
+        let anchor_pos = calculate_anchor_position(anchor, shift, 240, 500);
+        let (line_left, _) = calculate_aligned_position(anchor_pos, line_width, 1, align);
+        assert!(
+            (line_left as f32 + scroll_offset).abs() <= 2.0,
+            "line_left {line_left} should render as -scroll_offset {scroll_offset}"
+        );
+    }
+
     #[test]
     fn active_plain_upper_segments_follow_lower_typed_colors() {
         let mut app = typing_app("#title Test\n色は句");
@@ -1522,5 +1562,69 @@ mod tests {
             lower_alignment.visible_start_width,
             cache.current.segment_prefix_width[first_visible_segment] as u32
         );
+    }
+
+    #[test]
+    fn cached_typing_rows_use_scroll_as_viewport_left() {
+        let mut app = typing_app(
+            "#title Test\n[a/a][b/b][c/c][d/d][e/e][f/f][g/g][h/h][i/i][j/j][k/k][l/l][m/m][n/n][o/o][p/p][q/q][r/r][s/s][t/t][u/u][v/v][w/w][x/x][y/y][z/z]",
+        );
+        for (index, c) in "abcdefghijklmnopqr".chars().enumerate() {
+            app.on_event(AppEvent::Char {
+                c,
+                timestamp: index as f64,
+            });
+        }
+        app.update(240, 500, 100.0);
+
+        let render_list = build_ui(&app, app.get_current_font(), 240, 500);
+        let Some(model) = app.typing_model() else {
+            panic!("typing model should exist");
+        };
+        let Some(ScrollCache::Ready(cache)) = app.scroll_cache() else {
+            panic!("scroll cache should be ready");
+        };
+        let scroll_offset = (model.scroll.scroll - cache.line_origin as f64) as f32;
+        let mut checked_rows = 0;
+
+        for item in &render_list {
+            match item {
+                Renderable::TypingUpper {
+                    anchor,
+                    shift,
+                    align,
+                    line_width,
+                    ..
+                } => {
+                    assert_line_left_matches_scroll_offset(
+                        *anchor,
+                        *shift,
+                        *align,
+                        *line_width,
+                        scroll_offset,
+                    );
+                    checked_rows += 1;
+                }
+                Renderable::TypingLower {
+                    anchor,
+                    shift,
+                    align,
+                    line_alignment,
+                    ..
+                } => {
+                    assert_line_left_matches_scroll_offset(
+                        *anchor,
+                        *shift,
+                        *align,
+                        line_alignment.full_line_width,
+                        scroll_offset,
+                    );
+                    checked_rows += 1;
+                }
+                _ => {}
+            }
+        }
+
+        assert_eq!(checked_rows, 2);
     }
 }

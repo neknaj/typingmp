@@ -2,31 +2,26 @@
 #![cfg_attr(feature = "uefi", no_std)]
 #![cfg_attr(feature = "uefi", no_main)]
 
-/// main関数 - featureフラグに応じて各バックエンドを起動
 #[cfg(not(feature = "uefi"))]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // "gui" featureが有効な場合にコンパイルされるブロック
     #[cfg(feature = "gui")]
     {
         println!("Starting GUI version... (Close the window or press ESC to exit)");
-        return rust_multibackend_app::gui::run();
+        rust_multibackend_app::gui::run()
     }
 
-    // "gui" が無効で "tui" が有効な場合にコンパイルされるブロック
     #[cfg(all(not(feature = "gui"), feature = "tui"))]
     {
         println!("Starting TUI version... (Press ESC to exit)");
-        return rust_multibackend_app::tui::run();
+        rust_multibackend_app::tui::run()
     }
 
-    // "mobile" featureが有効な場合にコンパイルされるブロック（デスクトップ上でのSlint UI テスト）
-    #[cfg(feature = "mobile")]
+    #[cfg(all(not(feature = "gui"), not(feature = "tui"), feature = "mobile"))]
     {
         println!("Starting Mobile (Slint) version...");
-        return rust_multibackend_app::mobile::run();
+        rust_multibackend_app::mobile::run()
     }
 
-    // デスクトップ用featureが一つも有効でない場合にコンパイルされるブロック
     #[cfg(not(any(feature = "gui", feature = "tui", feature = "mobile")))]
     {
         println!(
@@ -39,7 +34,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(feature = "uefi")]
 #[uefi::entry]
 fn efi_main() -> uefi::prelude::Status {
-    // ここで `run` 関数を呼び出すか、`run` 関数の内容を直接記述します。
-    // `run` 関数のシグネチャを合わせる必要があるかもしれません。
     rust_multibackend_app::uefi::run()
 }

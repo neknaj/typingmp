@@ -42,6 +42,89 @@ struct Cell {
     fg_color: Color,
 }
 
+#[derive(Clone, Copy)]
+#[cfg(not(feature = "uefi"))]
+struct TuiViewport {
+    width: usize,
+    height: usize,
+}
+
+#[cfg(not(feature = "uefi"))]
+impl TuiViewport {
+    const fn new(width: usize, height: usize) -> Self {
+        Self { width, height }
+    }
+}
+
+#[derive(Clone, Copy)]
+#[cfg(not(feature = "uefi"))]
+struct TuiTextPlacement {
+    anchor: Anchor,
+    shift: Shift,
+    align: Align,
+}
+
+#[cfg(not(feature = "uefi"))]
+impl TuiTextPlacement {
+    const fn new(anchor: Anchor, shift: Shift, align: Align) -> Self {
+        Self {
+            anchor,
+            shift,
+            align,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+#[cfg(not(feature = "uefi"))]
+struct TuiArtStyle {
+    font_size: FontSize,
+    is_braille: bool,
+    color: Color,
+}
+
+#[cfg(not(feature = "uefi"))]
+impl TuiArtStyle {
+    const fn new(font_size: FontSize, is_braille: bool, color: Color) -> Self {
+        Self {
+            font_size,
+            is_braille,
+            color,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+#[cfg(not(feature = "uefi"))]
+struct CellPosition {
+    x: isize,
+    y: isize,
+}
+
+#[cfg(not(feature = "uefi"))]
+impl CellPosition {
+    const fn new(x: isize, y: isize) -> Self {
+        Self { x, y }
+    }
+}
+
+#[derive(Clone, Copy)]
+#[cfg(not(feature = "uefi"))]
+struct ArtBlitPlacement {
+    width: usize,
+    position: CellPosition,
+}
+
+#[cfg(not(feature = "uefi"))]
+impl ArtBlitPlacement {
+    const fn new(width: usize, x: isize, y: isize) -> Self {
+        Self {
+            width,
+            position: CellPosition::new(x, y),
+        }
+    }
+}
+
 #[cfg(not(feature = "uefi"))]
 impl Default for Cell {
     fn default() -> Self {
@@ -183,6 +266,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         let mut current_buffer = vec![Cell::default(); cols * rows];
+        let viewport = TuiViewport::new(cols, rows);
 
         let current_font = app.get_current_font();
         // ui.build_uiにも仮想ピクセルサイズを渡す
@@ -208,25 +292,17 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 &mut current_buffer,
                                 current_font,
                                 &text,
-                                anchor,
-                                shift,
-                                align,
-                                font_size,
-                                cols,
-                                rows,
-                                is_braille,
-                                crossterm_color,
+                                TuiTextPlacement::new(anchor, shift, align),
+                                viewport,
+                                TuiArtStyle::new(font_size, is_braille, crossterm_color),
                             );
                         }
                         TuiDisplayMode::SimpleText => {
                             draw_plain_text(
                                 &mut current_buffer,
                                 &text,
-                                anchor,
-                                shift,
-                                align,
-                                cols,
-                                rows,
+                                TuiTextPlacement::new(anchor, shift, align),
+                                viewport,
                                 crossterm_color,
                             );
                         }
@@ -243,11 +319,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     draw_plain_text(
                         &mut current_buffer,
                         &text,
-                        anchor,
-                        shift,
-                        align,
-                        cols,
-                        rows,
+                        TuiTextPlacement::new(anchor, shift, align),
+                        viewport,
                         u32_to_crossterm_color(color),
                     );
                 }
@@ -278,50 +351,29 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 tui_renderer::render_text_to_art
                             };
 
-                            let (total_width_cells, total_width_pixels) = segments.iter().fold(
-                                (0_u32, 0.0_f32),
-                                |(acc_cells, acc_pixels), seg| {
-                                    let cells =
-                                        renderer(current_font, &seg.base_text, render_font_size).1
-                                            as u32;
-                                    let pixels = gui_renderer::measure_text(
-                                        current_font,
-                                        &seg.base_text,
-                                        font_size_px,
-                                    )
-                                    .0 as f32;
-                                    (acc_cells + cells, acc_pixels + pixels)
-                                },
-                            );
+                            let total_width_cells = segments
+                                .iter()
+                                .map(|seg| {
+                                    renderer(current_font, &seg.base_text, render_font_size).1
+                                        as u32
+                                })
+                                .sum::<u32>();
 
                             if total_width_cells == 0 {
                                 continue;
                             }
 
-                            let pixels_per_cell = if total_width_cells > 0 {
-                                total_width_pixels as f64 / total_width_cells as f64
-                            } else {
-                                1.0
-                            };
-                            let Some(typing_model) = app.typing_model() else {
-                                continue;
-                            };
-                            let scroll_offset_cells =
-                                (typing_model.scroll.scroll / pixels_per_cell).round() as i32;
-
                             let (_, _, line_total_height, line_ascent) =
                                 renderer(current_font, "|", render_font_size);
 
-                            let y_only_shift = Shift { x: 0.0, y: shift.y };
                             let anchor_pos =
-                                ui::calculate_anchor_position(anchor, y_only_shift, cols, rows);
-                            let (center_pen_x, line_start_y) = ui::calculate_aligned_position(
+                                ui::calculate_anchor_position(anchor, shift, cols, rows);
+                            let (mut pen_x, line_start_y) = ui::calculate_aligned_position(
                                 anchor_pos,
                                 total_width_cells,
                                 line_total_height as u32,
                                 align,
                             );
-                            let mut pen_x = center_pen_x - scroll_offset_cells;
                             let line_baseline_y = line_start_y + line_ascent as i32;
 
                             for seg in segments {
@@ -337,13 +389,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 let blit_y = line_baseline_y - char_ascent as i32;
                                 blit_art(
                                     &mut current_buffer,
-                                    cols,
-                                    rows,
+                                    viewport,
                                     &art_buffer,
-                                    art_width,
-                                    0,
-                                    pen_x as isize,
-                                    blit_y as isize,
+                                    ArtBlitPlacement::new(
+                                        art_width,
+                                        pen_x as isize,
+                                        blit_y as isize,
+                                    ),
                                     color,
                                 );
 
@@ -354,7 +406,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                         let (ruby_art_buffer, ruby_art_width, ruby_art_height, _) =
                                             tui_renderer::render_text_to_braille_art(
                                                 current_font,
-                                                &ruby,
+                                                ruby,
                                                 ruby_font_size_px,
                                             );
                                         let ruby_anchor_pos =
@@ -370,13 +422,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                         );
                                         blit_art(
                                             &mut current_buffer,
-                                            cols,
-                                            rows,
+                                            viewport,
                                             &ruby_art_buffer,
-                                            ruby_art_width,
-                                            ruby_art_height,
-                                            ruby_x as isize,
-                                            ruby_y as isize,
+                                            ArtBlitPlacement::new(
+                                                ruby_art_width,
+                                                ruby_x as isize,
+                                                ruby_y as isize,
+                                            ),
                                             ruby_color,
                                         );
                                     } else {
@@ -508,22 +560,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             } else {
                                 1.0
                             };
-                            let scroll_offset_cells =
-                                (typing_model.scroll.scroll / pixels_per_cell).round() as i32;
 
                             let (_, _, line_total_height, line_ascent) =
                                 renderer(current_font, "|", render_font_size);
 
-                            let y_only_shift = Shift { x: 0.0, y: shift.y };
                             let anchor_pos =
-                                ui::calculate_anchor_position(anchor, y_only_shift, cols, rows);
-                            let (center_pen_x, line_start_y) = ui::calculate_aligned_position(
+                                ui::calculate_anchor_position(anchor, shift, cols, rows);
+                            let (mut pen_x, line_start_y) = ui::calculate_aligned_position(
                                 anchor_pos,
                                 total_width_cells,
                                 line_total_height as u32,
                                 align,
                             );
-                            let mut pen_x = center_pen_x - scroll_offset_cells;
                             pen_x += (line_alignment.visible_start_width as f64 / pixels_per_cell)
                                 .round() as i32;
                             let line_baseline_y = line_start_y + line_ascent as i32;
@@ -546,13 +594,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                         let blit_y = line_baseline_y - char_ascent as i32;
                                         blit_art(
                                             &mut current_buffer,
-                                            cols,
-                                            rows,
+                                            viewport,
                                             &art_buffer,
-                                            art_width,
-                                            0,
-                                            pen_x as isize,
-                                            blit_y as isize,
+                                            ArtBlitPlacement::new(
+                                                art_width,
+                                                pen_x as isize,
+                                                blit_y as isize,
+                                            ),
                                             color,
                                         );
 
@@ -585,13 +633,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                                     );
                                                 blit_art(
                                                     &mut current_buffer,
-                                                    cols,
-                                                    rows,
+                                                    viewport,
                                                     &ruby_art_buffer,
-                                                    ruby_art_width,
-                                                    ruby_art_height,
-                                                    ruby_x as isize,
-                                                    ruby_y as isize,
+                                                    ArtBlitPlacement::new(
+                                                        ruby_art_width,
+                                                        ruby_x as isize,
+                                                        ruby_y as isize,
+                                                    ),
                                                     color,
                                                 );
                                             } else {
@@ -677,13 +725,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                                 let blit_y = line_baseline_y - char_ascent as i32;
                                                 blit_art(
                                                     &mut current_buffer,
-                                                    cols,
-                                                    rows,
+                                                    viewport,
                                                     &art_buffer,
-                                                    art_width,
-                                                    0,
-                                                    pen_x as isize,
-                                                    blit_y as isize,
+                                                    ArtBlitPlacement::new(
+                                                        art_width,
+                                                        pen_x as isize,
+                                                        blit_y as isize,
+                                                    ),
                                                     color,
                                                 );
                                                 pen_x += art_width as i32;
@@ -864,30 +912,30 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(not(feature = "uefi"))]
 fn blit_art(
     buffer: &mut [Cell],
-    buf_w: usize,
-    buf_h: usize,
+    viewport: TuiViewport,
     art: &[char],
-    art_w: usize,
-    _art_h: usize,
-    start_x: isize,
-    start_y: isize,
+    placement: ArtBlitPlacement,
     color: Color,
 ) {
-    if art_w == 0 {
+    if placement.width == 0 {
         return;
     }
-    let art_h = if art.is_empty() { 0 } else { art.len() / art_w };
+    let art_h = if art.is_empty() {
+        0
+    } else {
+        art.len() / placement.width
+    };
 
     for y in 0..art_h {
-        let target_y = start_y + y as isize;
-        if target_y >= 0 && target_y < buf_h as isize {
-            for x in 0..art_w {
-                let target_x = start_x + x as isize;
-                if target_x >= 0 && target_x < buf_w as isize {
-                    let art_char = art[y * art_w + x];
+        let target_y = placement.position.y + y as isize;
+        if target_y >= 0 && target_y < viewport.height as isize {
+            for x in 0..placement.width {
+                let target_x = placement.position.x + x as isize;
+                if target_x >= 0 && target_x < viewport.width as isize {
+                    let art_char = art[y * placement.width + x];
                     if art_char != ' ' {
                         // Don't blit spaces
-                        let idx = target_y as usize * buf_w + target_x as usize;
+                        let idx = target_y as usize * viewport.width + target_x as usize;
                         buffer[idx] = Cell {
                             char: art_char,
                             fg_color: color,
@@ -910,23 +958,28 @@ fn measure_plain_text(text: &str) -> (u32, u32) {
 fn draw_plain_text(
     buffer: &mut [Cell],
     text: &str,
-    anchor: Anchor,
-    shift: Shift,
-    align: Align,
-    width: usize,
-    height: usize,
+    placement: TuiTextPlacement,
+    viewport: TuiViewport,
     color: Color,
 ) {
     let (text_width, text_height) = measure_plain_text(text);
-    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
+    let anchor_pos = ui::calculate_anchor_position(
+        placement.anchor,
+        placement.shift,
+        viewport.width,
+        viewport.height,
+    );
     let (start_x, start_y) =
-        ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
-    draw_plain_text_at(buffer, text, start_x, start_y, width, color);
+        ui::calculate_aligned_position(anchor_pos, text_width, text_height, placement.align);
+    draw_plain_text_at(buffer, text, start_x, start_y, viewport.width, color);
 }
 
 /// 指定した座標にプレーンテキストを描画するヘルパー関数
 #[cfg(not(feature = "uefi"))]
 fn draw_plain_text_at(buffer: &mut [Cell], text: &str, x: i32, y: i32, width: usize, color: Color) {
+    if width == 0 {
+        return;
+    }
     if y < 0 || y >= (buffer.len() / width) as i32 {
         return;
     }
@@ -950,26 +1003,22 @@ fn draw_art_text(
     buffer: &mut [Cell],
     font: &FontVec,
     text: &str,
-    anchor: Anchor,
-    shift: Shift,
-    align: Align,
-    font_size: FontSize,
-    cols: usize,
-    rows: usize,
-    is_braille: bool,
-    color: Color,
+    placement: TuiTextPlacement,
+    viewport: TuiViewport,
+    style: TuiArtStyle,
 ) {
-    let target_art_height_in_cells = calculate_target_art_height(font_size, cols, rows);
+    let target_art_height_in_cells =
+        calculate_target_art_height(style.font_size, viewport.width, viewport.height);
     if target_art_height_in_cells == 0 {
         return;
     }
 
     let mut font_size_px = target_art_height_in_cells as f32 * tui_renderer::ART_V_PIXELS_PER_CELL;
-    if is_braille {
+    if style.is_braille {
         font_size_px *= 2.0;
     }
 
-    let (art_buffer, art_width, art_height, _) = if is_braille {
+    let (art_buffer, art_width, art_height, _) = if style.is_braille {
         tui_renderer::render_text_to_braille_art(font, text, font_size_px)
     } else {
         tui_renderer::render_text_to_art(font, text, font_size_px)
@@ -979,20 +1028,25 @@ fn draw_art_text(
         return;
     }
 
-    let anchor_pos = ui::calculate_anchor_position(anchor, shift, cols, rows);
-    let (start_x, start_y) =
-        ui::calculate_aligned_position(anchor_pos, art_width as u32, art_height as u32, align);
+    let anchor_pos = ui::calculate_anchor_position(
+        placement.anchor,
+        placement.shift,
+        viewport.width,
+        viewport.height,
+    );
+    let (start_x, start_y) = ui::calculate_aligned_position(
+        anchor_pos,
+        art_width as u32,
+        art_height as u32,
+        placement.align,
+    );
 
     blit_art(
         buffer,
-        cols,
-        rows,
+        viewport,
         &art_buffer,
-        art_width,
-        art_height,
-        start_x as isize,
-        start_y as isize,
-        color,
+        ArtBlitPlacement::new(art_width, start_x as isize, start_y as isize),
+        style.color,
     );
 }
 

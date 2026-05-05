@@ -8,7 +8,7 @@ mod view;
 
 use crate::app::scroll::{
     build_scroll_line_cache, cursor_position_from_status, line_origin_from_previous,
-    line_origin_from_start, ScrollCacheState,
+    line_origin_from_start, typing_line_scroll_position, ScrollCacheState,
 };
 #[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
 use crate::io::FontEntry;
@@ -28,7 +28,7 @@ use crate::typing;
 use crate::ui; // typing_rendererの代わりにuiをインポート
 use ab_glyph::FontVec;
 
-pub(crate) use scroll::ScrollCache;
+pub(crate) use scroll::{typing_line_scroll_offset, ScrollCache};
 pub use view::AppSnapshot;
 
 // ビルドスクリプトによってOUT_DIRに生成されたファイルを取り込む
@@ -550,10 +550,21 @@ impl App {
                 );
                 let cursor_world = line_origin + cursor_in_line;
 
-                let mut target_scroll = f64::from(cursor_world) - (f64::from(gap_width) * 0.5);
+                let scroll_position = typing_line_scroll_position(
+                    line_origin,
+                    current_cache.total_width,
+                    cursor_in_line,
+                    width,
+                );
+                let mut target_scroll = scroll_position.target;
                 if let Some(ScrollCache::Ready(previous_cache)) = &self.scroll_cache {
-                    let previous_target = previous_cache.cursor_world as f64
-                        - (previous_cache.gap_width as f64 * 0.5);
+                    let previous_position = typing_line_scroll_position(
+                        previous_cache.line_origin,
+                        previous_cache.current.total_width,
+                        previous_cache.cursor_in_line,
+                        previous_cache.width,
+                    );
+                    let previous_target = previous_position.target;
                     if (cursor_world >= previous_cache.cursor_world
                         && target_scroll < previous_target)
                         || (cursor_world < previous_cache.cursor_world
@@ -570,12 +581,12 @@ impl App {
                 let now = model.scroll.scroll;
                 let diff = target_scroll - now;
                 model.scroll.scroll += diff * 7.5 * (clamped_delta_time / 1000.0);
+                model.scroll.max = scroll_position.max;
 
                 self.scroll_cache = Some(ScrollCache::Ready(ScrollCacheState {
                     width,
                     height,
                     font_pixel_size: base_pixel_font_size,
-                    gap_width,
                     line_origin,
                     cursor_in_line,
                     cursor_world,
