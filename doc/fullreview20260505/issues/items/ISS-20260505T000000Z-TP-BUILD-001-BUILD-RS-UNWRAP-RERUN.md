@@ -2,12 +2,12 @@
 id: ISS-20260505T000000Z-TP-BUILD-001-BUILD-RS-UNWRAP-RERUN
 title: "build.rsがunwrapとrerun-if-changed不足に依存している"
 area: build
-status: open
-resolved: false
+status: verified
+resolved: true
 priority: P2
 type: build
 created: 2026-05-05
-updated: 2026-05-05
+updated: 2026-05-06
 target: "build.rs, examples/"
 legacy_id: TP-BUILD-001
 source: "doc/fullreview20260505/quality/static-validation.md"

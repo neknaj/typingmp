@@ -1,68 +1,124 @@
 use std::env;
+use std::error::Error;
 use std::fs;
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-fn main() {
-    // Slint UI コンパイル（mobile feature 有効時のみ）
-    if std::env::var("CARGO_FEATURE_MOBILE").is_ok() {
-        slint_build::compile("ui/mobile.slint").expect("Slint compile error");
+fn main() -> Result<(), Box<dyn Error>> {
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=examples");
+    println!("cargo:rerun-if-changed=ui/mobile.slint");
+
+    if env::var("CARGO_FEATURE_MOBILE").is_ok() {
+        slint_build::compile("ui/mobile.slint").map_err(|error| {
+            io::Error::other(format!("failed to compile ui/mobile.slint: {error}"))
+        })?;
     }
 
-    let out_dir = env::var_os("OUT_DIR").unwrap();
-    let dest_path = Path::new(&out_dir).join("problem_files.rs");
-    let mut f = fs::File::create(&dest_path).unwrap();
-
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let out_dir = required_env_path("OUT_DIR")?;
+    let dest_path = out_dir.join("problem_files.rs");
+    let manifest_dir = required_env_path("CARGO_MANIFEST_DIR")?;
     let examples_dir = manifest_dir.join("examples");
-    let mut problem_files = Vec::new();
+    let problem_files = discover_problem_files(&manifest_dir, &examples_dir)?;
 
-    if examples_dir.is_dir() {
-        for entry in fs::read_dir(examples_dir).unwrap() {
-            let entry = entry.unwrap();
-            let path = entry.path();
-            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("ntq") {
-                if let Some(file_stem) = path.file_stem().and_then(|s| s.to_str()) {
-                    // プロジェクトルートからの相対パスを保存
-                    let relative_path = path
-                        .strip_prefix(&manifest_dir)
-                        .unwrap()
-                        .to_str()
-                        .unwrap()
-                        .replace('\\', "/");
-                    problem_files.push((file_stem.to_string(), relative_path.to_string()));
-                }
-            }
-        }
-    }
-
-    // ファイル名でソート
-    problem_files.sort_by(|a, b| a.0.cmp(&b.0));
-
-    // 問題ファイルの名前の静的配列を生成
-    writeln!(f, "pub const PROBLEM_FILES_NAMES: &[&str] = &[").unwrap();
-    for (name, _) in &problem_files {
-        writeln!(f, "    \"{}\",", name).unwrap();
-    }
-    writeln!(f, "];\n").unwrap();
-
-    // 問題ファイルの内容を動的に取得するための関数を生成
-    writeln!(
-        f,
-        "pub fn get_problem_content(index: usize) -> &'static str {{"
-    )
-    .unwrap();
-    writeln!(f, "    match index {{").unwrap();
-    for (i, (_, path)) in problem_files.iter().enumerate() {
-        // include_str! にはプロジェクトルートからの相対パスを渡す
-        writeln!(
-            f,
-            "        {} => include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/{}\")),",
-            i, path
+    let mut output = fs::File::create(&dest_path).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("failed to create {}: {error}", dest_path.display()),
         )
-        .unwrap();
+    })?;
+    write_problem_file_module(&mut output, &problem_files)?;
+
+    Ok(())
+}
+
+fn required_env_path(name: &str) -> io::Result<PathBuf> {
+    env::var_os(name).map(PathBuf::from).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("required environment variable {name} is not set"),
+        )
+    })
+}
+
+fn discover_problem_files(
+    manifest_dir: &Path,
+    examples_dir: &Path,
+) -> io::Result<Vec<(String, String)>> {
+    let mut problem_files = Vec::new();
+    if !examples_dir.is_dir() {
+        return Ok(problem_files);
     }
-    writeln!(f, "        _ => \"#title Error\\nFile not found.\",").unwrap();
-    writeln!(f, "    }}").unwrap();
-    writeln!(f, "}}").unwrap();
+
+    for entry in fs::read_dir(examples_dir).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("failed to read {}: {error}", examples_dir.display()),
+        )
+    })? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() || path.extension().and_then(|value| value.to_str()) != Some("ntq") {
+            continue;
+        }
+
+        println!("cargo:rerun-if-changed={}", path.display());
+        let file_stem = path_to_utf8(
+            path.file_stem()
+                .ok_or_else(|| invalid_path("problem file has no file stem", &path))?,
+            &path,
+        )?;
+        let relative_path = path.strip_prefix(manifest_dir).map_err(|error| {
+            invalid_path(&format!("path is outside manifest dir: {error}"), &path)
+        })?;
+        let relative_path = path_to_utf8(relative_path.as_os_str(), &path)?.replace('\\', "/");
+        problem_files.push((file_stem.to_string(), relative_path));
+    }
+
+    problem_files.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(problem_files)
+}
+
+fn path_to_utf8<'a>(value: &'a std::ffi::OsStr, path: &Path) -> io::Result<&'a str> {
+    value.to_str().ok_or_else(|| {
+        invalid_path(
+            "problem paths must be valid UTF-8 to generate Rust source",
+            path,
+        )
+    })
+}
+
+fn invalid_path(message: &str, path: &Path) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("{message}: {}", path.display()),
+    )
+}
+
+fn write_problem_file_module(
+    writer: &mut dyn Write,
+    problem_files: &[(String, String)],
+) -> io::Result<()> {
+    writeln!(writer, "pub const PROBLEM_FILES_NAMES: &[&str] = &[")?;
+    for (name, _) in problem_files {
+        writeln!(writer, "    {name:?},")?;
+    }
+    writeln!(writer, "];\n")?;
+
+    writeln!(
+        writer,
+        "pub fn get_problem_content(index: usize) -> &'static str {{"
+    )?;
+    writeln!(writer, "    match index {{")?;
+    for (index, (_, path)) in problem_files.iter().enumerate() {
+        writeln!(
+            writer,
+            "        {index} => include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/\", {path:?})),"
+        )?;
+    }
+    writeln!(writer, "        _ => \"#title Error\\nFile not found.\",")?;
+    writeln!(writer, "    }}")?;
+    writeln!(writer, "}}")?;
+
+    Ok(())
 }

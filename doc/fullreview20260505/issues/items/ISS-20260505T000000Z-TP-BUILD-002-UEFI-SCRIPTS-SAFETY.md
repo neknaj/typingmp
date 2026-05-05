@@ -2,12 +2,12 @@
 id: ISS-20260505T000000Z-TP-BUILD-002-UEFI-SCRIPTS-SAFETY
 title: "UEFI実行scriptsのpath解決と破壊的操作が安全境界として弱い"
 area: build
-status: open
-resolved: false
+status: verified
+resolved: true
 priority: P2
 type: build
 created: 2026-05-05
-updated: 2026-05-05
+updated: 2026-05-06
 target: "run_uefi.ps1, run_uefi_hyperv.ps1"
 legacy_id: TP-BUILD-002
 source: "doc/fullreview20260505/security/dev-tools.md"

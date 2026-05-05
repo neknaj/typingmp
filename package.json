@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "test:serve": "node --test serve.test.js"
+  },
   "dependencies": {
     "ws": "^8.18.3"
   }
