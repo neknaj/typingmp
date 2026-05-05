@@ -35,3 +35,9 @@ web input event で `prevent_default()` を呼んでも、input event の実際�
 - `TP-WEB-001`
 - `TP-WASM-001`
 - `TP-CORE-001`
+
+## 実装進捗: T14
+
+`index.html` から初回 `pointerdown` の clipboard 書き込みを削除した。keyboard mode の `localStorage` は `readStorageItem` / `writeStorageItem` helper に閉じ、storage 拒否時も通常操作を継続する。
+
+custom problem storage の失敗は Rust 側で `App::report_visible_error()` に流し、画面 status として利用者に見えるようにした。

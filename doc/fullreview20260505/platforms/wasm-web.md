@@ -56,3 +56,9 @@ WASM/web は機能量が多い一方で、build-time env、DOM unwrap、storage 
 `src/backend.rs` に backend 共通の `BackendError` / `BackendErrorKind` を追加した。WASM startup は `window`、`document`、`body`、canvas 2D context、初回 resize callback、`ImageData`、RAF の失敗を `JsValue` / console-visible error に変換し、host page 欠落時に `unwrap()` で落ちない形へ寄せた。
 
 localStorage の user-facing diagnostic と clipboard side effect は T14 の対象として残す。
+
+## 実装進捗: T14
+
+WASM startup failure は `show_startup_error()` で `#canvas-wrapper` または `body` に表示する。custom problem の localStorage load / save failure は `App::report_visible_error()` へ流し、status 表示で利用者に見えるようにした。keyboard mode の `localStorage` 操作は browser storage 制限で例外が出ても起動を止めない helper に閉じた。
+
+`index.html` の初回 `pointerdown` で clipboard を書き換える処理は削除した。web 版の通常操作は clipboard API を呼ばない。

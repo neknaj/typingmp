@@ -399,7 +399,19 @@
     // localStorage に保存し次回起動時に復元。デフォルト: app
     // =============================================
     const LS_KB_KEY = 'typingmp_kb_mode';
-    let useAppKeyboard = (localStorage.getItem(LS_KB_KEY) ?? 'app') === 'app';
+    const readStorageItem = (key) => {
+        try {
+            return window.localStorage.getItem(key);
+        } catch (_err) {
+            return null;
+        }
+    };
+    const writeStorageItem = (key, value) => {
+        try {
+            window.localStorage.setItem(key, value);
+        } catch (_err) {}
+    };
+    let useAppKeyboard = (readStorageItem(LS_KB_KEY) ?? 'app') === 'app';
     let hiddenInput = null; // WASM init 後に取得
 
     const applyKeyboardMode = () => {
@@ -426,7 +438,7 @@
             btnFlick.textContent = useAppKeyboard ? '⌨' : '⌨OS';
             btnFlick.style.borderColor = useAppKeyboard ? '#44aa66' : '#446';
         }
-        localStorage.setItem(LS_KB_KEY, useAppKeyboard ? 'app' : 'device');
+        writeStorageItem(LS_KB_KEY, useAppKeyboard ? 'app' : 'device');
     };
 
     const toggleKeyboardMode = () => {
@@ -526,13 +538,6 @@
             });
         }
         applyKeyboardMode(); // 保存済みモードを適用
-
-        const copyToClipboardOnce = async () => {
-            try {
-                await navigator.clipboard.writeText('Neknaj Typing MP wasm edition');
-            } catch (err) {}
-        };
-        document.body.addEventListener('pointerdown', copyToClipboardOnce, { once: true });
 
         const adjustHeight = () => {
             if (window.visualViewport) {

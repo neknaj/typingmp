@@ -251,7 +251,7 @@ pub fn start() {
     // フォント取得とアプリ初期化を非同期で実行する
     wasm_bindgen_futures::spawn_local(async {
         if let Err(e) = start_async().await {
-            web_sys::console::error_1(&e);
+            show_startup_error(&e);
         }
     });
 }
@@ -329,7 +329,11 @@ async fn start_async() -> Result<(), JsValue> {
         let mut app_mut = app.borrow_mut();
         match WebCustomProblemStore.load_custom_problems() {
             Ok(problems) => app_mut.set_custom_problems(problems),
-            Err(err) => web_sys::console::warn_1(&JsValue::from_str(&err.to_string())),
+            Err(err) => report_provider_error(
+                &mut app_mut,
+                "failed to load custom problems from localStorage",
+                err,
+            ),
         }
     }
     app.borrow_mut().on_event(AppEvent::Start);
@@ -382,7 +386,11 @@ async fn start_async() -> Result<(), JsValue> {
                         if let Err(err) =
                             WebCustomProblemStore.save_custom_problems(app_mut.custom_problems())
                         {
-                            web_sys::console::warn_1(&JsValue::from_str(&err.to_string()));
+                            report_provider_error(
+                                &mut app_mut,
+                                "failed to save custom problems to localStorage",
+                                err,
+                            );
                         }
                     }
                     // 同一ファイルを再度選択できるようにリセット
@@ -571,7 +579,11 @@ async fn start_async() -> Result<(), JsValue> {
                         if let Err(err) =
                             WebCustomProblemStore.save_custom_problems(app.custom_problems())
                         {
-                            web_sys::console::warn_1(&JsValue::from_str(&err.to_string()));
+                            report_provider_error(
+                                &mut app,
+                                "failed to save custom problems to localStorage",
+                                err,
+                            );
                         }
                     }
                 }
@@ -989,6 +1001,34 @@ async fn start_async() -> Result<(), JsValue> {
 
 fn js_backend_error(error: BackendError) -> JsValue {
     JsValue::from_str(&error.to_string())
+}
+
+fn js_value_to_string(value: &JsValue) -> String {
+    value
+        .as_string()
+        .unwrap_or_else(|| "unknown JavaScript error".to_string())
+}
+
+fn show_startup_error(error: &JsValue) {
+    web_sys::console::error_1(error);
+    let message = format!("Failed to start typingmp: {}", js_value_to_string(error));
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Some(document) = window.document() else {
+        return;
+    };
+    if let Some(wrapper) = document.get_element_by_id("canvas-wrapper") {
+        wrapper.set_text_content(Some(&message));
+    } else if let Some(body) = document.body() {
+        body.set_text_content(Some(&message));
+    }
+}
+
+fn report_provider_error(app: &mut App, context: &str, error: ProviderError) {
+    let message = format!("{context}: {error}");
+    web_sys::console::warn_1(&JsValue::from_str(&message));
+    app.report_visible_error(message);
 }
 
 fn schedule_next_frame(callback: &Rc<RefCell<Option<Closure<dyn FnMut()>>>>) {
