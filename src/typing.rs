@@ -4,16 +4,9 @@
 extern crate alloc;
 
 #[cfg(feature = "uefi")]
-use alloc::{
-    format,
-    string::{String, ToString},
-    vec::Vec,
-};
+use alloc::{format, string::String, vec::Vec};
 #[cfg(not(feature = "uefi"))]
-use std::{
-    string::{String, ToString},
-    vec::Vec,
-};
+use std::{string::String, vec::Vec};
 
 use crate::model::{
     Content, Model, ResultModel, Segment, TypingCorrectnessChar, TypingCorrectnessContent,
@@ -66,7 +59,7 @@ fn normalize_typing_char(c: char) -> char {
         _ => {}
     }
     let lower = c.to_lowercase().next().unwrap_or(c);
-    if lower >= 'ァ' && lower <= 'ヶ' {
+    if ('ァ'..='ヶ').contains(&lower) {
         core::char::from_u32(lower as u32 - 0x60).unwrap_or(lower)
     } else {
         lower
@@ -74,14 +67,11 @@ fn normalize_typing_char(c: char) -> char {
 }
 
 fn is_n_auto_commit_trigger(unconfirmed: &[char], input_lower: char, target_slice: &str) -> bool {
-    match (unconfirmed, target_slice.chars().next()) {
+    matches!(
+        (unconfirmed, target_slice.chars().next()),
         (['n'], Some('ん'))
-            if !matches!(input_lower, 'a' | 'i' | 'u' | 'e' | 'o' | 'n' | 'y' | '\'') =>
-        {
-            true
-        }
-        _ => false,
-    }
+            if !matches!(input_lower, 'a' | 'i' | 'u' | 'e' | 'o' | 'n' | 'y' | '\'')
+    )
 }
 
 fn build_current_input_lower(unconfirmed: &[char], input_lower: char) -> String {
@@ -273,7 +263,7 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
             .user_input
             .last()
             .and_then(|s| s.inputs.last())
-            .map_or(true, |i| (current_time - i.timestamp) > 1000.0)
+            .is_none_or(|i| (current_time - i.timestamp) > 1000.0)
     {
         model.user_input.push(TypingSession {
             line: model.status.line,
@@ -388,10 +378,7 @@ pub fn key_input(mut model: TypingModel, input: char, timestamp: f64) -> Model {
     } else {
         model.total_miss_count += 1;
     }
-    if model
-        .first_input_time
-        .map_or(true, |first| timestamp < first)
-    {
+    if model.first_input_time.is_none_or(|first| timestamp < first) {
         model.first_input_time = Some(timestamp);
     }
     model.last_input_time = Some(
@@ -448,10 +435,7 @@ fn segment_target_reading_static(seg: &Segment) -> String {
     match seg {
         Segment::Plain { text } => text.clone(),
         Segment::Annotated { reading, .. } => reading.clone(),
-        Segment::Anno { inner, .. } => inner
-            .iter()
-            .map(|s| segment_target_reading_static(s))
-            .collect(),
+        Segment::Anno { inner, .. } => inner.iter().map(segment_target_reading_static).collect(),
     }
 }
 

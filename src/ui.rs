@@ -742,7 +742,7 @@ fn segment_base_text(seg: &Segment) -> String {
     match seg {
         Segment::Plain { text } => text.clone(),
         Segment::Annotated { base, .. } => base.clone(),
-        Segment::Anno { inner, .. } => inner.iter().map(|s| segment_base_text(s)).collect(),
+        Segment::Anno { inner, .. } => inner.iter().map(segment_base_text).collect(),
     }
 }
 
@@ -751,7 +751,7 @@ fn segment_reading_text(seg: &Segment) -> String {
     match seg {
         Segment::Plain { text } => text.clone(),
         Segment::Annotated { reading, .. } => reading.clone(),
-        Segment::Anno { inner, .. } => inner.iter().map(|s| segment_reading_text(s)).collect(),
+        Segment::Anno { inner, .. } => inner.iter().map(segment_reading_text).collect(),
     }
 }
 
@@ -761,14 +761,8 @@ fn segment_display_parts(seg: &Segment) -> (String, Option<String>, Option<Strin
         Segment::Plain { text } => (text.clone(), None, None),
         Segment::Annotated { base, reading } => (base.clone(), Some(reading.clone()), None),
         Segment::Anno { inner, annotation } => {
-            let base = inner
-                .iter()
-                .map(|s| segment_base_text(s))
-                .collect::<String>();
-            let reading = inner
-                .iter()
-                .map(|s| segment_reading_text(s))
-                .collect::<String>();
+            let base = inner.iter().map(segment_base_text).collect::<String>();
+            let reading = inner.iter().map(segment_reading_text).collect::<String>();
             let ruby = if reading.is_empty() {
                 None
             } else {
@@ -784,10 +778,7 @@ fn is_word_correct(word: &TypingCorrectnessWord) -> bool {
 }
 
 fn is_segment_correct(segment: &TypingCorrectnessSegment) -> bool {
-    !segment
-        .chars
-        .iter()
-        .any(|c| *c == TypingCorrectnessChar::Incorrect)
+    !segment.chars.contains(&TypingCorrectnessChar::Incorrect)
 }
 
 fn build_typing_ui(
@@ -801,9 +792,6 @@ fn build_typing_ui(
     render_list.push(Renderable::Background { gradient });
 
     if let Some(model) = &app.typing_model {
-        // --- 驛｢譎｢・ｽ・ｬ驛｢・ｧ繝ｻ・､驛｢・ｧ繝ｻ・｢驛｢・ｧ繝ｻ・ｦ驛｢譎槭Γ繝ｻ・ｪ繝ｻ・ｿ髫ｰ・ｨ繝ｻ・ｴ髯区ｻゑｽｽ・､ ---
-        let v_offset = 0.08; // UI髯ｷ闌ｨ・ｽ・ｨ髣厄ｽｴ髦ｮ蜻ｻ・ｽ螳壼初闕ｵ譏ｶ繝ｻ驍ｵ・ｺ陞｢・ｹ繝ｻ閾･・ｸ・ｺ陷ｷ譎画ｨｪ髯ｷ・ｷ郢晢ｽｻ
-                             // --- 髯懶｣ｰ陜楢ｶ｣・ｽ・｡陟募ｾ娯蔓驛｢・ｧ繝ｻ・､驛｢譎冗樟・取辨蜍励・・ｨ鬩穂ｼ夲ｽｽ・ｺ ---
         render_list.push(Renderable::BigText {
             text: model.content.title.to_string(),
             anchor: Anchor::TopCenter,
@@ -873,7 +861,7 @@ fn build_typing_ui(
                             .words
                             .get(word_idx)
                             .and_then(|w| w.segments.get(seg_idx))
-                            .map_or(false, is_segment_correct);
+                            .is_some_and(is_segment_correct);
                         if is_current_segment_correct {
                             UpperSegmentState::Correct
                         } else {
@@ -985,7 +973,7 @@ fn build_typing_ui(
                             correctness_word
                                 .segments
                                 .get(cache_seg.segment_index)
-                                .map_or(false, is_segment_correct)
+                                .is_some_and(is_segment_correct)
                         }
                         _ => false,
                     };
@@ -1071,7 +1059,7 @@ fn build_typing_ui(
                         let is_correct = active_correctness_word
                             .segments
                             .get(seg_idx)
-                            .map_or(false, is_segment_correct);
+                            .is_some_and(is_segment_correct);
                         let width =
                             gui_renderer::measure_text(font, &base_text, base_pixel_font_size).0;
                         lower_segments.push(LowerTypingSegment::Completed {
@@ -1160,7 +1148,7 @@ fn build_typing_ui(
         // --- 驛｢・ｧ繝ｻ・ｹ驛｢譏ｴ繝ｻ郢晢ｽｻ驛｢・ｧ繝ｻ・ｿ驛｢・ｧ繝ｻ・ｹ驛｢譏懶ｽｻ・｣郢晢ｽｭ驛｢譎｢・ｽ・ｫ ---
         let metrics = typing::calculate_total_metrics(model);
         let time = metrics.total_time / 1000.0;
-        let status_items = vec![
+        let status_items = [
             format!(
                 "Progress: {} / {}",
                 model.status.line as usize + 1,
@@ -1231,7 +1219,7 @@ fn build_result_ui(app: &App, render_list: &mut Vec<Renderable>, gradient: Gradi
 
     if let Some(result) = &app.result_model {
         let metrics = crate::typing::calculate_total_metrics(&result.typing_model);
-        let result_texts = vec![
+        let result_texts = [
             format!("Typed Chars: {}", metrics.type_count),
             format!("Misses: {}", metrics.miss_count),
             format!("Time: {:.2}s", metrics.total_time / 1000.0),

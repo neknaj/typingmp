@@ -97,7 +97,7 @@ fn tokenize_line(line: &str) -> Vec<Token> {
 }
 
 // ruby記法 [base/reading] をパースする。pos は '[' の位置を指す
-fn parse_ruby(chars: &Vec<char>, start: usize) -> (Segment, usize) {
+fn parse_ruby(chars: &[char], start: usize) -> (Segment, usize) {
     let mut pos = start + 1; // '[' をスキップ
     let mut base = String::new();
     while pos < chars.len() {
@@ -139,7 +139,7 @@ fn parse_ruby(chars: &Vec<char>, start: usize) -> (Segment, usize) {
 // anno記法 {inner/annotation} をパースする。pos は '{' の位置を指す
 // inner は ruby ([base/reading]) とプレーンテキストの混合を許容する
 // '[...]' の内部の '/' は anno の区切りとして扱わない
-fn parse_anno(chars: &Vec<char>, start: usize) -> (Segment, usize) {
+fn parse_anno(chars: &[char], start: usize) -> (Segment, usize) {
     let mut pos = start + 1; // '{' をスキップ
     let mut inner: Vec<Segment> = Vec::new();
     let mut plain_buf = String::new();

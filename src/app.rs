@@ -33,7 +33,7 @@ fn seg_base_text_owned(seg: &Segment) -> String {
     match seg {
         Segment::Plain { text } => text.clone(),
         Segment::Annotated { base, .. } => base.clone(),
-        Segment::Anno { inner, .. } => inner.iter().map(|s| seg_base_text_owned(s)).collect(),
+        Segment::Anno { inner, .. } => inner.iter().map(seg_base_text_owned).collect(),
     }
 }
 
@@ -42,7 +42,7 @@ fn seg_reading_text_owned(seg: &Segment) -> String {
     match seg {
         Segment::Plain { text } => text.clone(),
         Segment::Annotated { reading, .. } => reading.clone(),
-        Segment::Anno { inner, .. } => inner.iter().map(|s| seg_reading_text_owned(s)).collect(),
+        Segment::Anno { inner, .. } => inner.iter().map(seg_reading_text_owned).collect(),
     }
 }
 
@@ -273,7 +273,7 @@ fn build_scroll_line_cache(
         }
     }
 
-    for (word_index, word) in line.words.iter().enumerate() {
+    for word_index in 0..line.words.len() {
         let start = word_segment_starts.get(word_index).copied().unwrap_or(0);
         let end = word_segment_starts
             .get(word_index + 1)
@@ -859,19 +859,15 @@ impl App {
             if let Some(current_line_content) = model.content.lines.get(line_idx) {
                 let status = &model.status;
 
-                let rebuild_cache = self
-                    .scroll_cache
-                    .as_ref()
-                    .map_or(true, |cache| match cache {
-                        ScrollCache::Empty => true,
-                        ScrollCache::Ready(ready) => {
-                            ready.width != width
-                                || ready.height != height
-                                || (ready.font_pixel_size - base_pixel_font_size).abs()
-                                    > f32::EPSILON
-                                || ready.current.line != status.line
-                        }
-                    });
+                let rebuild_cache = self.scroll_cache.as_ref().is_none_or(|cache| match cache {
+                    ScrollCache::Empty => true,
+                    ScrollCache::Ready(ready) => {
+                        ready.width != width
+                            || ready.height != height
+                            || (ready.font_pixel_size - base_pixel_font_size).abs() > f32::EPSILON
+                            || ready.current.line != status.line
+                    }
+                });
 
                 let current_cache = if rebuild_cache {
                     build_scroll_line_cache(
@@ -928,12 +924,10 @@ impl App {
                 if let Some(ScrollCache::Ready(previous_cache)) = &self.scroll_cache {
                     let previous_target = previous_cache.cursor_world as f64
                         - (previous_cache.gap_width as f64 * 0.5);
-                    if cursor_world >= previous_cache.cursor_world
-                        && target_scroll < previous_target
-                    {
-                        target_scroll = previous_target;
-                    } else if cursor_world < previous_cache.cursor_world
-                        && target_scroll > previous_target
+                    if (cursor_world >= previous_cache.cursor_world
+                        && target_scroll < previous_target)
+                        || (cursor_world < previous_cache.cursor_world
+                            && target_scroll > previous_target)
                     {
                         target_scroll = previous_target;
                     }
@@ -1228,15 +1222,15 @@ impl App {
                 match event {
                     AppEvent::Char { c, timestamp } => {
                         if let Some(model) = self.typing_model.take() {
-                            let old_word = model.status.word;
-                            let old_line = model.status.line;
+                            #[cfg(target_arch = "wasm32")]
+                            let old_position = (model.status.line, model.status.word);
 
                             match typing::key_input(model, c, timestamp) {
                                 Model::Typing(new_model) => {
                                     #[cfg(target_arch = "wasm32")]
                                     {
-                                        if new_model.status.line != old_line
-                                            || new_model.status.word != old_word
+                                        if (new_model.status.line, new_model.status.word)
+                                            != old_position
                                         {
                                             self.should_reset_ime = true;
                                         }

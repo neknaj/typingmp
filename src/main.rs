@@ -32,7 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!(
             "No desktop backend feature enabled. Please run with --features gui or --features tui"
         );
-        return Ok(());
+        Ok(())
     }
 }
 

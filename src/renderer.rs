@@ -430,14 +430,14 @@ pub mod tui_renderer {
             for x in 0..art_width {
                 let mut braille_byte: u32 = 0;
                 // 2x4 のサブピクセルをチェック
-                for dy in 0..4 {
-                    for dx in 0..2 {
+                for (dy, row) in BIT_MAP.iter().enumerate() {
+                    for (dx, bit) in row.iter().enumerate() {
                         let sub_x = x * 2 + dx;
                         let sub_y = y * 4 + dy;
                         let index = sub_y * sub_w + sub_x;
                         if sub_pixel_buffer[index] > 0.3 {
                             // カバレッジの閾値
-                            braille_byte |= 1 << BIT_MAP[dy][dx];
+                            braille_byte |= 1u32 << u32::from(*bit);
                         }
                     }
                 }

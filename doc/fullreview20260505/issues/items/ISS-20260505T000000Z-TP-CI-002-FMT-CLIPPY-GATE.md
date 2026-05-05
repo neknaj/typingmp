@@ -37,3 +37,11 @@ source: "doc/fullreview20260505/quality/static-validation.md"
 
 - `cargo fmt --check`
 - `cargo clippy --no-default-features --all-targets -- -D warnings`
+
+## 進捗
+
+2026-05-06:
+
+- `cargo fmt` は `4ffd73e style: run cargo fmt` で適用済み。
+- T03 として、redundant closure、`ptr_arg`、`map_or` simplification、manual range contains、manual contains、useless vec、needless return などの機械的 warning を削減した。
+- 残る private interface / dead code 系 warning は、`App` public field と scroll cache 境界に由来するため、`TP-ARCH-001` / `TP-ARCH-003` の T11 で解消する。
