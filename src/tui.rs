@@ -257,6 +257,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     shift,
                     align,
                     font_size,
+                    ..
                 } => {
                     match display_mode {
                         TuiDisplayMode::AsciiArt | TuiDisplayMode::Braille => {
@@ -445,7 +446,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     shift,
                     align,
                     font_size,
-                    ..
+                    line_alignment,
                 } => {
                     match display_mode {
                         TuiDisplayMode::AsciiArt | TuiDisplayMode::Braille => {
@@ -523,6 +524,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 align,
                             );
                             let mut pen_x = center_pen_x - scroll_offset_cells;
+                            pen_x += (line_alignment.visible_start_width as f64 / pixels_per_cell)
+                                .round() as i32;
                             let line_baseline_y = line_start_y + line_ascent as i32;
 
                             for seg in segments {
@@ -726,6 +729,15 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 1,
                                 align,
                             );
+                            let visible_start_chars = if line_alignment.full_line_width > 0 {
+                                (line_alignment.visible_start_width as f64
+                                    / line_alignment.full_line_width as f64
+                                    * total_width_chars as f64)
+                                    .round() as i32
+                            } else {
+                                0
+                            };
+                            pen_x += visible_start_chars;
 
                             // Now, draw each segment
                             for seg in segments {

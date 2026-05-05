@@ -138,6 +138,31 @@ pub enum LowerTypingSegment {
     Active { elements: Vec<ActiveLowerElement> },
 }
 
+/// Typing-line horizontal metrics shared by upper and lower play rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TypingLineAlignment {
+    pub full_line_width: u32,
+    pub visible_start_width: u32,
+}
+
+impl TypingLineAlignment {
+    pub const fn new(full_line_width: u32, visible_start_width: u32) -> Self {
+        let visible_start_width = if visible_start_width > full_line_width {
+            full_line_width
+        } else {
+            visible_start_width
+        };
+        Self {
+            full_line_width,
+            visible_start_width,
+        }
+    }
+
+    pub const fn full_line(full_line_width: u32) -> Self {
+        Self::new(full_line_width, 0)
+    }
+}
+
 /// 鬨ｾ蛹・ｽｽ・ｻ鬯ｮ・ｱ繝ｻ・｢驍ｵ・ｺ繝ｻ・ｫ髫ｰ・ｰ陷諤懈・驍ｵ・ｺ陷ｷ・ｶ遶冗距・ｸ・ｺ陝雜｣・ｽ・ｦ遶擾ｽｫ繝ｻ・ｴ繝ｻ・ｰ驍ｵ・ｺ繝ｻ・ｮ鬩墓ｩｸ・ｽ・ｮ鬯ｯ菫ｶ・ｧ・ｭ遶雁､・ｹ譎｢・ｽ・ｬ驛｢・ｧ繝ｻ・､驛｢・ｧ繝ｻ・｢驛｢・ｧ繝ｻ・ｦ驛｢譎乗ｲｺ郢晢ｽ･髯懶ｽ｣繝ｻ・ｱ驛｢・ｧ髮区ｩｸ・ｽ・ｮ陞溘ｑ・ｽ・ｾ繝ｻ・ｩ驍ｵ・ｺ陷ｷ・ｶ繝ｻ闖穫um
 pub enum Renderable {
     Background {
@@ -166,6 +191,7 @@ pub enum Renderable {
         shift: Shift,
         align: Align,
         font_size: FontSize, // 驛｢譎冗函郢晢ｽｻ驛｢・ｧ繝ｻ・ｹ驛｢譏ｴ繝ｻ邵ｺ蜀暦ｽｹ・ｧ繝ｻ・ｹ驛｢譎冗樟郢晢ｽｻ驛｢譎・ｽｼ譁青ｰ驛｢譎｢・ｽ・ｳ驛｢譎冗樟邵ｺ遉ｼ・ｹ・ｧ繝ｻ・､驛｢・ｧ繝ｻ・ｺ
+        line_width: u32,
     },
     /// 髣包ｽｳ陋ｹ・ｺ繝ｻ・ｮ繝ｻ・ｵ驍ｵ・ｺ繝ｻ・ｮ髯ｷ闌ｨ・ｽ・･髯ｷ迚呻ｽｸ蜷ｶﾎ倬Δ・ｧ繝ｻ・ｭ驛｢・ｧ繝ｻ・ｹ驛｢譎槭Γ繝ｻ・｡隰疲ｺ倥・髣厄ｽｴ髦ｮ蜻ｻ・ｽ蟶晏距繝ｻ・ｨ驍ｵ・ｺ陷ｷ譎・ｽ｢繝ｻ
     TypingLower {
@@ -174,7 +200,7 @@ pub enum Renderable {
         shift: Shift,
         align: Align,
         font_size: FontSize, // 髯ｷ闌ｨ・ｽ・･髯ｷ迚呻ｽｸ蜷ｶﾎ倬Δ・ｧ繝ｻ・ｭ驛｢・ｧ繝ｻ・ｹ驛｢譎冗樟郢晢ｽｻ驛｢譎・ｽｼ譁青ｰ驛｢譎｢・ｽ・ｳ驛｢譎冗樟邵ｺ遉ｼ・ｹ・ｧ繝ｻ・､驛｢・ｧ繝ｻ・ｺ
-        target_line_total_width: u32,
+        line_alignment: TypingLineAlignment,
     },
     ProgressBar {
         anchor: Anchor,
@@ -807,6 +833,17 @@ fn is_segment_correct(segment: &TypingCorrectnessSegment) -> bool {
     !segment.chars.contains(&TypingCorrectnessChar::Incorrect)
 }
 
+fn measure_line_base_width(line: &crate::model::Line, font: &FontVec, font_size: f32) -> u32 {
+    line.words
+        .iter()
+        .flat_map(|word| &word.segments)
+        .map(|segment| {
+            let text = segment_base_text(segment);
+            gui_renderer::measure_text(font, &text, font_size).0
+        })
+        .sum()
+}
+
 fn build_typing_ui(
     app: &App,
     render_list: &mut Vec<Renderable>,
@@ -851,20 +888,9 @@ fn build_typing_ui(
         let line_origin = cached_cache
             .map(|state| state.line_origin as f64)
             .unwrap_or(0.0);
-        let target_line_total_width = match cached_cache {
-            Some(state) => (state.current.total_width + state.gap_width) as u32,
-            None => {
-                content_line
-                    .words
-                    .iter()
-                    .flat_map(|w| &w.segments)
-                    .map(|seg| {
-                        let text = segment_base_text(seg);
-                        gui_renderer::measure_text(font, &text, base_pixel_font_size).0
-                    })
-                    .sum::<u32>()
-                    + width as u32
-            }
+        let full_line_width = match cached_cache {
+            Some(state) => state.current.total_width as u32,
+            None => measure_line_base_width(content_line, font, base_pixel_font_size),
         };
         let scroll_offset = if cached_cache.is_some() {
             (model.scroll.scroll - line_origin) as f32
@@ -962,10 +988,12 @@ fn build_typing_ui(
                 vertical: VerticalAlign::Center,
             },
             font_size: base_font_size,
+            line_width: full_line_width,
         });
 
         // --- 髣包ｽｳ陋ｹ・ｺ繝ｻ・ｮ繝ｻ・ｵ郢晢ｽｻ闔・･郢晢ｽｻ髯ｷ迚呻ｽｸ蜷ｶﾎ倬Δ・ｧ繝ｻ・ｭ驛｢・ｧ繝ｻ・ｹ驛｢譎∬か繝ｻ・ｼ陝ｲ・ｨ郢晢ｽｻ髫ｶ蝣､霍昴・・ｯ郢晢ｽｻ---
         let mut lower_segments = Vec::new();
+        let mut lower_visible_start_width = 0;
         let status_word = status.word.get();
         let status_segment = status.segment.get();
 
@@ -1015,6 +1043,12 @@ fn build_typing_ui(
             if active_segment_idx > visible_end {
                 visible_end = active_segment_idx;
             }
+
+            lower_visible_start_width = current_cache
+                .segment_prefix_width
+                .get(visible_start)
+                .copied()
+                .unwrap_or(0.0) as u32;
 
             for cache_index in visible_start..visible_end {
                 if let Some(cache_seg) = current_cache.segments.get(cache_index) {
@@ -1170,7 +1204,7 @@ fn build_typing_ui(
                 vertical: VerticalAlign::Top,
             },
             font_size: base_font_size,
-            target_line_total_width,
+            line_alignment: TypingLineAlignment::new(full_line_width, lower_visible_start_width),
         });
 
         // --- 驛｢・ｧ繝ｻ・ｳ驛｢譎｢・ｽ・ｳ驛｢譏ｴ繝ｻ邵ｺ蜀暦ｽｹ・ｧ繝ｻ・ｹ驛｢譎槭Γ繝ｻ・｡鬲・ｼ夲ｽｽ・ｼ闔・･霎ｯ謌奇｣ｰ蜍滂ｽｾ蠕後・鬮ｯ・ｦ鬲・ｼ夲ｽｽ・ｼ陝ｲ・ｨ繝ｻ螳夲ｽｬ・ｰ陷諤懈・ ---
@@ -1365,6 +1399,42 @@ mod tests {
         app
     }
 
+    fn typing_rows(render_list: &[Renderable]) -> (&[UpperTypingSegment], &[LowerTypingSegment]) {
+        let upper_segments = render_list
+            .iter()
+            .find_map(|item| match item {
+                Renderable::TypingUpper { segments, .. } => Some(segments.as_slice()),
+                _ => None,
+            })
+            .expect("typing upper renderable should exist");
+        let lower_segments = render_list
+            .iter()
+            .find_map(|item| match item {
+                Renderable::TypingLower { segments, .. } => Some(segments.as_slice()),
+                _ => None,
+            })
+            .expect("typing lower renderable should exist");
+        (upper_segments, lower_segments)
+    }
+
+    fn typing_alignment(render_list: &[Renderable]) -> (u32, TypingLineAlignment) {
+        let upper_width = render_list
+            .iter()
+            .find_map(|item| match item {
+                Renderable::TypingUpper { line_width, .. } => Some(*line_width),
+                _ => None,
+            })
+            .expect("typing upper renderable should exist");
+        let lower_alignment = render_list
+            .iter()
+            .find_map(|item| match item {
+                Renderable::TypingLower { line_alignment, .. } => Some(*line_alignment),
+                _ => None,
+            })
+            .expect("typing lower renderable should exist");
+        (upper_width, lower_alignment)
+    }
+
     #[test]
     fn active_plain_upper_segments_follow_lower_typed_colors() {
         let mut app = typing_app("#title Test\n色は句");
@@ -1378,13 +1448,7 @@ mod tests {
         });
 
         let render_list = build_ui(&app, app.get_current_font(), 800, 500);
-        let upper_segments = render_list
-            .iter()
-            .find_map(|item| match item {
-                Renderable::TypingUpper { segments, .. } => Some(segments),
-                _ => None,
-            })
-            .expect("typing upper renderable should exist");
+        let (upper_segments, lower_segments) = typing_rows(&render_list);
         assert_eq!(upper_segments[0].base_text, "色");
         assert_eq!(upper_segments[0].state, UpperSegmentState::Correct);
         assert_eq!(upper_segments[1].base_text, "は");
@@ -1392,13 +1456,6 @@ mod tests {
         assert_eq!(upper_segments[2].base_text, "句");
         assert_eq!(upper_segments[2].state, UpperSegmentState::Active);
 
-        let lower_segments = render_list
-            .iter()
-            .find_map(|item| match item {
-                Renderable::TypingLower { segments, .. } => Some(segments),
-                _ => None,
-            })
-            .expect("typing lower renderable should exist");
         let LowerTypingSegment::Active { elements } = &lower_segments[0] else {
             panic!("first lower segment should be active");
         };
@@ -1416,5 +1473,54 @@ mod tests {
                 ActiveLowerElement::Cursor
             ]
         ));
+
+        let (upper_width, lower_alignment) = typing_alignment(&render_list);
+        assert_eq!(lower_alignment, TypingLineAlignment::full_line(upper_width));
+    }
+
+    #[test]
+    fn cached_lower_segments_keep_their_full_line_offset() {
+        let mut app = typing_app(
+            "#title Test\n[a/a][b/b][c/c][d/d][e/e][f/f][g/g][h/h][i/i][j/j][k/k][l/l][m/m][n/n][o/o][p/p][q/q][r/r][s/s][t/t][u/u][v/v][w/w][x/x][y/y][z/z]",
+        );
+        for (index, c) in "abcdefghijklmnopqr".chars().enumerate() {
+            app.on_event(AppEvent::Char {
+                c,
+                timestamp: index as f64,
+            });
+        }
+        app.update(240, 500, 100.0);
+
+        let render_list = build_ui(&app, app.get_current_font(), 240, 500);
+        let (upper_width, lower_alignment) = typing_alignment(&render_list);
+        let (_, lower_segments) = typing_rows(&render_list);
+        let Some(ScrollCache::Ready(cache)) = app.scroll_cache() else {
+            panic!("scroll cache should be ready");
+        };
+
+        assert_eq!(upper_width, cache.current.total_width as u32);
+        assert_eq!(lower_alignment.full_line_width, upper_width);
+        assert!(
+            lower_alignment.visible_start_width > 0,
+            "long cached rows should preserve a non-zero clipped prefix"
+        );
+
+        let first_completed_text = lower_segments
+            .iter()
+            .find_map(|segment| match segment {
+                LowerTypingSegment::Completed { base_text, .. } => Some(base_text),
+                LowerTypingSegment::Active { .. } => None,
+            })
+            .expect("clipped lower row should contain visible completed segments");
+        let first_visible_segment = cache
+            .current
+            .segments
+            .iter()
+            .position(|segment| &segment.base_text == first_completed_text)
+            .expect("visible lower segment should come from the scroll cache");
+        assert_eq!(
+            lower_alignment.visible_start_width,
+            cache.current.segment_prefix_width[first_visible_segment] as u32
+        );
     }
 }

@@ -310,15 +310,19 @@ fn render_argb<F: Font>(
                 shift,
                 align,
                 font_size,
+                line_width,
             } => draw_typing_upper(
                 &mut frame,
                 font,
                 segments,
-                TextPlacement {
-                    anchor: *anchor,
-                    shift: *shift,
-                    align: *align,
-                    font_size: *font_size,
+                TypingUpperPlacement {
+                    text: TextPlacement {
+                        anchor: *anchor,
+                        shift: *shift,
+                        align: *align,
+                        font_size: *font_size,
+                    },
+                    line_width: *line_width,
                 },
                 cache,
             ),
@@ -328,7 +332,7 @@ fn render_argb<F: Font>(
                 shift,
                 align,
                 font_size,
-                target_line_total_width,
+                line_alignment,
             } => draw_typing_lower(
                 &mut frame,
                 font,
@@ -340,7 +344,7 @@ fn render_argb<F: Font>(
                         align: *align,
                         font_size: *font_size,
                     },
-                    target_line_total_width: *target_line_total_width,
+                    line_alignment: *line_alignment,
                 },
                 cache,
             ),
@@ -385,9 +389,15 @@ struct TextPlacement {
 }
 
 #[derive(Clone, Copy)]
+struct TypingUpperPlacement {
+    text: TextPlacement,
+    line_width: u32,
+}
+
+#[derive(Clone, Copy)]
 struct TypingLowerPlacement {
     text: TextPlacement,
-    target_line_total_width: u32,
+    line_alignment: ui::TypingLineAlignment,
 }
 
 #[derive(Clone, Copy)]
@@ -434,10 +444,11 @@ fn draw_typing_upper<F: Font>(
     frame: &mut PixelFrame<'_>,
     font: &F,
     segments: &[ui::UpperTypingSegment],
-    placement: TextPlacement,
+    placement: TypingUpperPlacement,
     cache: &mut RenderCache,
 ) {
-    let pixel_font_size = calculate_pixel_font_size(placement.font_size, frame.width, frame.height);
+    let pixel_font_size =
+        calculate_pixel_font_size(placement.text.font_size, frame.width, frame.height);
     let ruby_pixel_font_size = pixel_font_size * 0.4;
     let segment_widths: Vec<u32> = segments
         .iter()
@@ -447,12 +458,19 @@ fn draw_typing_upper<F: Font>(
                 .width
         })
         .collect();
-    let total_width: u32 = segment_widths.iter().sum();
     let total_height = cache.measure_text(font, " ", pixel_font_size).height;
-    let anchor_pos =
-        ui::calculate_anchor_position(placement.anchor, placement.shift, frame.width, frame.height);
-    let (mut pen_x, y) =
-        ui::calculate_aligned_position(anchor_pos, total_width, total_height, placement.align);
+    let anchor_pos = ui::calculate_anchor_position(
+        placement.text.anchor,
+        placement.text.shift,
+        frame.width,
+        frame.height,
+    );
+    let (mut pen_x, y) = ui::calculate_aligned_position(
+        anchor_pos,
+        placement.line_width,
+        total_height,
+        placement.text.align,
+    );
 
     for (segment, segment_width) in segments.iter().zip(segment_widths.iter().copied()) {
         let color = upper_segment_color(segment.state);
@@ -504,10 +522,11 @@ fn draw_typing_lower<F: Font>(
     );
     let (mut pen_x, y) = ui::calculate_aligned_position(
         anchor_pos,
-        placement.target_line_total_width,
+        placement.line_alignment.full_line_width,
         total_height,
         placement.text.align,
     );
+    pen_x += placement.line_alignment.visible_start_width as i32;
     let visible_left = -100;
     let visible_right = frame.width as i32 + 100;
 
