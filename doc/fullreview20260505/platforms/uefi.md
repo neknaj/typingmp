@@ -4,7 +4,7 @@
 
 ## 結論
 
-UEFI backend は compile check は通るが、firmware call の `unwrap()` と frame ごとの大きな allocation が多い。UEFI は OS 上の desktop app と違い、allocation failure や device failure が現実的な制約なので、error path と buffer reuse を優先するべきである。
+UEFI backend は compile check は通るが、firmware call の `unwrap()` が残っている。frame ごとの大きな allocation は `ArgbSurface` / `RenderCache` と persistent buffer reuse により解消済みである。UEFI は OS 上の desktop app と違い、device failure が現実的な制約なので、残りは error path を優先する。
 
 ## firmware API unwrap
 
@@ -18,11 +18,11 @@ UEFI backend は compile check は通るが、firmware call の `unwrap()` と f
 
 ## frame allocation
 
-frame ごとに full-screen buffer と background buffer を確保・変換している。高解像度 firmware では memory / time の両方で重い。
+frame ごとの full-screen buffer と background buffer allocation は解消済み。ARGB buffer と GOP transfer buffer は loop 外で確保し、background gradient は shared cache で再利用する。
 
 修正方針:
 
-- persistent framebuffer を確保して再利用する。
+- persistent framebuffer は確保して再利用する。
 - background gradient は size change 時だけ再計算する。
 - text / UI primitive の差分更新を検討する。
 

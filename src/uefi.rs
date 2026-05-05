@@ -3,11 +3,10 @@
 extern crate alloc;
 
 use crate::app::{App, AppEvent, Fonts};
-use crate::renderer::{calculate_pixel_font_size, gui_renderer};
-use crate::ui::{self, ActiveLowerElement, LowerTypingSegment, Renderable, UpperSegmentState};
-use ab_glyph::{point, Font, FontVec, OutlinedGlyph, PxScale, ScaleFont};
+use crate::renderer::{ArgbSurface, RenderCache};
+use crate::ui;
+use ab_glyph::FontVec;
 use alloc::vec::Vec;
-use core_maths::CoreFloat;
 use uefi::boot::{EventType, TimerTrigger, Tpl};
 use uefi::prelude::*;
 use uefi::proto::console::gop::{BltOp, BltPixel, BltRegion, GraphicsOutput};
@@ -54,6 +53,9 @@ pub fn run() -> Status {
     let mut last_frame_time = crate::timestamp::now();
 
     let mut events = [timer_event];
+    let mut render_cache = RenderCache::new();
+    let mut argb_buffer = alloc::vec![0u32; width * height];
+    let mut pixel_buffer = alloc::vec![BltPixel::new(0, 0, 0); width * height];
 
     while !app.snapshot().should_quit {
         uefi::boot::wait_for_event(&mut events).unwrap();
@@ -96,320 +98,18 @@ pub fn run() -> Status {
 
         app.update(width, height, delta_time);
 
-        let background_color = ui::ACTIVE_COLOR;
-        let mut pixel_buffer: alloc::vec::Vec<BltPixel> = alloc::vec![
-            BltPixel::new(
-                ((background_color >> 16) & 0xFF) as u8,
-                ((background_color >> 8) & 0xFF) as u8,
-                ((background_color) & 0xFF) as u8
-            );
-            width * height
-        ];
-
-        // 現在選択されているフォントを取得
         let current_font = app.get_current_font();
         let render_list = ui::build_ui(&app, current_font, width, height);
-
-        for item in render_list {
-            match item {
-                Renderable::BigText {
-                    text,
-                    anchor,
-                    shift,
-                    align,
-                    font_size,
-                    color,
-                }
-                | Renderable::Text {
-                    text,
-                    anchor,
-                    shift,
-                    align,
-                    font_size,
-                    color,
-                } => {
-                    let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
-                    let (text_width, text_height, _ascent) =
-                        gui_renderer::measure_text(current_font, text.as_str(), pixel_font_size);
-                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
-                    let (x, y) =
-                        ui::calculate_aligned_position(anchor_pos, text_width, text_height, align);
-                    draw_text(
-                        &mut pixel_buffer,
-                        width,
-                        current_font,
-                        text.as_str(),
-                        (x as f32, y as f32),
-                        pixel_font_size,
-                        color,
-                    );
-                }
-                Renderable::Background { gradient } => {
-                    let mut temp_buffer: Vec<u32> = Vec::with_capacity(width * height);
-                    for pixel in pixel_buffer.iter() {
-                        temp_buffer.push(
-                            (pixel.red as u32) << 16
-                                | (pixel.green as u32) << 8
-                                | (pixel.blue as u32),
-                        );
-                    }
-                    crate::renderer::draw_linear_gradient(
-                        &mut temp_buffer,
-                        width,
-                        height,
-                        gradient.start_color,
-                        gradient.end_color,
-                        (0.0, 0.0),
-                        (width as f32, height as f32),
-                    );
-                    for (i, color) in temp_buffer.iter().enumerate() {
-                        pixel_buffer[i] = BltPixel::new(
-                            ((color >> 16) & 0xFF) as u8,
-                            ((color >> 8) & 0xFF) as u8,
-                            (color & 0xFF) as u8,
-                        );
-                    }
-                }
-                Renderable::TypingUpper {
-                    segments,
-                    anchor,
-                    shift,
-                    align,
-                    font_size,
-                } => {
-                    let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
-                    let ruby_pixel_font_size = pixel_font_size * 0.4;
-
-                    let total_width = segments
-                        .iter()
-                        .map(|seg| {
-                            gui_renderer::measure_text(
-                                current_font,
-                                seg.base_text.as_str(),
-                                pixel_font_size,
-                            )
-                            .0
-                        })
-                        .sum::<u32>();
-                    let total_height =
-                        gui_renderer::measure_text(current_font, " ", pixel_font_size).1;
-
-                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
-                    let (mut pen_x, y) = ui::calculate_aligned_position(
-                        anchor_pos,
-                        total_width,
-                        total_height,
-                        align,
-                    );
-
-                    for seg in segments {
-                        let color = match seg.state {
-                            UpperSegmentState::Correct => ui::CORRECT_COLOR,
-                            UpperSegmentState::Incorrect => ui::INCORRECT_COLOR,
-                            UpperSegmentState::Active => ui::ACTIVE_COLOR,
-                            UpperSegmentState::Pending => ui::PENDING_COLOR,
-                        };
-                        draw_text(
-                            &mut pixel_buffer,
-                            width,
-                            current_font,
-                            seg.base_text.as_str(),
-                            (pen_x as f32, y as f32),
-                            pixel_font_size,
-                            color,
-                        );
-
-                        if let Some(ruby) = &seg.ruby_text {
-                            let (base_w, ..) = gui_renderer::measure_text(
-                                current_font,
-                                seg.base_text.as_str(),
-                                pixel_font_size,
-                            );
-                            let (ruby_w, ..) = gui_renderer::measure_text(
-                                current_font,
-                                ruby.as_str(),
-                                ruby_pixel_font_size,
-                            );
-                            let ruby_x = pen_x as f32 + (base_w as f32 - ruby_w as f32) / 2.0;
-                            let ruby_y = y as f32 - ruby_pixel_font_size * 0.5;
-                            draw_text(
-                                &mut pixel_buffer,
-                                width,
-                                current_font,
-                                ruby.as_str(),
-                                (ruby_x, ruby_y),
-                                ruby_pixel_font_size,
-                                color,
-                            );
-                        }
-
-                        let (seg_width, _, _) = gui_renderer::measure_text(
-                            current_font,
-                            seg.base_text.as_str(),
-                            pixel_font_size,
-                        );
-                        pen_x += seg_width as i32;
-                    }
-                }
-                Renderable::TypingLower {
-                    segments,
-                    anchor,
-                    shift,
-                    align,
-                    font_size,
-                    target_line_total_width,
-                } => {
-                    let pixel_font_size = calculate_pixel_font_size(font_size, width, height);
-                    let ruby_pixel_font_size = pixel_font_size * 0.3;
-                    let total_height =
-                        gui_renderer::measure_text(current_font, " ", pixel_font_size).1;
-
-                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
-                    let (mut pen_x, y) = ui::calculate_aligned_position(
-                        anchor_pos,
-                        target_line_total_width,
-                        total_height,
-                        align,
-                    );
-
-                    for seg in segments {
-                        match seg {
-                            LowerTypingSegment::Completed {
-                                base_text,
-                                ruby_text,
-                                is_correct,
-                                width: seg_width,
-                                ..
-                            } => {
-                                let color = if is_correct {
-                                    ui::CORRECT_COLOR
-                                } else {
-                                    ui::INCORRECT_COLOR
-                                };
-                                draw_text(
-                                    &mut pixel_buffer,
-                                    width,
-                                    current_font,
-                                    base_text.as_str(),
-                                    (pen_x as f32, y as f32),
-                                    pixel_font_size,
-                                    color,
-                                );
-
-                                if let Some(ruby) = ruby_text {
-                                    let base_w = seg_width;
-                                    let (ruby_w, ..) = gui_renderer::measure_text(
-                                        current_font,
-                                        ruby.as_str(),
-                                        ruby_pixel_font_size,
-                                    );
-                                    let ruby_x =
-                                        pen_x as f32 + (base_w as f32 - ruby_w as f32) / 2.0;
-                                    let ruby_y = y as f32 - ruby_pixel_font_size * 0.5;
-                                    draw_text(
-                                        &mut pixel_buffer,
-                                        width,
-                                        current_font,
-                                        ruby.as_str(),
-                                        (ruby_x, ruby_y),
-                                        ruby_pixel_font_size,
-                                        color,
-                                    );
-                                }
-
-                                pen_x += seg_width as i32;
-                            }
-                            LowerTypingSegment::Active { elements } => {
-                                for el in elements {
-                                    let (text, color) = match el {
-                                        ActiveLowerElement::Typed {
-                                            character,
-                                            is_correct,
-                                        } => (
-                                            alloc::string::ToString::to_string(&character),
-                                            if is_correct {
-                                                ui::CORRECT_COLOR
-                                            } else {
-                                                ui::INCORRECT_COLOR
-                                            },
-                                        ),
-                                        ActiveLowerElement::Cursor => (
-                                            alloc::string::ToString::to_string(&'|'),
-                                            ui::CURSOR_COLOR,
-                                        ),
-                                        ActiveLowerElement::UnconfirmedInput(s) => {
-                                            (s.clone(), ui::UNCONFIRMED_COLOR)
-                                        }
-                                        ActiveLowerElement::LastIncorrectInput(c) => (
-                                            alloc::string::ToString::to_string(&c),
-                                            ui::WRONG_KEY_COLOR,
-                                        ),
-                                    };
-                                    draw_text(
-                                        &mut pixel_buffer,
-                                        width,
-                                        current_font,
-                                        text.as_str(),
-                                        (pen_x as f32, y as f32),
-                                        pixel_font_size,
-                                        color,
-                                    );
-                                    pen_x += gui_renderer::measure_text(
-                                        current_font,
-                                        text.as_str(),
-                                        pixel_font_size,
-                                    )
-                                    .0 as i32;
-                                }
-                            }
-                        }
-                    }
-                }
-                Renderable::ProgressBar {
-                    anchor,
-                    shift,
-                    width_ratio,
-                    height_ratio,
-                    progress,
-                    bg_color,
-                    fg_color,
-                } => {
-                    let bar_width = (width as f32 * width_ratio) as u32;
-                    let bar_height = (height as f32 * height_ratio) as u32;
-
-                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, width, height);
-                    // anchor_posが左下を指すので、描画開始Y座標を調整
-                    let start_x = anchor_pos.0 as usize;
-                    let start_y = (anchor_pos.1 - bar_height as i32).max(0) as usize;
-
-                    // 背景を描画
-                    draw_rect(
-                        &mut pixel_buffer,
-                        width,
-                        start_x,
-                        start_y,
-                        bar_width as usize,
-                        bar_height as usize,
-                        bg_color,
-                    );
-
-                    // 前景（進捗）を描画
-                    let fg_width = (bar_width as f32 * progress) as usize;
-                    if fg_width > 0 {
-                        draw_rect(
-                            &mut pixel_buffer,
-                            width,
-                            start_x,
-                            start_y,
-                            fg_width,
-                            bar_height as usize,
-                            fg_color,
-                        );
-                    }
-                }
+        if let Some(mut surface) = ArgbSurface::new(width, height, &mut argb_buffer) {
+            surface.render(current_font, &render_list, &mut render_cache);
+            for (pixel, color) in pixel_buffer.iter_mut().zip(surface.pixels().iter()) {
+                *pixel = BltPixel::new(
+                    ((*color >> 16) & 0xFF) as u8,
+                    ((*color >> 8) & 0xFF) as u8,
+                    (*color & 0xFF) as u8,
+                );
             }
         }
-
         gop.blt(BltOp::BufferToVideo {
             buffer: &pixel_buffer,
             src: BltRegion::Full,
@@ -422,85 +122,4 @@ pub fn run() -> Status {
     }
 
     Status::SUCCESS
-}
-
-fn draw_rect(
-    buffer: &mut [BltPixel],
-    width: usize,
-    rect_x: usize,
-    rect_y: usize,
-    rect_w: usize,
-    rect_h: usize,
-    color: u32,
-) {
-    let height = buffer.len() / width;
-    let pixel_color = BltPixel::new(
-        ((color >> 16) & 0xFF) as u8,
-        ((color >> 8) & 0xFF) as u8,
-        (color & 0xFF) as u8,
-    );
-
-    for y in rect_y..(rect_y + rect_h).min(height) {
-        for x in rect_x..(rect_x + rect_w).min(width) {
-            let index = y * width + x;
-            buffer[index] = pixel_color;
-        }
-    }
-}
-
-fn draw_text(
-    buffer: &mut [BltPixel],
-    stride: usize,
-    font: &FontVec,
-    text: &str,
-    pos: (f32, f32),
-    font_size: f32,
-    color: u32,
-) {
-    let scale = PxScale::from(font_size);
-    let scaled_font = font.as_scaled(scale);
-    let ascent = scaled_font.ascent();
-    let mut pen_x = pos.0;
-    let pen_y = pos.1 + ascent;
-
-    let mut last_glyph = None;
-    for character in text.chars() {
-        let glyph_id = font.glyph_id(character);
-        if let Some(last) = last_glyph {
-            pen_x += scaled_font.kern(last, glyph_id);
-        }
-        let glyph = glyph_id.with_scale_and_position(scale, point(pen_x, pen_y));
-        if let Some(outlined) = font.outline_glyph(glyph) {
-            draw_glyph_to_pixel_buffer(buffer, stride, &outlined, color);
-        }
-        pen_x += scaled_font.h_advance(glyph_id);
-        last_glyph = Some(glyph_id);
-    }
-}
-
-fn draw_glyph_to_pixel_buffer(
-    buffer: &mut [BltPixel],
-    stride: usize,
-    outlined: &OutlinedGlyph,
-    color: u32,
-) {
-    let bounds = outlined.px_bounds();
-    outlined.draw(|x, y, c| {
-        let buffer_x = bounds.min.x as i32 + x as i32;
-        let buffer_y = bounds.min.y as i32 + y as i32;
-        let height = buffer.len() / stride;
-        if buffer_x >= 0 && buffer_x < stride as i32 && buffer_y >= 0 && buffer_y < height as i32 {
-            let index = (buffer_y as usize) * stride + (buffer_x as usize);
-            let text_b = (color & 0xFF) as f32;
-            let text_g = ((color >> 8) & 0xFF) as f32;
-            let text_r = ((color >> 16) & 0xFF) as f32;
-            let bg_b = buffer[index].blue as f32;
-            let bg_g = buffer[index].green as f32;
-            let bg_r = buffer[index].red as f32;
-            let b = (text_b * c + bg_b * (1.0 - c)) as u8;
-            let g = (text_g * c + bg_g * (1.0 - c)) as u8;
-            let r = (text_r * c + bg_r * (1.0 - c)) as u8;
-            buffer[index] = BltPixel::new(r, g, b);
-        }
-    });
 }

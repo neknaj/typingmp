@@ -2,12 +2,12 @@
 id: ISS-20260505T000000Z-TP-PERF-002-TEXT-MEASURE-CACHE
 title: "text measurementとrasterizationが再計算されやすい"
 area: performance
-status: open
-resolved: false
+status: verified
+resolved: true
 priority: P2
 type: performance
 created: 2026-05-05
-updated: 2026-05-05
+updated: 2026-05-06
 target: "src/renderer.rs, src/ui.rs, src/app.rs"
 legacy_id: TP-PERF-002
 source: "doc/fullreview20260505/architecture/rendering.md"
@@ -28,7 +28,12 @@ scroll 位置が platform ごとにずれる可能性がある。低性能 targe
 - 内部 layout は logical pixel / float で保持し、backend transfer の最後で丸める。
 - render tree と measurement cache の責務を分ける。
 
+## 修正結果
+
+`RenderCache` が font pointer / text / font size を key に text measurement を保持する。background gradient も size と color が変わらない限り cached ARGB buffer を再利用する。
+
 ## 検証
 
 - scroll visibility test
 - representative text の measurement snapshot
+- `renderer::tests::argb_surface_renders_and_reuses_text_measurements`

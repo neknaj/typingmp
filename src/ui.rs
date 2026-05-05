@@ -10,7 +10,7 @@ use core_maths::CoreFloat;
 
 // uefi 驍ｵ・ｺ繝ｻ・ｨ std 驍ｵ・ｺ繝ｻ・ｧ髣厄ｽｴ繝ｻ・ｿ鬨ｾ蛹・ｽｽ・ｨ驍ｵ・ｺ陷ｷ・ｶ繝ｻ繝ｻVec 驍ｵ・ｺ繝ｻ・ｨ vec! 驛｢・ｧ髮区ｧｭ繝ｻ驛｢・ｧ鬯・､ｧ・ｴ蟶ｷ・ｸ・ｺ陋ｹ・ｻ繝ｻ繝ｻ
 #[cfg(feature = "uefi")]
-use alloc::{vec, vec::Vec};
+use alloc::vec::Vec;
 #[cfg(not(feature = "uefi"))]
 use std::vec::Vec;
 
@@ -92,6 +92,7 @@ pub struct Gradient {
 }
 
 /// 髣包ｽｳ鬯・汚・ｽ・ｮ繝ｻ・ｵ郢晢ｽｻ髢ｧ・ｲ陝ｯ・ｼ髫ｶ轣倡函郢晢ｽｦ驛｢・ｧ繝ｻ・ｭ驛｢・ｧ繝ｻ・ｹ驛｢譎∬か繝ｻ・ｼ陝ｲ・ｨ郢晢ｽｻ驛｢・ｧ繝ｻ・ｻ驛｢・ｧ繝ｻ・ｰ驛｢譎｢・ｽ・｡驛｢譎｢・ｽ・ｳ驛｢譎冗樟郢晢ｽｻ髴托ｽ･繝ｻ・ｶ髫ｲ・ｷ郢晢ｽｻ
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpperSegmentState {
     /// 打ち込みが正しく完了したセグメント。
     Correct,
@@ -902,6 +903,42 @@ fn build_typing_ui(
                 };
 
                 let (base_text, ruby_text, anno_text) = segment_display_parts(seg);
+                if word_idx == status.word.get()
+                    && seg_idx == status.segment.get()
+                    && ruby_text.is_none()
+                    && anno_text.is_none()
+                {
+                    if let Some(correctness_segment) = correctness_line
+                        .words
+                        .get(word_idx)
+                        .and_then(|word| word.segments.get(seg_idx))
+                    {
+                        let base_char_count = base_text.chars().count();
+                        if base_char_count == correctness_segment.chars.len() {
+                            for (char_idx, ch) in base_text.chars().enumerate() {
+                                let state = match correctness_segment.chars[char_idx] {
+                                    TypingCorrectnessChar::Correct => UpperSegmentState::Correct,
+                                    TypingCorrectnessChar::Incorrect => {
+                                        UpperSegmentState::Incorrect
+                                    }
+                                    TypingCorrectnessChar::Pending
+                                        if char_idx == status.char_.get() =>
+                                    {
+                                        UpperSegmentState::Active
+                                    }
+                                    TypingCorrectnessChar::Pending => UpperSegmentState::Pending,
+                                };
+                                upper_segments.push(UpperTypingSegment {
+                                    base_text: ch.to_string(),
+                                    ruby_text: None,
+                                    anno_text: None,
+                                    state,
+                                });
+                            }
+                            continue;
+                        }
+                    }
+                }
                 upper_segments.push(UpperTypingSegment {
                     base_text,
                     ruby_text,
@@ -1303,4 +1340,81 @@ pub fn calculate_aligned_position(
     };
 
     (x, y)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::{App, AppEvent, Fonts};
+
+    fn test_fonts() -> Fonts {
+        let japanese =
+            FontVec::try_from_vec(include_bytes!("../fonts/YujiSyuku-Regular.ttf").to_vec())
+                .expect("test font should parse");
+        Fonts {
+            japanese,
+            traditional_chinese: None,
+            simplified_chinese: None,
+        }
+    }
+
+    fn typing_app(problem: &str) -> App {
+        let mut app = App::new(test_fonts());
+        app.add_custom_problem("plain".to_string(), problem.to_string(), 0);
+        app.on_event(AppEvent::Enter);
+        app
+    }
+
+    #[test]
+    fn active_plain_upper_segments_follow_lower_typed_colors() {
+        let mut app = typing_app("#title Test\n色は句");
+        app.on_event(AppEvent::Char {
+            c: '色',
+            timestamp: 1.0,
+        });
+        app.on_event(AppEvent::Char {
+            c: 'は',
+            timestamp: 2.0,
+        });
+
+        let render_list = build_ui(&app, app.get_current_font(), 800, 500);
+        let upper_segments = render_list
+            .iter()
+            .find_map(|item| match item {
+                Renderable::TypingUpper { segments, .. } => Some(segments),
+                _ => None,
+            })
+            .expect("typing upper renderable should exist");
+        assert_eq!(upper_segments[0].base_text, "色");
+        assert_eq!(upper_segments[0].state, UpperSegmentState::Correct);
+        assert_eq!(upper_segments[1].base_text, "は");
+        assert_eq!(upper_segments[1].state, UpperSegmentState::Correct);
+        assert_eq!(upper_segments[2].base_text, "句");
+        assert_eq!(upper_segments[2].state, UpperSegmentState::Active);
+
+        let lower_segments = render_list
+            .iter()
+            .find_map(|item| match item {
+                Renderable::TypingLower { segments, .. } => Some(segments),
+                _ => None,
+            })
+            .expect("typing lower renderable should exist");
+        let LowerTypingSegment::Active { elements } = &lower_segments[0] else {
+            panic!("first lower segment should be active");
+        };
+        assert!(matches!(
+            elements.as_slice(),
+            [
+                ActiveLowerElement::Typed {
+                    character: '色',
+                    is_correct: true
+                },
+                ActiveLowerElement::Typed {
+                    character: 'は',
+                    is_correct: true
+                },
+                ActiveLowerElement::Cursor
+            ]
+        ));
+    }
 }
