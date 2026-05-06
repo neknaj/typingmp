@@ -10,6 +10,8 @@ use crate::app::scroll::{
     build_scroll_line_cache, cursor_position_from_status, line_origin_from_previous,
     line_origin_from_start, typing_line_scroll_position, ScrollCacheState,
 };
+use crate::display::DisplaySettings;
+pub use crate::font::{FontScript as Script, Fonts};
 #[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
 use crate::io::FontEntry;
 use crate::io::{FontAssetId, ProblemRepository};
@@ -52,24 +54,6 @@ pub enum TuiDisplayMode {
     AsciiArt,
     SimpleText,
     Braille,
-}
-
-/// どのスクリプト種別のフォントを選択しているか
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Script {
-    Japanese,
-    TraditionalChinese,
-    SimplifiedChinese,
-}
-
-impl Script {
-    pub fn label(self) -> &'static str {
-        match self {
-            Script::Japanese => "Japanese",
-            Script::TraditionalChinese => "Traditional Chinese",
-            Script::SimplifiedChinese => "Simplified Chinese",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -121,66 +105,50 @@ impl MainMenuItem {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsItem {
     Japanese,
-    TraditionalChinese,
     SimplifiedChinese,
+    TraditionalChinese,
+    AspectRatio,
+    DisplayScale,
 }
 
 impl SettingsItem {
     pub const fn index(self) -> usize {
         match self {
             Self::Japanese => 0,
-            Self::TraditionalChinese => 1,
-            Self::SimplifiedChinese => 2,
+            Self::SimplifiedChinese => 1,
+            Self::TraditionalChinese => 2,
+            Self::AspectRatio => 3,
+            Self::DisplayScale => 4,
         }
     }
 
-    pub const fn script(self) -> Script {
+    pub const fn font_script(self) -> Option<Script> {
         match self {
-            Self::Japanese => Script::Japanese,
-            Self::TraditionalChinese => Script::TraditionalChinese,
-            Self::SimplifiedChinese => Script::SimplifiedChinese,
+            Self::Japanese => Some(Script::Japanese),
+            Self::SimplifiedChinese => Some(Script::SimplifiedChinese),
+            Self::TraditionalChinese => Some(Script::TraditionalChinese),
+            Self::AspectRatio | Self::DisplayScale => None,
         }
     }
 
     pub fn previous(self) -> Self {
         match self {
             Self::Japanese => Self::Japanese,
-            Self::TraditionalChinese => Self::Japanese,
-            Self::SimplifiedChinese => Self::TraditionalChinese,
+            Self::SimplifiedChinese => Self::Japanese,
+            Self::TraditionalChinese => Self::SimplifiedChinese,
+            Self::AspectRatio => Self::TraditionalChinese,
+            Self::DisplayScale => Self::AspectRatio,
         }
     }
 
     pub fn next(self) -> Self {
         match self {
-            Self::Japanese => Self::TraditionalChinese,
-            Self::TraditionalChinese => Self::SimplifiedChinese,
-            Self::SimplifiedChinese => Self::SimplifiedChinese,
+            Self::Japanese => Self::SimplifiedChinese,
+            Self::SimplifiedChinese => Self::TraditionalChinese,
+            Self::TraditionalChinese => Self::AspectRatio,
+            Self::AspectRatio => Self::DisplayScale,
+            Self::DisplayScale => Self::DisplayScale,
         }
-    }
-}
-
-/// ロードされたフォントデータ（スクリプト別）
-pub struct Fonts {
-    pub japanese: FontVec,
-    pub traditional_chinese: Option<FontVec>,
-    pub simplified_chinese: Option<FontVec>,
-}
-
-impl Fonts {
-    /// スクリプトに対応するフォントを返す（未設定時は japanese で代替）
-    pub fn get_for_script(&self, script: Script) -> &FontVec {
-        match script {
-            Script::Japanese => &self.japanese,
-            Script::TraditionalChinese => {
-                self.traditional_chinese.as_ref().unwrap_or(&self.japanese)
-            }
-            Script::SimplifiedChinese => self.simplified_chinese.as_ref().unwrap_or(&self.japanese),
-        }
-    }
-
-    /// メインフォント（日本語フォント）を返す
-    pub fn primary(&self) -> &FontVec {
-        &self.japanese
     }
 }
 
@@ -272,8 +240,7 @@ pub struct App {
     /// ファイルダイアログを開く要求フラグ（gui/wasm のみ）
     pub(crate) should_open_file_dialog: bool,
     pub(crate) fonts: Fonts,
-    /// Settings画面で選択中のスクリプト
-    pub(crate) settings_script: Script,
+    pub(crate) display_settings: DisplaySettings,
     /// フォントピッカーを開いているか
     pub(crate) settings_picking_font: bool,
     /// フォントピッカー内の選択インデックス
@@ -326,7 +293,7 @@ impl App {
             should_quit: false,
             should_open_file_dialog: false,
             fonts,
-            settings_script: Script::Japanese,
+            display_settings: DisplaySettings::default(),
             settings_picking_font: false,
             selected_font_item: 0,
             #[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
@@ -385,9 +352,12 @@ impl App {
         should_save
     }
 
-    /// 現在の設定言語に合わせたメインフォントへの参照を取得する
-    pub fn get_current_font(&self) -> &FontVec {
-        self.fonts.get_for_script(self.settings_script)
+    pub fn fonts(&self) -> &Fonts {
+        &self.fonts
+    }
+
+    pub fn display_settings(&self) -> DisplaySettings {
+        self.display_settings
     }
 
     pub(crate) fn scroll_cache(&self) -> Option<&ScrollCache> {
@@ -404,13 +374,57 @@ impl App {
         bytes: Vec<u8>,
     ) -> Result<(), FontApplyError> {
         let font = FontVec::try_from_vec(bytes).map_err(|_| FontApplyError::InvalidFontData)?;
-        match script {
-            Script::Japanese => self.fonts.japanese = font,
-            Script::TraditionalChinese => self.fonts.traditional_chinese = Some(font),
-            Script::SimplifiedChinese => self.fonts.simplified_chinese = Some(font),
-        }
+        self.fonts.set_for_script(script, font);
         self.scroll_cache = None;
         Ok(())
+    }
+
+    fn advance_selected_display_setting(&mut self) {
+        match self.selected_settings_item {
+            SettingsItem::AspectRatio => {
+                self.display_settings.aspect_ratio = self.display_settings.aspect_ratio.next();
+                self.scroll_cache = None;
+            }
+            SettingsItem::DisplayScale => {
+                self.display_settings.scale = self.display_settings.scale.next();
+                self.scroll_cache = None;
+            }
+            SettingsItem::Japanese
+            | SettingsItem::SimplifiedChinese
+            | SettingsItem::TraditionalChinese => {}
+        }
+    }
+
+    fn handle_display_setting_shortcut(&mut self, c: char) -> bool {
+        let next = matches!(c, 'd' | 'D' | '+' | '=');
+        let previous = matches!(c, 'a' | 'A' | '-' | '_');
+        if !next && !previous {
+            return false;
+        }
+
+        match self.selected_settings_item {
+            SettingsItem::AspectRatio => {
+                self.display_settings.aspect_ratio = if next {
+                    self.display_settings.aspect_ratio.next()
+                } else {
+                    self.display_settings.aspect_ratio.previous()
+                };
+                self.scroll_cache = None;
+            }
+            SettingsItem::DisplayScale => {
+                self.display_settings.scale = if next {
+                    self.display_settings.scale.next()
+                } else {
+                    self.display_settings.scale.previous()
+                };
+                self.scroll_cache = None;
+            }
+            SettingsItem::Japanese
+            | SettingsItem::SimplifiedChinese
+            | SettingsItem::TraditionalChinese => return false,
+        }
+
+        true
     }
 
     /// 新しいタイピングセッションを開始する
@@ -481,10 +495,10 @@ impl App {
         let clamped_delta_time = delta_time.min(100.0);
 
         if let Some(model) = self.typing_model.as_mut() {
-            let font = self.fonts.get_for_script(self.settings_script);
             let base_font_size_enum = crate::ui::FontSize::WindowHeight(ui::BASE_FONT_SIZE_RATIO);
             let base_pixel_font_size =
-                crate::renderer::calculate_pixel_font_size(base_font_size_enum, width, height);
+                crate::renderer::calculate_pixel_font_size(base_font_size_enum, width, height)
+                    * self.display_settings.scale.multiplier();
             let gap_width = width as f32;
 
             let line_idx = model.status.line.get();
@@ -503,7 +517,7 @@ impl App {
                 let current_cache = if rebuild_cache {
                     build_scroll_line_cache(
                         current_line_content,
-                        font,
+                        &self.fonts,
                         base_pixel_font_size,
                         status.line,
                     )
@@ -512,7 +526,7 @@ impl App {
                         Some(ScrollCache::Ready(ready)) => ready.current.clone(),
                         _ => build_scroll_line_cache(
                             current_line_content,
-                            font,
+                            &self.fonts,
                             base_pixel_font_size,
                             status.line,
                         ),
@@ -528,7 +542,7 @@ impl App {
                             previous_cache,
                             line_idx,
                             &model.content.lines,
-                            font,
+                            &self.fonts,
                             base_pixel_font_size,
                             gap_width,
                         )
@@ -536,7 +550,7 @@ impl App {
                     _ => line_origin_from_start(
                         line_idx,
                         &model.content.lines,
-                        font,
+                        &self.fonts,
                         base_pixel_font_size,
                         gap_width,
                     ),
@@ -670,22 +684,27 @@ impl App {
                 }
             }
             AppState::Settings => {
-                self.status_text = "Select a font for each script.".to_string();
+                self.status_text =
+                    "Assign fonts. Problem readings choose the script automatically.".to_string();
                 if !self.settings_picking_font {
-                    // スクリプト選択モード: Up/Down で 3 スクリプトをサイクル
+                    // 設定項目選択モード: Up/Down で項目を移動
                     match event {
                         AppEvent::Up => {
                             self.selected_settings_item = self.selected_settings_item.previous();
-                            self.settings_script = self.selected_settings_item.script();
                         }
                         AppEvent::Down => {
                             self.selected_settings_item = self.selected_settings_item.next();
-                            self.settings_script = self.selected_settings_item.script();
                         }
                         AppEvent::Enter => {
-                            // 選択スクリプトのフォントピッカーを開く
-                            self.settings_picking_font = true;
-                            self.selected_font_item = 0;
+                            if self.selected_settings_item.font_script().is_some() {
+                                self.settings_picking_font = true;
+                                self.selected_font_item = 0;
+                            } else {
+                                self.advance_selected_display_setting();
+                            }
+                        }
+                        AppEvent::Char { c, .. } => {
+                            self.handle_display_setting_shortcut(c);
                         }
                         AppEvent::Escape => {
                             self.state = AppState::MainMenu;
@@ -711,10 +730,13 @@ impl App {
                             }
                             AppEvent::Enter => {
                                 if self.selected_font_item < font_count {
-                                    let font_id = self.available_fonts[self.selected_font_item].id;
-                                    let script = self.settings_script;
-                                    self.requested_font_load =
-                                        Some(FontLoadRequest { script, font_id });
+                                    if let Some(script) = self.selected_settings_item.font_script()
+                                    {
+                                        let font_id =
+                                            self.available_fonts[self.selected_font_item].id;
+                                        self.requested_font_load =
+                                            Some(FontLoadRequest { script, font_id });
+                                    }
                                 }
                                 self.settings_picking_font = false;
                             }
@@ -938,14 +960,12 @@ mod tests {
     use super::*;
 
     fn test_fonts() -> Fonts {
-        let japanese =
+        fn font() -> FontVec {
             FontVec::try_from_vec(include_bytes!("../fonts/YujiSyuku-Regular.ttf").to_vec())
-                .expect("test font should parse");
-        Fonts {
-            japanese,
-            traditional_chinese: None,
-            simplified_chinese: None,
+                .expect("test font should parse")
         }
+
+        Fonts::new(font(), font(), font())
     }
 
     #[test]

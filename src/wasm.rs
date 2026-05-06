@@ -316,11 +316,11 @@ async fn start_async() -> Result<(), JsValue> {
         FontVec::try_from_vec(fetch_font_bytes("./fonts/NotoSerifJP-Regular.ttf").await?)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
-    let fonts = Fonts {
-        japanese: japanese_font,
-        traditional_chinese: Some(traditional_chinese_font),
-        simplified_chinese: Some(simplified_chinese_font),
-    };
+    let fonts = Fonts::new(
+        japanese_font,
+        simplified_chinese_font,
+        traditional_chinese_font,
+    );
 
     let app = Rc::new(RefCell::new(App::new(fonts)));
     // localStorage からカスタム問題を復元
@@ -615,12 +615,18 @@ async fn start_async() -> Result<(), JsValue> {
         };
         *last_time_borrow = now;
 
-        app.borrow_mut().update(width, height, delta_time);
+        {
+            let mut app_mut = app.borrow_mut();
+            let viewport = app_mut.display_settings().viewport(width, height);
+            app_mut.update(viewport.width, viewport.height, delta_time);
+        }
 
         // --- 描画処理（不変借用） ---
         {
             let app_borrow = app.borrow();
-            let current_font = app_borrow.get_current_font();
+            let display_settings = app_borrow.display_settings();
+            let viewport = display_settings.viewport(width, height);
+            let fonts = app_borrow.fonts();
 
             // ピクセルバッファを再利用（毎フレームの大量アロケーションを回避）
             PIXEL_BUFFER.with(|pb| {
@@ -629,13 +635,13 @@ async fn start_async() -> Result<(), JsValue> {
                 if pb.len() != needed {
                     pb.resize(needed, 0);
                 }
-                // pb.fill(0) は不要: Background グラデーションが毎フレーム全画面を上書きする
+                // pb.fill(0) は不要: renderer が viewport 外も含めて毎フレーム初期化する
 
-                let render_list = ui::build_ui(&app_borrow, current_font, width, height);
+                let render_list = ui::build_ui(&app_borrow, fonts, viewport.width, viewport.height);
                 RENDER_CACHE.with(|cache| {
                     let mut cache = cache.borrow_mut();
                     if let Some(mut surface) = ArgbSurface::new(width, height, &mut pb) {
-                        surface.render(current_font, &render_list, &mut cache);
+                        surface.render(fonts, display_settings, &render_list, &mut cache);
                     }
                 });
                 // u8 バッファも再利用してコピー（毎フレームの大量アロケーションを回避）

@@ -43,11 +43,7 @@ fn run_inner() -> core::result::Result<(), Status> {
     let simplified_chinese_font = load_embedded_font(simplified_chinese_font_data)?;
 
     // Fonts構造体を初期化
-    let fonts = Fonts {
-        japanese: yuji_font,
-        traditional_chinese: Some(traditional_chinese_font),
-        simplified_chinese: Some(simplified_chinese_font),
-    };
+    let fonts = Fonts::new(yuji_font, simplified_chinese_font, traditional_chinese_font);
 
     // AppにFontsを渡して初期化
     let mut app = App::new(fonts);
@@ -108,12 +104,14 @@ fn run_inner() -> core::result::Result<(), Status> {
             }
         }
 
-        app.update(width, height, delta_time);
+        let display_settings = app.display_settings();
+        let viewport = display_settings.viewport(width, height);
+        app.update(viewport.width, viewport.height, delta_time);
 
-        let current_font = app.get_current_font();
-        let render_list = ui::build_ui(&app, current_font, width, height);
+        let fonts = app.fonts();
+        let render_list = ui::build_ui(&app, fonts, viewport.width, viewport.height);
         if let Some(mut surface) = ArgbSurface::new(width, height, &mut argb_buffer) {
-            surface.render(current_font, &render_list, &mut render_cache);
+            surface.render(fonts, display_settings, &render_list, &mut render_cache);
             for (pixel, color) in pixel_buffer.iter_mut().zip(surface.pixels().iter()) {
                 *pixel = BltPixel::new(
                     ((*color >> 16) & 0xFF) as u8,

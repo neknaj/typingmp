@@ -48,11 +48,11 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::NotoSerifJpRegular)?)
             .map_err(|_| BackendError::asset("failed to parse Noto Serif JP font"))?;
 
-    let fonts = Fonts {
-        japanese: japanese_font,
-        traditional_chinese: Some(traditional_chinese_font),
-        simplified_chinese: Some(simplified_chinese_font),
-    };
+    let fonts = Fonts::new(
+        japanese_font,
+        simplified_chinese_font,
+        traditional_chinese_font,
+    );
 
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()
@@ -207,7 +207,8 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                     *control_flow = ControlFlow::Exit;
                 }
 
-                app.update(width, height, delta_time.min(100.0));
+                let viewport = app.display_settings().viewport(width, height);
+                app.update(viewport.width, viewport.height, delta_time.min(100.0));
 
                 if let Err(err) = present_frame(width, height, &app, &mut pixel_buffer, &mut pixels)
                 {
@@ -229,10 +230,12 @@ fn render_frame(
     pixel_buffer: &mut [u32],
     render_cache: &mut RenderCache,
 ) {
-    let current_font = app.get_current_font();
-    let render_list = ui::build_ui(app, current_font, width, height);
+    let display_settings = app.display_settings();
+    let viewport = display_settings.viewport(width, height);
+    let fonts = app.fonts();
+    let render_list = ui::build_ui(app, fonts, viewport.width, viewport.height);
     if let Some(mut surface) = ArgbSurface::new(width, height, pixel_buffer) {
-        surface.render(current_font, &render_list, render_cache);
+        surface.render(fonts, display_settings, &render_list, render_cache);
     }
 }
 

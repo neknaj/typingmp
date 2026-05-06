@@ -1,5 +1,6 @@
 extern crate alloc;
 
+use crate::font::{script_for_segment, FontScript, Fonts};
 use crate::model::{CharIndex, Line, LineIndex, Segment, SegmentIndex, WordIndex};
 use crate::renderer::gui_renderer;
 use ab_glyph::FontVec;
@@ -48,6 +49,7 @@ fn seg_ruby_text_owned(seg: &Segment) -> Option<String> {
 pub(crate) struct ScrollLineSegmentCache {
     pub base_text: String,
     pub ruby_text: Option<String>,
+    pub script: FontScript,
     pub base_width: f32,
     pub reading_width_prefix: Vec<f32>,
     pub word_index: usize,
@@ -169,7 +171,7 @@ fn build_reading_width_prefix(font: &FontVec, text: &str, font_pixel_size: f32) 
 
 pub(crate) fn build_scroll_line_cache(
     line: &Line,
-    font: &FontVec,
+    fonts: &Fonts,
     font_pixel_size: f32,
     line_index: LineIndex,
 ) -> ScrollLineCache {
@@ -185,6 +187,8 @@ pub(crate) fn build_scroll_line_cache(
             let base_text = seg_base_text_owned(segment);
             let reading_text = seg_reading_text_owned(segment);
             let ruby_text = seg_ruby_text_owned(segment);
+            let script = script_for_segment(segment);
+            let font = fonts.get_for_script(script);
             let base_width = gui_renderer::measure_text(font, &base_text, font_pixel_size).0 as f32;
             let reading_width_prefix =
                 build_reading_width_prefix(font, &reading_text, font_pixel_size);
@@ -193,6 +197,7 @@ pub(crate) fn build_scroll_line_cache(
             segments.push(ScrollLineSegmentCache {
                 base_text,
                 ruby_text,
+                script,
                 base_width,
                 reading_width_prefix,
                 word_index: 0,
@@ -224,13 +229,17 @@ pub(crate) fn build_scroll_line_cache(
     }
 }
 
-fn line_total_width(line: &Line, font: &FontVec, font_pixel_size: f32) -> f32 {
+fn line_total_width(line: &Line, fonts: &Fonts, font_pixel_size: f32) -> f32 {
     let mut total = 0.0f32;
     for word in &line.words {
         for segment in &word.segments {
-            total +=
-                gui_renderer::measure_text(font, &seg_base_text_owned(segment), font_pixel_size).0
-                    as f32;
+            let script = script_for_segment(segment);
+            total += gui_renderer::measure_text(
+                fonts.get_for_script(script),
+                &seg_base_text_owned(segment),
+                font_pixel_size,
+            )
+            .0 as f32;
         }
     }
     total
@@ -239,7 +248,7 @@ fn line_total_width(line: &Line, font: &FontVec, font_pixel_size: f32) -> f32 {
 pub(crate) fn line_origin_from_start(
     target_line: usize,
     lines: &[Line],
-    font: &FontVec,
+    fonts: &Fonts,
     font_pixel_size: f32,
     gap_width: f32,
 ) -> f32 {
@@ -251,7 +260,7 @@ pub(crate) fn line_origin_from_start(
         } else {
             return origin;
         };
-        origin += line_total_width(line, font, font_pixel_size) + gap_width;
+        origin += line_total_width(line, fonts, font_pixel_size) + gap_width;
     }
     origin
 }
@@ -260,7 +269,7 @@ pub(crate) fn line_origin_from_previous(
     previous: &ScrollCacheState,
     target_line: usize,
     lines: &[Line],
-    font: &FontVec,
+    fonts: &Fonts,
     font_pixel_size: f32,
     gap_width: f32,
 ) -> f32 {
@@ -279,7 +288,7 @@ pub(crate) fn line_origin_from_previous(
                 return line_origin_from_start(
                     target_line,
                     lines,
-                    font,
+                    fonts,
                     font_pixel_size,
                     gap_width,
                 );
@@ -287,7 +296,7 @@ pub(crate) fn line_origin_from_previous(
             let width = if line_idx == previous_line {
                 previous.current.total_width
             } else {
-                line_total_width(line, font, font_pixel_size)
+                line_total_width(line, fonts, font_pixel_size)
             };
             origin += width + gap_width;
         }
@@ -299,12 +308,12 @@ pub(crate) fn line_origin_from_previous(
                 return line_origin_from_start(
                     target_line,
                     lines,
-                    font,
+                    fonts,
                     font_pixel_size,
                     gap_width,
                 );
             };
-            let width = line_total_width(line, font, font_pixel_size);
+            let width = line_total_width(line, fonts, font_pixel_size);
             origin -= width + gap_width;
         }
     }

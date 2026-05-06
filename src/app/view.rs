@@ -1,4 +1,5 @@
-use super::{App, AppState, MainMenuItem, Script, SettingsItem, TuiDisplayMode};
+use super::{App, AppState, MainMenuItem, SettingsItem, TuiDisplayMode};
+use crate::display::DisplaySettings;
 
 #[derive(Debug, Clone, Copy)]
 pub struct AppSnapshot<'a> {
@@ -10,7 +11,7 @@ pub struct AppSnapshot<'a> {
     pub selected_main_menu_item: MainMenuItem,
     pub selected_problem_item: usize,
     pub selected_settings_item: SettingsItem,
-    pub settings_script: Script,
+    pub display_settings: DisplaySettings,
     pub source_scroll: usize,
     pub how_to_use_scroll: usize,
     pub should_quit: bool,
@@ -28,7 +29,7 @@ impl App {
             selected_main_menu_item: self.selected_main_menu_item,
             selected_problem_item: self.selected_problem_item,
             selected_settings_item: self.selected_settings_item,
-            settings_script: self.settings_script,
+            display_settings: self.display_settings,
             source_scroll: self.source_scroll,
             how_to_use_scroll: self.how_to_use_scroll,
             should_quit: self.should_quit,

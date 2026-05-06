@@ -19,13 +19,15 @@ use std::{
 #[cfg(feature = "uefi")]
 use core_maths::CoreFloat;
 
+use crate::display::{DisplaySettings, DisplayViewport};
+use crate::font::Fonts;
 use crate::ui::{
     self, ActiveLowerElement, FontSize, LowerTypingSegment, Renderable, UpperSegmentState,
 };
 use ab_glyph::{point, Font, OutlinedGlyph, PxScale, ScaleFont};
 
 /// 背景の描画色
-pub const BG_COLOR: u32 = 0x00_000000;
+pub const BG_COLOR: u32 = 0xFF_000000;
 
 /// ピクセルバッファに線形グラデーションを描画する
 pub fn draw_linear_gradient(
@@ -89,6 +91,7 @@ struct TextMetrics {
 
 #[derive(Debug, Clone)]
 struct TextMeasureCacheEntry {
+    font_key: usize,
     text: String,
     size_bits: u32,
     metrics: TextMetrics,
@@ -105,7 +108,7 @@ struct BackgroundCache {
 
 /// Shared render cache used by pixel backends.
 pub struct RenderCache {
-    font_key: usize,
+    font_generation: u64,
     text_metrics: Vec<TextMeasureCacheEntry>,
     background: Option<BackgroundCache>,
 }
@@ -115,27 +118,26 @@ impl RenderCache {
 
     pub const fn new() -> Self {
         Self {
-            font_key: 0,
+            font_generation: u64::MAX,
             text_metrics: Vec::new(),
             background: None,
         }
     }
 
-    fn prepare_font<F: Font>(&mut self, font: &F) {
-        let font_key = core::ptr::from_ref(font).cast::<()>() as usize;
-        if self.font_key != font_key {
-            self.font_key = font_key;
+    fn prepare_fonts(&mut self, fonts: &Fonts) {
+        let font_generation = fonts.generation();
+        if self.font_generation != font_generation {
+            self.font_generation = font_generation;
             self.text_metrics.clear();
         }
     }
 
     fn measure_text<F: Font>(&mut self, font: &F, text: &str, size: f32) -> TextMetrics {
+        let font_key = core::ptr::from_ref(font).cast::<()>() as usize;
         let size_bits = size.to_bits();
-        if let Some(entry) = self
-            .text_metrics
-            .iter()
-            .find(|entry| entry.size_bits == size_bits && entry.text == text)
-        {
+        if let Some(entry) = self.text_metrics.iter().find(|entry| {
+            entry.font_key == font_key && entry.size_bits == size_bits && entry.text == text
+        }) {
             return entry.metrics;
         }
 
@@ -145,6 +147,7 @@ impl RenderCache {
             self.text_metrics.clear();
         }
         self.text_metrics.push(TextMeasureCacheEntry {
+            font_key,
             text: text.to_string(),
             size_bits,
             metrics,
@@ -223,18 +226,21 @@ impl<'a> ArgbSurface<'a> {
         })
     }
 
-    pub fn render<F: Font>(
+    pub fn render(
         &mut self,
-        font: &F,
+        fonts: &Fonts,
+        display_settings: DisplaySettings,
         render_list: &[Renderable],
         cache: &mut RenderCache,
     ) {
-        cache.prepare_font(font);
+        cache.prepare_fonts(fonts);
+        let viewport = display_settings.viewport(self.width, self.height);
         render_argb(
             self.pixels,
             self.width,
             self.height,
-            font,
+            viewport,
+            fonts,
             render_list,
             cache,
         );
@@ -245,36 +251,33 @@ impl<'a> ArgbSurface<'a> {
     }
 }
 
-fn render_argb<F: Font>(
+fn render_argb(
     pixels: &mut [u32],
     width: usize,
     height: usize,
-    font: &F,
+    viewport: DisplayViewport,
+    fonts: &Fonts,
     render_list: &[Renderable],
     cache: &mut RenderCache,
 ) {
     let mut frame = PixelFrame {
         pixels,
-        width,
-        height,
+        stride: width,
+        frame_height: height,
+        viewport,
     };
+    frame.pixels.fill(BG_COLOR);
     let has_background = render_list
         .iter()
         .any(|item| matches!(item, Renderable::Background { .. }));
     if !has_background {
-        frame.pixels.fill(BG_COLOR);
+        frame.fill_viewport(BG_COLOR);
     }
 
     for item in render_list {
         match item {
             Renderable::Background { gradient } => {
-                cache.draw_gradient(
-                    frame.pixels,
-                    frame.width,
-                    frame.height,
-                    gradient.start_color,
-                    gradient.end_color,
-                );
+                frame.draw_gradient(cache, gradient.start_color, gradient.end_color);
             }
             Renderable::BigText {
                 text,
@@ -293,7 +296,7 @@ fn render_argb<F: Font>(
                 color,
             } => draw_aligned_text(
                 &mut frame,
-                font,
+                fonts.primary(),
                 text,
                 TextPlacement {
                     anchor: *anchor,
@@ -313,7 +316,7 @@ fn render_argb<F: Font>(
                 line_width,
             } => draw_typing_upper(
                 &mut frame,
-                font,
+                fonts,
                 segments,
                 TypingUpperPlacement {
                     text: TextPlacement {
@@ -335,7 +338,7 @@ fn render_argb<F: Font>(
                 line_alignment,
             } => draw_typing_lower(
                 &mut frame,
-                font,
+                fonts,
                 segments,
                 TypingLowerPlacement {
                     text: TextPlacement {
@@ -376,8 +379,66 @@ fn render_argb<F: Font>(
 
 struct PixelFrame<'a> {
     pixels: &'a mut [u32],
-    width: usize,
-    height: usize,
+    stride: usize,
+    frame_height: usize,
+    viewport: DisplayViewport,
+}
+
+impl PixelFrame<'_> {
+    fn width(&self) -> usize {
+        self.viewport.width
+    }
+
+    fn height(&self) -> usize {
+        self.viewport.height
+    }
+
+    fn scale(&self) -> f32 {
+        self.viewport.scale
+    }
+
+    fn offset_position(&self, pos: (f32, f32)) -> (f32, f32) {
+        (
+            pos.0 + self.viewport.x as f32,
+            pos.1 + self.viewport.y as f32,
+        )
+    }
+
+    fn fill_viewport(&mut self, color: u32) {
+        for y in self.viewport.y..(self.viewport.y + self.viewport.height).min(self.frame_height) {
+            let row_start = y * self.stride;
+            let start = row_start + self.viewport.x.min(self.stride);
+            let end = row_start + (self.viewport.x + self.viewport.width).min(self.stride);
+            self.pixels[start..end].fill(color);
+        }
+    }
+
+    fn draw_gradient(&mut self, cache: &mut RenderCache, start_color: u32, end_color: u32) {
+        if self.viewport.width == 0 || self.viewport.height == 0 {
+            return;
+        }
+
+        let mut viewport_pixels = vec![0; self.viewport.width * self.viewport.height];
+        cache.draw_gradient(
+            &mut viewport_pixels,
+            self.viewport.width,
+            self.viewport.height,
+            start_color,
+            end_color,
+        );
+
+        for row in 0..self.viewport.height {
+            let dest_y = self.viewport.y + row;
+            if dest_y >= self.frame_height {
+                break;
+            }
+            let dest_start = dest_y * self.stride + self.viewport.x;
+            let dest_end = dest_start + self.viewport.width.min(self.stride - self.viewport.x);
+            let src_start = row * self.viewport.width;
+            let src_end = src_start + (dest_end - dest_start);
+            self.pixels[dest_start..dest_end].copy_from_slice(&viewport_pixels[src_start..src_end]);
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -423,47 +484,57 @@ fn draw_aligned_text<F: Font>(
     color: u32,
     cache: &mut RenderCache,
 ) {
-    let pixel_font_size = calculate_pixel_font_size(placement.font_size, frame.width, frame.height);
+    let pixel_font_size =
+        calculate_pixel_font_size(placement.font_size, frame.width(), frame.height())
+            * frame.scale();
     let metrics = cache.measure_text(font, text, pixel_font_size);
-    let anchor_pos =
-        ui::calculate_anchor_position(placement.anchor, placement.shift, frame.width, frame.height);
+    let anchor_pos = ui::calculate_anchor_position(
+        placement.anchor,
+        placement.shift,
+        frame.width(),
+        frame.height(),
+    );
     let (x, y) =
         ui::calculate_aligned_position(anchor_pos, metrics.width, metrics.height, placement.align);
     gui_renderer::draw_text(
         frame.pixels,
-        frame.width,
+        frame.stride,
         font,
         text,
-        (x as f32, y as f32),
+        frame.offset_position((x as f32, y as f32)),
         pixel_font_size,
         color,
     );
 }
 
-fn draw_typing_upper<F: Font>(
+fn draw_typing_upper(
     frame: &mut PixelFrame<'_>,
-    font: &F,
+    fonts: &Fonts,
     segments: &[ui::UpperTypingSegment],
     placement: TypingUpperPlacement,
     cache: &mut RenderCache,
 ) {
     let pixel_font_size =
-        calculate_pixel_font_size(placement.text.font_size, frame.width, frame.height);
+        calculate_pixel_font_size(placement.text.font_size, frame.width(), frame.height())
+            * frame.scale();
     let ruby_pixel_font_size = pixel_font_size * 0.4;
     let segment_widths: Vec<u32> = segments
         .iter()
         .map(|segment| {
+            let font = fonts.get_for_script(segment.script);
             cache
                 .measure_text(font, &segment.base_text, pixel_font_size)
                 .width
         })
         .collect();
-    let total_height = cache.measure_text(font, " ", pixel_font_size).height;
+    let total_height = cache
+        .measure_text(fonts.primary(), " ", pixel_font_size)
+        .height;
     let anchor_pos = ui::calculate_anchor_position(
         placement.text.anchor,
         placement.text.shift,
-        frame.width,
-        frame.height,
+        frame.width(),
+        frame.height(),
     );
     let (mut pen_x, y) = ui::calculate_aligned_position(
         anchor_pos,
@@ -474,12 +545,13 @@ fn draw_typing_upper<F: Font>(
 
     for (segment, segment_width) in segments.iter().zip(segment_widths.iter().copied()) {
         let color = upper_segment_color(segment.state);
+        let font = fonts.get_for_script(segment.script);
         gui_renderer::draw_text(
             frame.pixels,
-            frame.width,
+            frame.stride,
             font,
             &segment.base_text,
-            (pen_x as f32, y as f32),
+            frame.offset_position((pen_x as f32, y as f32)),
             pixel_font_size,
             color,
         );
@@ -490,10 +562,10 @@ fn draw_typing_upper<F: Font>(
             let ruby_y = y as f32 - ruby_pixel_font_size * 0.5;
             gui_renderer::draw_text(
                 frame.pixels,
-                frame.width,
+                frame.stride,
                 font,
                 ruby,
-                (ruby_x, ruby_y),
+                frame.offset_position((ruby_x, ruby_y)),
                 ruby_pixel_font_size,
                 color,
             );
@@ -503,22 +575,25 @@ fn draw_typing_upper<F: Font>(
     }
 }
 
-fn draw_typing_lower<F: Font>(
+fn draw_typing_lower(
     frame: &mut PixelFrame<'_>,
-    font: &F,
+    fonts: &Fonts,
     segments: &[LowerTypingSegment],
     placement: TypingLowerPlacement,
     cache: &mut RenderCache,
 ) {
     let pixel_font_size =
-        calculate_pixel_font_size(placement.text.font_size, frame.width, frame.height);
+        calculate_pixel_font_size(placement.text.font_size, frame.width(), frame.height())
+            * frame.scale();
     let ruby_pixel_font_size = pixel_font_size * 0.3;
-    let total_height = cache.measure_text(font, " ", pixel_font_size).height;
+    let total_height = cache
+        .measure_text(fonts.primary(), " ", pixel_font_size)
+        .height;
     let anchor_pos = ui::calculate_anchor_position(
         placement.text.anchor,
         placement.text.shift,
-        frame.width,
-        frame.height,
+        frame.width(),
+        frame.height(),
     );
     let (mut pen_x, y) = ui::calculate_aligned_position(
         anchor_pos,
@@ -528,16 +603,18 @@ fn draw_typing_lower<F: Font>(
     );
     pen_x += placement.line_alignment.visible_start_width as i32;
     let visible_left = -100;
-    let visible_right = frame.width as i32 + 100;
+    let visible_right = frame.width() as i32 + 100;
 
     for segment in segments {
         match segment {
             LowerTypingSegment::Completed {
                 base_text,
                 ruby_text,
+                script,
                 is_correct,
                 width: segment_width,
             } => {
+                let font = fonts.get_for_script(*script);
                 let color = if *is_correct {
                     ui::CORRECT_COLOR
                 } else {
@@ -550,10 +627,10 @@ fn draw_typing_lower<F: Font>(
                 {
                     gui_renderer::draw_text(
                         frame.pixels,
-                        frame.width,
+                        frame.stride,
                         font,
                         base_text,
-                        (pen_x as f32, y as f32),
+                        frame.offset_position((pen_x as f32, y as f32)),
                         pixel_font_size,
                         color,
                     );
@@ -566,10 +643,10 @@ fn draw_typing_lower<F: Font>(
                             let ruby_y = y as f32 - ruby_pixel_font_size * 0.5;
                             gui_renderer::draw_text(
                                 frame.pixels,
-                                frame.width,
+                                frame.stride,
                                 font,
                                 ruby,
-                                (ruby_x, ruby_y),
+                                frame.offset_position((ruby_x, ruby_y)),
                                 ruby_pixel_font_size,
                                 color,
                             );
@@ -578,7 +655,8 @@ fn draw_typing_lower<F: Font>(
                 }
                 pen_x += segment_width_px;
             }
-            LowerTypingSegment::Active { elements } => {
+            LowerTypingSegment::Active { elements, script } => {
+                let font = fonts.get_for_script(*script);
                 for element in elements {
                     let (text, color) = active_lower_text_and_color(element);
                     let text_width = cache.measure_text(font, &text, pixel_font_size).width as i32;
@@ -588,10 +666,10 @@ fn draw_typing_lower<F: Font>(
                     {
                         gui_renderer::draw_text(
                             frame.pixels,
-                            frame.width,
+                            frame.stride,
                             font,
                             &text,
-                            (pen_x as f32, y as f32),
+                            frame.offset_position((pen_x as f32, y as f32)),
                             pixel_font_size,
                             color,
                         );
@@ -608,16 +686,20 @@ fn draw_progress_bar(
     placement: ProgressPlacement,
     colors: ProgressColors,
 ) {
-    let bar_width = (frame.width as f32 * placement.width_ratio) as u32;
-    let bar_height = (frame.height as f32 * placement.height_ratio) as u32;
-    let anchor_pos =
-        ui::calculate_anchor_position(placement.anchor, placement.shift, frame.width, frame.height);
-    let start_x = anchor_pos.0.max(0) as usize;
-    let start_y = (anchor_pos.1 - bar_height as i32).max(0) as usize;
+    let bar_width = (frame.width() as f32 * placement.width_ratio) as u32;
+    let bar_height = (frame.height() as f32 * placement.height_ratio) as u32;
+    let anchor_pos = ui::calculate_anchor_position(
+        placement.anchor,
+        placement.shift,
+        frame.width(),
+        frame.height(),
+    );
+    let start_x = frame.viewport.x + anchor_pos.0.max(0) as usize;
+    let start_y = frame.viewport.y + (anchor_pos.1 - bar_height as i32).max(0) as usize;
 
     gui_renderer::draw_rect(
         frame.pixels,
-        frame.width,
+        frame.stride,
         start_x,
         start_y,
         bar_width as usize,
@@ -629,7 +711,7 @@ fn draw_progress_bar(
     if fg_width > 0 {
         gui_renderer::draw_rect(
             frame.pixels,
-            frame.width,
+            frame.stride,
             start_x,
             start_y,
             fg_width,
@@ -1049,6 +1131,8 @@ pub mod tui_renderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::display::DisplaySettings;
+    use crate::font::Fonts;
     use crate::ui::{Align, Anchor, FontSize, HorizontalAlign, Renderable, Shift, VerticalAlign};
     use ab_glyph::FontVec;
 
@@ -1057,9 +1141,13 @@ mod tests {
             .expect("test font should parse")
     }
 
+    fn test_fonts() -> Fonts {
+        Fonts::new(test_font(), test_font(), test_font())
+    }
+
     #[test]
     fn argb_surface_renders_and_reuses_text_measurements() {
-        let font = test_font();
+        let fonts = test_fonts();
         let render_list = vec![
             Renderable::Background {
                 gradient: crate::ui::Gradient {
@@ -1085,7 +1173,7 @@ mod tests {
         {
             let mut surface =
                 ArgbSurface::new(160, 90, &mut pixels).expect("surface dimensions should be valid");
-            surface.render(&font, &render_list, &mut cache);
+            surface.render(&fonts, DisplaySettings::default(), &render_list, &mut cache);
         }
         let cache_len_after_first_render = cache.text_measure_cache_len();
         assert!(cache_len_after_first_render > 0);
@@ -1094,7 +1182,7 @@ mod tests {
         {
             let mut surface =
                 ArgbSurface::new(160, 90, &mut pixels).expect("surface dimensions should be valid");
-            surface.render(&font, &render_list, &mut cache);
+            surface.render(&fonts, DisplaySettings::default(), &render_list, &mut cache);
         }
         assert_eq!(cache.text_measure_cache_len(), cache_len_after_first_render);
     }

@@ -19,13 +19,15 @@ use alloc::{
 #[cfg(not(feature = "uefi"))]
 use std::string::{String, ToString};
 
-use crate::app::{typing_line_scroll_offset, App, AppSnapshot, AppState, Script, ScrollCache};
+use crate::app::{
+    typing_line_scroll_offset, App, AppSnapshot, AppState, Script, ScrollCache, SettingsItem,
+};
+use crate::font::{script_for_segment, FontScript, Fonts};
 use crate::model::{
     Segment, TypingCorrectnessChar, TypingCorrectnessSegment, TypingCorrectnessWord,
 };
 use crate::renderer::{calculate_pixel_font_size, gui_renderer};
 use crate::typing; // For calculate_total_metrics
-use ab_glyph::FontVec;
 
 #[derive(Clone, Copy)]
 pub enum Anchor {
@@ -94,6 +96,7 @@ pub struct UpperTypingSegment {
     pub base_text: String,
     pub ruby_text: Option<String>,
     pub anno_text: Option<String>,
+    pub script: FontScript,
     pub state: UpperSegmentState,
 }
 
@@ -108,11 +111,13 @@ pub enum LowerTypingSegment {
     Completed {
         base_text: String,
         ruby_text: Option<String>,
+        script: FontScript,
         is_correct: bool,
         width: u32,
     },
     Active {
         elements: Vec<ActiveLowerElement>,
+        script: FontScript,
     },
 }
 
@@ -240,7 +245,7 @@ pub const WRONG_KEY_COLOR: u32 = 0xFF_F55252;
 pub const CURSOR_COLOR: u32 = 0xFF_FFFFFF;
 pub const UNCONFIRMED_COLOR: u32 = 0xFF_CCCCCC;
 
-pub fn build_ui(app: &App, font: &FontVec, width: usize, height: usize) -> Vec<Renderable> {
+pub fn build_ui(app: &App, fonts: &Fonts, width: usize, height: usize) -> Vec<Renderable> {
     let mut render_list = Vec::new();
     let snapshot = app.snapshot();
 
@@ -264,7 +269,7 @@ pub fn build_ui(app: &App, font: &FontVec, width: usize, height: usize) -> Vec<R
     match snapshot.state {
         AppState::MainMenu => build_main_menu_ui(snapshot, &mut render_list, menu_gradient),
         AppState::Typing => {
-            build_typing_ui(app, &mut render_list, typing_gradient, font, width, height)
+            build_typing_ui(app, &mut render_list, typing_gradient, fonts, width, height)
         }
         AppState::ProblemSelection => {
             build_problem_selection_ui(app, snapshot, &mut render_list, menu_gradient)
@@ -409,23 +414,44 @@ fn build_settings_ui(
     });
 
     let fonts = [
-        (Script::Japanese, "Japanese"),
-        (Script::TraditionalChinese, "Traditional Chinese"),
-        (Script::SimplifiedChinese, "Simplified Chinese"),
+        (
+            SettingsItem::Japanese,
+            Script::Japanese.settings_label().to_string(),
+        ),
+        (
+            SettingsItem::SimplifiedChinese,
+            Script::SimplifiedChinese.settings_label().to_string(),
+        ),
+        (
+            SettingsItem::TraditionalChinese,
+            Script::TraditionalChinese.settings_label().to_string(),
+        ),
+        (
+            SettingsItem::AspectRatio,
+            format!(
+                "Aspect Ratio: {}",
+                snapshot.display_settings.aspect_ratio.label()
+            ),
+        ),
+        (
+            SettingsItem::DisplayScale,
+            format!("Display Scale: {}", snapshot.display_settings.scale.label()),
+        ),
     ];
 
-    for (i, (font_choice, name)) in fonts.iter().enumerate() {
+    for (i, (settings_item, label)) in fonts.iter().enumerate() {
         let is_selected = i == snapshot.selected_settings_item.index();
-        let is_active = *font_choice == snapshot.settings_script;
 
         let mut display_text = if is_selected {
-            format!("> {}", name)
+            format!("> {}", label)
         } else {
-            format!("  {}", name)
+            format!("  {}", label)
         };
 
-        if is_active {
-            display_text.push_str(" *");
+        if is_selected && settings_item.font_script().is_some() {
+            display_text.push_str(" <assign>");
+        } else if is_selected {
+            display_text.push_str(" <cycle>");
         }
 
         let color = if is_selected {
@@ -796,13 +822,14 @@ fn is_segment_correct(segment: &TypingCorrectnessSegment) -> bool {
     !segment.chars.contains(&TypingCorrectnessChar::Incorrect)
 }
 
-fn measure_line_base_width(line: &crate::model::Line, font: &FontVec, font_size: f32) -> u32 {
+fn measure_line_base_width(line: &crate::model::Line, fonts: &Fonts, font_size: f32) -> u32 {
     line.words
         .iter()
         .flat_map(|word| &word.segments)
         .map(|segment| {
             let text = segment_base_text(segment);
-            gui_renderer::measure_text(font, &text, font_size).0
+            let script = script_for_segment(segment);
+            gui_renderer::measure_text(fonts.get_for_script(script), &text, font_size).0
         })
         .sum()
 }
@@ -834,7 +861,7 @@ fn build_typing_ui(
     app: &App,
     render_list: &mut Vec<Renderable>,
     gradient: Gradient,
-    font: &FontVec,
+    fonts: &Fonts,
     width: usize,
     height: usize,
 ) {
@@ -854,7 +881,8 @@ fn build_typing_ui(
         });
 
         let base_font_size = FontSize::WindowHeight(BASE_FONT_SIZE_RATIO);
-        let base_pixel_font_size = calculate_pixel_font_size(base_font_size, width, height);
+        let base_pixel_font_size = calculate_pixel_font_size(base_font_size, width, height)
+            * app.display_settings().scale.multiplier();
         let line_idx = model.status.line.get();
         let content_line = if let Some(line) = model.content.lines.get(line_idx) {
             line
@@ -876,7 +904,7 @@ fn build_typing_ui(
             .unwrap_or(0.0);
         let full_line_width = match cached_cache {
             Some(state) => state.current.total_width as u32,
-            None => measure_line_base_width(content_line, font, base_pixel_font_size),
+            None => measure_line_base_width(content_line, fonts, base_pixel_font_size),
         };
         let scroll_offset = if cached_cache.is_some() {
             (model.scroll.scroll - line_origin) as f32
@@ -914,6 +942,7 @@ fn build_typing_ui(
                     UpperSegmentState::Pending
                 };
 
+                let segment_script = script_for_segment(seg);
                 let (base_text, ruby_text, anno_text) = segment_display_parts(seg);
                 if word_idx == status.word.get()
                     && seg_idx == status.segment.get()
@@ -944,6 +973,7 @@ fn build_typing_ui(
                                     base_text: ch.to_string(),
                                     ruby_text: None,
                                     anno_text: None,
+                                    script: segment_script,
                                     state,
                                 });
                             }
@@ -955,6 +985,7 @@ fn build_typing_ui(
                     base_text,
                     ruby_text,
                     anno_text,
+                    script: segment_script,
                     state,
                 });
             }
@@ -1052,6 +1083,7 @@ fn build_typing_ui(
                     lower_segments.push(LowerTypingSegment::Completed {
                         base_text: cache_seg.base_text.clone(),
                         ruby_text: cache_seg.ruby_text.clone(),
+                        script: cache_seg.script,
                         is_correct,
                         width: cache_seg.base_width as u32,
                     });
@@ -1065,6 +1097,7 @@ fn build_typing_ui(
                     if let Some(active_seg_content) =
                         active_word_content.segments.get(status_segment)
                     {
+                        let active_script = script_for_segment(active_seg_content);
                         let reading_text = segment_reading_text(active_seg_content);
                         let mut active_elements = Vec::new();
 
@@ -1094,6 +1127,7 @@ fn build_typing_ui(
 
                         lower_segments.push(LowerTypingSegment::Active {
                             elements: active_elements,
+                            script: active_script,
                         });
                     }
                 }
@@ -1105,12 +1139,18 @@ fn build_typing_ui(
                     correctness_line.words.get(word_idx),
                 ) {
                     for seg in &word.segments {
+                        let script = script_for_segment(seg);
                         let (base_text, ruby_text, _) = segment_display_parts(seg);
-                        let seg_width =
-                            gui_renderer::measure_text(font, &base_text, base_pixel_font_size).0;
+                        let seg_width = gui_renderer::measure_text(
+                            fonts.get_for_script(script),
+                            &base_text,
+                            base_pixel_font_size,
+                        )
+                        .0;
                         lower_segments.push(LowerTypingSegment::Completed {
                             base_text,
                             ruby_text,
+                            script,
                             is_correct: is_word_correct(correctness_word),
                             width: seg_width,
                         });
@@ -1124,16 +1164,22 @@ fn build_typing_ui(
             ) {
                 for seg_idx in 0..status_segment {
                     if let Some(seg) = active_word_content.segments.get(seg_idx) {
+                        let script = script_for_segment(seg);
                         let (base_text, ruby_text, _) = segment_display_parts(seg);
                         let is_correct = active_correctness_word
                             .segments
                             .get(seg_idx)
                             .is_some_and(is_segment_correct);
-                        let width =
-                            gui_renderer::measure_text(font, &base_text, base_pixel_font_size).0;
+                        let width = gui_renderer::measure_text(
+                            fonts.get_for_script(script),
+                            &base_text,
+                            base_pixel_font_size,
+                        )
+                        .0;
                         lower_segments.push(LowerTypingSegment::Completed {
                             base_text,
                             ruby_text,
+                            script,
                             is_correct,
                             width,
                         });
@@ -1141,6 +1187,7 @@ fn build_typing_ui(
                 }
 
                 if let Some(active_seg_content) = active_word_content.segments.get(status_segment) {
+                    let active_script = script_for_segment(active_seg_content);
                     let reading_text = segment_reading_text(active_seg_content);
                     let mut active_elements = Vec::new();
 
@@ -1169,6 +1216,7 @@ fn build_typing_ui(
 
                     lower_segments.push(LowerTypingSegment::Active {
                         elements: active_elements,
+                        script: active_script,
                     });
                 }
             }
@@ -1359,16 +1407,17 @@ pub fn calculate_aligned_position(
 mod tests {
     use super::*;
     use crate::app::{App, AppEvent, Fonts};
+    use crate::display::DisplayScale;
+    use crate::font::FontScript;
+    use ab_glyph::FontVec;
 
     fn test_fonts() -> Fonts {
-        let japanese =
+        fn font() -> FontVec {
             FontVec::try_from_vec(include_bytes!("../fonts/YujiSyuku-Regular.ttf").to_vec())
-                .expect("test font should parse");
-        Fonts {
-            japanese,
-            traditional_chinese: None,
-            simplified_chinese: None,
+                .expect("test font should parse")
         }
+
+        Fonts::new(font(), font(), font())
     }
 
     fn typing_app(problem: &str) -> App {
@@ -1414,6 +1463,16 @@ mod tests {
         (upper_width, lower_alignment)
     }
 
+    fn upper_line_width(render_list: &[Renderable]) -> u32 {
+        render_list
+            .iter()
+            .find_map(|item| match item {
+                Renderable::TypingUpper { line_width, .. } => Some(*line_width),
+                _ => None,
+            })
+            .expect("typing upper renderable should exist")
+    }
+
     fn assert_line_left_matches_scroll_offset(
         anchor: Anchor,
         shift: Shift,
@@ -1443,7 +1502,7 @@ mod tests {
             timestamp: 2.0,
         });
 
-        let render_list = build_ui(&app, app.get_current_font(), 800, 500);
+        let render_list = build_ui(&app, app.fonts(), 800, 500);
         let (upper_segments, lower_segments) = typing_rows(&render_list);
         assert_eq!(upper_segments[0].base_text, "色");
         assert_eq!(upper_segments[0].state, UpperSegmentState::Correct);
@@ -1452,7 +1511,7 @@ mod tests {
         assert_eq!(upper_segments[2].base_text, "句");
         assert_eq!(upper_segments[2].state, UpperSegmentState::Active);
 
-        let LowerTypingSegment::Active { elements } = &lower_segments[0] else {
+        let LowerTypingSegment::Active { elements, .. } = &lower_segments[0] else {
             panic!("first lower segment should be active");
         };
         assert!(matches!(
@@ -1475,6 +1534,38 @@ mod tests {
     }
 
     #[test]
+    fn problem_readings_route_each_segment_to_its_font_script() {
+        let app = typing_app("#title Test\n[色/いろ][字/zi][字/ㄗˋ]");
+
+        let render_list = build_ui(&app, app.fonts(), 800, 500);
+        let (upper_segments, lower_segments) = typing_rows(&render_list);
+
+        assert_eq!(upper_segments[0].script, FontScript::Japanese);
+        assert_eq!(upper_segments[1].script, FontScript::SimplifiedChinese);
+        assert_eq!(upper_segments[2].script, FontScript::TraditionalChinese);
+
+        let LowerTypingSegment::Active { script, .. } = &lower_segments[0] else {
+            panic!("first lower segment should be active");
+        };
+        assert_eq!(*script, FontScript::Japanese);
+    }
+
+    #[test]
+    fn display_scale_is_applied_to_typing_line_measurement() {
+        let mut app = typing_app("#title Test\n[色/いろ][字/zi][字/ㄗˋ]");
+
+        let normal_width = upper_line_width(&build_ui(&app, app.fonts(), 800, 500));
+        app.display_settings.scale = DisplayScale::Percent200;
+        let scaled_width = upper_line_width(&build_ui(&app, app.fonts(), 800, 500));
+
+        assert!(scaled_width > normal_width);
+        assert!(
+            (scaled_width as f32 - normal_width as f32 * 2.0).abs() <= 2.0,
+            "scaled width {scaled_width} should be roughly double normal width {normal_width}"
+        );
+    }
+
+    #[test]
     fn cached_lower_segments_keep_their_full_line_offset() {
         let mut app = typing_app(
             "#title Test\n[a/a][b/b][c/c][d/d][e/e][f/f][g/g][h/h][i/i][j/j][k/k][l/l][m/m][n/n][o/o][p/p][q/q][r/r][s/s][t/t][u/u][v/v][w/w][x/x][y/y][z/z]",
@@ -1487,7 +1578,7 @@ mod tests {
         }
         app.update(240, 500, 100.0);
 
-        let render_list = build_ui(&app, app.get_current_font(), 240, 500);
+        let render_list = build_ui(&app, app.fonts(), 240, 500);
         let (upper_width, lower_alignment) = typing_alignment(&render_list);
         let (_, lower_segments) = typing_rows(&render_list);
         let Some(ScrollCache::Ready(cache)) = app.scroll_cache() else {
@@ -1533,7 +1624,7 @@ mod tests {
         }
         app.update(240, 500, 100.0);
 
-        let render_list = build_ui(&app, app.get_current_font(), 240, 500);
+        let render_list = build_ui(&app, app.fonts(), 240, 500);
         let Some(model) = app.typing_model() else {
             panic!("typing model should exist");
         };

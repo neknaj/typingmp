@@ -5,6 +5,8 @@ use crate::app::{App, AppEvent, Fonts, TuiDisplayMode};
 #[cfg(not(feature = "uefi"))]
 use crate::backend::BackendError;
 #[cfg(not(feature = "uefi"))]
+use crate::font::script_for_segment;
+#[cfg(not(feature = "uefi"))]
 use crate::io::{AssetProvider, BundledFont, DesktopAssetProvider};
 #[cfg(not(feature = "uefi"))]
 use crate::model::Segment;
@@ -209,11 +211,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::NotoSerifJpRegular)?)
             .map_err(|_| BackendError::asset("failed to parse Noto Serif JP font"))?;
 
-    let fonts = Fonts {
-        japanese: japanese_font,
-        traditional_chinese: Some(traditional_chinese_font),
-        simplified_chinese: Some(simplified_chinese_font),
-    };
+    let fonts = Fonts::new(
+        japanese_font,
+        simplified_chinese_font,
+        traditional_chinese_font,
+    );
 
     let mut stdout = stdout();
     let _terminal_guard = TerminalGuard::enter(&mut stdout)?;
@@ -244,7 +246,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         last_frame_time = now_time;
 
         // app.updateには仮想ピクセルサイズを渡す
-        app.update(TUI_VIRTUAL_PIXEL_WIDTH, virtual_height, delta_time);
+        let display_settings = app.display_settings();
+        let virtual_viewport = display_settings.viewport(TUI_VIRTUAL_PIXEL_WIDTH, virtual_height);
+        app.update(virtual_viewport.width, virtual_viewport.height, delta_time);
         if let Some(request) = app.take_font_load_request() {
             match asset_provider.load_font(request.font_id) {
                 Ok(bytes) => {
@@ -268,9 +272,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         let mut current_buffer = vec![Cell::default(); cols * rows];
         let viewport = TuiViewport::new(cols, rows);
 
-        let current_font = app.get_current_font();
+        let fonts = app.fonts();
         // ui.build_uiにも仮想ピクセルサイズを渡す
-        let render_list = ui::build_ui(&app, current_font, TUI_VIRTUAL_PIXEL_WIDTH, virtual_height);
+        let render_list =
+            ui::build_ui(&app, fonts, virtual_viewport.width, virtual_viewport.height);
+        let primary_font = fonts.primary();
 
         for item in render_list {
             match item {
@@ -290,7 +296,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             let is_braille = display_mode == TuiDisplayMode::Braille;
                             draw_art_text(
                                 &mut current_buffer,
-                                current_font,
+                                primary_font,
                                 &text,
                                 TuiTextPlacement::new(anchor, shift, align),
                                 viewport,
@@ -337,9 +343,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             let is_braille = display_mode == TuiDisplayMode::Braille;
                             let font_size_px = crate::renderer::calculate_pixel_font_size(
                                 font_size,
-                                TUI_VIRTUAL_PIXEL_WIDTH,
-                                virtual_height,
-                            );
+                                virtual_viewport.width,
+                                virtual_viewport.height,
+                            ) * display_settings.scale.multiplier();
 
                             let mut render_font_size = font_size_px;
                             if is_braille {
@@ -354,8 +360,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             let total_width_cells = segments
                                 .iter()
                                 .map(|seg| {
-                                    renderer(current_font, &seg.base_text, render_font_size).1
-                                        as u32
+                                    renderer(
+                                        fonts.get_for_script(seg.script),
+                                        &seg.base_text,
+                                        render_font_size,
+                                    )
+                                    .1 as u32
                                 })
                                 .sum::<u32>();
 
@@ -364,7 +374,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             }
 
                             let (_, _, line_total_height, line_ascent) =
-                                renderer(current_font, "|", render_font_size);
+                                renderer(primary_font, "|", render_font_size);
 
                             let anchor_pos =
                                 ui::calculate_anchor_position(anchor, shift, cols, rows);
@@ -384,8 +394,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     ui::UpperSegmentState::Pending => ui::PENDING_COLOR,
                                 });
 
-                                let (art_buffer, art_width, _, char_ascent) =
-                                    renderer(current_font, &seg.base_text, render_font_size);
+                                let (art_buffer, art_width, _, char_ascent) = renderer(
+                                    fonts.get_for_script(seg.script),
+                                    &seg.base_text,
+                                    render_font_size,
+                                );
                                 let blit_y = line_baseline_y - char_ascent as i32;
                                 blit_art(
                                     &mut current_buffer,
@@ -405,7 +418,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                         let ruby_font_size_px = render_font_size * 0.5;
                                         let (ruby_art_buffer, ruby_art_width, ruby_art_height, _) =
                                             tui_renderer::render_text_to_braille_art(
-                                                current_font,
+                                                fonts.get_for_script(seg.script),
                                                 ruby,
                                                 ruby_font_size_px,
                                             );
@@ -505,9 +518,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             let is_braille = display_mode == TuiDisplayMode::Braille;
                             let font_size_px = crate::renderer::calculate_pixel_font_size(
                                 font_size,
-                                TUI_VIRTUAL_PIXEL_WIDTH,
-                                virtual_height,
-                            );
+                                virtual_viewport.width,
+                                virtual_viewport.height,
+                            ) * display_settings.scale.multiplier();
                             let mut render_font_size = font_size_px;
                             if is_braille {
                                 render_font_size *= 2.0;
@@ -540,14 +553,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                             })
                                             .collect(),
                                     };
-                                    let cells =
-                                        renderer(current_font, &text, render_font_size).1 as u32;
-                                    let pixels = gui_renderer::measure_text(
-                                        current_font,
-                                        &text,
-                                        font_size_px,
-                                    )
-                                    .0 as f32;
+                                    let font = fonts.get_for_script(script_for_segment(seg));
+                                    let cells = renderer(font, &text, render_font_size).1 as u32;
+                                    let pixels =
+                                        gui_renderer::measure_text(font, &text, font_size_px).0
+                                            as f32;
                                     (acc_cells + cells, acc_pixels + pixels)
                                 });
 
@@ -562,7 +572,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             };
 
                             let (_, _, line_total_height, line_ascent) =
-                                renderer(current_font, "|", render_font_size);
+                                renderer(primary_font, "|", render_font_size);
 
                             let anchor_pos =
                                 ui::calculate_anchor_position(anchor, shift, cols, rows);
@@ -581,16 +591,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     LowerTypingSegment::Completed {
                                         base_text,
                                         ruby_text,
+                                        script,
                                         is_correct,
                                         ..
                                     } => {
+                                        let font = fonts.get_for_script(script);
                                         let color = u32_to_crossterm_color(if is_correct {
                                             ui::CORRECT_COLOR
                                         } else {
                                             ui::INCORRECT_COLOR
                                         });
                                         let (art_buffer, art_width, _, char_ascent) =
-                                            renderer(current_font, &base_text, render_font_size);
+                                            renderer(font, &base_text, render_font_size);
                                         let blit_y = line_baseline_y - char_ascent as i32;
                                         blit_art(
                                             &mut current_buffer,
@@ -613,7 +625,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                                     ruby_art_height,
                                                     _,
                                                 ) = tui_renderer::render_text_to_braille_art(
-                                                    current_font,
+                                                    font,
                                                     &ruby,
                                                     ruby_font_size_px,
                                                 );
@@ -669,7 +681,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                         }
                                         pen_x += art_width as i32;
                                     }
-                                    LowerTypingSegment::Active { elements } => {
+                                    LowerTypingSegment::Active { elements, script } => {
+                                        let font = fonts.get_for_script(script);
                                         for el in elements {
                                             let (text_to_render, color) = match el {
                                                 ActiveLowerElement::Typed {
@@ -718,7 +731,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                             } else {
                                                 let (art_buffer, art_width, _, char_ascent) =
                                                     renderer(
-                                                        current_font,
+                                                        font,
                                                         &text_to_render,
                                                         render_font_size,
                                                     );
@@ -810,7 +823,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                         );
                                         pen_x += base_text.chars().count() as i32;
                                     }
-                                    LowerTypingSegment::Active { elements } => {
+                                    LowerTypingSegment::Active { elements, .. } => {
                                         for el in elements {
                                             let (text, color) = match el {
                                                 ActiveLowerElement::Typed {
