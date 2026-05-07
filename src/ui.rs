@@ -172,7 +172,7 @@ pub enum Renderable {
         shift: Shift,
         align: Align,
         font_size: FontSize,
-        line_width: u32,
+        line_alignment: TypingLineAlignment,
     },
     TypingLower {
         segments: Vec<LowerTypingSegment>,
@@ -857,6 +857,71 @@ fn typing_visible_line_bounds(scroll_offset: f32, width: usize) -> (f32, f32) {
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct VisibleSegmentRange {
+    start: usize,
+    end: usize,
+    start_width: u32,
+}
+
+impl VisibleSegmentRange {
+    fn contains(self, index: usize) -> bool {
+        index >= self.start && index < self.end
+    }
+}
+
+fn visible_segment_range(
+    segment_prefix_width: &[f32],
+    segment_count: usize,
+    left_bound: f32,
+    right_bound: f32,
+) -> VisibleSegmentRange {
+    let start = segment_prefix_width
+        .partition_point(|value| *value <= left_bound)
+        .saturating_sub(1)
+        .min(segment_count);
+    let mut end = segment_prefix_width
+        .partition_point(|value| *value <= right_bound)
+        .min(segment_count);
+    if end < start {
+        end = start;
+    }
+
+    let start_width = segment_prefix_width
+        .get(start)
+        .copied()
+        .unwrap_or(0.0)
+        .max(0.0) as u32;
+
+    VisibleSegmentRange {
+        start,
+        end,
+        start_width,
+    }
+}
+
+fn cached_status_segment_index(
+    word_segment_starts: &[usize],
+    segment_count: usize,
+    status_word: usize,
+    status_segment: usize,
+) -> usize {
+    if status_word >= word_segment_starts.len() {
+        return segment_count;
+    }
+
+    let word_start = word_segment_starts
+        .get(status_word)
+        .copied()
+        .unwrap_or(segment_count);
+    let word_end = word_segment_starts
+        .get(status_word + 1)
+        .copied()
+        .unwrap_or(segment_count);
+    let segment_count_in_word = word_end.saturating_sub(word_start);
+    word_start + status_segment.min(segment_count_in_word)
+}
+
 fn build_typing_ui(
     app: &App,
     render_list: &mut Vec<Renderable>,
@@ -912,9 +977,55 @@ fn build_typing_ui(
             typing_line_scroll_offset(full_line_width as f32, 0.0, width)
         };
         let line_shift_x = typing_line_shift_x(scroll_offset, width);
+        let status_word = status.word.get();
+        let status_segment = status.segment.get();
+        let upper_visible_range = cached_cache.map(|state| {
+            let current_cache = &state.current;
+            let (left_bound, right_bound) = typing_visible_line_bounds(scroll_offset, width);
+            let mut range = visible_segment_range(
+                &current_cache.segment_prefix_width,
+                current_cache.segments.len(),
+                left_bound,
+                right_bound,
+            );
+            let active_segment_idx = cached_status_segment_index(
+                &current_cache.word_segment_starts,
+                current_cache.segments.len(),
+                status_word,
+                status_segment,
+            );
+
+            if active_segment_idx < range.start {
+                range.start = active_segment_idx;
+            }
+            if active_segment_idx < current_cache.segments.len() && active_segment_idx >= range.end
+            {
+                range.end = active_segment_idx + 1;
+            }
+            if range.end < range.start {
+                range.end = range.start;
+            }
+            range.start_width = current_cache
+                .segment_prefix_width
+                .get(range.start)
+                .copied()
+                .unwrap_or(0.0)
+                .max(0.0) as u32;
+            range
+        });
+        let upper_visible_start_width = upper_visible_range
+            .map(|range| range.start_width)
+            .unwrap_or(0);
         let mut upper_segments = Vec::new();
+        let mut flat_segment_index = 0usize;
         for (word_idx, word) in content_line.words.iter().enumerate() {
             for (seg_idx, seg) in word.segments.iter().enumerate() {
+                let segment_index = flat_segment_index;
+                flat_segment_index += 1;
+                if upper_visible_range.is_some_and(|range| !range.contains(segment_index)) {
+                    continue;
+                }
+
                 let state = if word_idx < status.word.get() {
                     if is_word_correct(&correctness_line.words[word_idx]) {
                         UpperSegmentState::Correct
@@ -1005,45 +1116,32 @@ fn build_typing_ui(
                 vertical: VerticalAlign::Center,
             },
             font_size: base_font_size,
-            line_width: full_line_width,
+            line_alignment: TypingLineAlignment::new(full_line_width, upper_visible_start_width),
         });
 
         let mut lower_segments = Vec::new();
         let mut lower_visible_start_width = 0;
-        let status_word = status.word.get();
-        let status_segment = status.segment.get();
 
         if let Some(state) = cached_cache {
             let current_cache = &state.current;
             let status_word_idx = status_word;
             let (left_bound, right_bound) = typing_visible_line_bounds(scroll_offset, width);
 
-            let active_segment_idx = if status_word < current_cache.word_segment_starts.len() {
-                let word_start = current_cache
-                    .word_segment_starts
-                    .get(status_word)
-                    .copied()
-                    .unwrap_or(current_cache.segments.len());
-                let word_end = current_cache
-                    .word_segment_starts
-                    .get(status_word + 1)
-                    .copied()
-                    .unwrap_or(current_cache.segments.len());
-                let segment_count = word_end.saturating_sub(word_start);
-                let status_offset = status_segment.min(segment_count);
-                word_start + status_offset
-            } else {
-                current_cache.segments.len()
-            };
+            let active_segment_idx = cached_status_segment_index(
+                &current_cache.word_segment_starts,
+                current_cache.segments.len(),
+                status_word,
+                status_segment,
+            );
 
-            let mut visible_start = current_cache
-                .segment_prefix_width
-                .partition_point(|value| *value <= left_bound)
-                .saturating_sub(1)
-                .min(current_cache.segments.len());
-            let mut visible_end = current_cache
-                .segment_prefix_width
-                .partition_point(|value| *value <= right_bound);
+            let visible_range = visible_segment_range(
+                &current_cache.segment_prefix_width,
+                current_cache.segments.len(),
+                left_bound,
+                right_bound,
+            );
+            let mut visible_start = visible_range.start;
+            let mut visible_end = visible_range.end;
             visible_start = visible_start.min(active_segment_idx);
             visible_end = visible_end
                 .min(active_segment_idx)
@@ -1445,11 +1543,11 @@ mod tests {
         (upper_segments, lower_segments)
     }
 
-    fn typing_alignment(render_list: &[Renderable]) -> (u32, TypingLineAlignment) {
-        let upper_width = render_list
+    fn typing_alignment(render_list: &[Renderable]) -> (TypingLineAlignment, TypingLineAlignment) {
+        let upper_alignment = render_list
             .iter()
             .find_map(|item| match item {
-                Renderable::TypingUpper { line_width, .. } => Some(*line_width),
+                Renderable::TypingUpper { line_alignment, .. } => Some(*line_alignment),
                 _ => None,
             })
             .expect("typing upper renderable should exist");
@@ -1460,14 +1558,16 @@ mod tests {
                 _ => None,
             })
             .expect("typing lower renderable should exist");
-        (upper_width, lower_alignment)
+        (upper_alignment, lower_alignment)
     }
 
     fn upper_line_width(render_list: &[Renderable]) -> u32 {
         render_list
             .iter()
             .find_map(|item| match item {
-                Renderable::TypingUpper { line_width, .. } => Some(*line_width),
+                Renderable::TypingUpper { line_alignment, .. } => {
+                    Some(line_alignment.full_line_width)
+                }
                 _ => None,
             })
             .expect("typing upper renderable should exist")
@@ -1529,8 +1629,12 @@ mod tests {
             ]
         ));
 
-        let (upper_width, lower_alignment) = typing_alignment(&render_list);
-        assert_eq!(lower_alignment, TypingLineAlignment::full_line(upper_width));
+        let (upper_alignment, lower_alignment) = typing_alignment(&render_list);
+        assert_eq!(upper_alignment.visible_start_width, 0);
+        assert_eq!(
+            lower_alignment,
+            TypingLineAlignment::full_line(upper_alignment.full_line_width)
+        );
     }
 
     #[test]
@@ -1579,17 +1683,46 @@ mod tests {
         app.update(240, 500, 100.0);
 
         let render_list = build_ui(&app, app.fonts(), 240, 500);
-        let (upper_width, lower_alignment) = typing_alignment(&render_list);
-        let (_, lower_segments) = typing_rows(&render_list);
+        let (upper_alignment, lower_alignment) = typing_alignment(&render_list);
+        let (upper_segments, lower_segments) = typing_rows(&render_list);
         let Some(ScrollCache::Ready(cache)) = app.scroll_cache() else {
             panic!("scroll cache should be ready");
         };
 
-        assert_eq!(upper_width, cache.current.total_width as u32);
-        assert_eq!(lower_alignment.full_line_width, upper_width);
+        assert_eq!(
+            upper_alignment.full_line_width,
+            cache.current.total_width as u32
+        );
+        assert_eq!(
+            lower_alignment.full_line_width,
+            upper_alignment.full_line_width
+        );
+        assert!(
+            upper_alignment.visible_start_width > 0,
+            "long cached upper rows should preserve a non-zero clipped prefix"
+        );
         assert!(
             lower_alignment.visible_start_width > 0,
             "long cached rows should preserve a non-zero clipped prefix"
+        );
+        assert!(
+            upper_segments.len() < cache.current.segments.len(),
+            "cached upper row should only include the visible segment window"
+        );
+
+        let first_upper_text = &upper_segments
+            .first()
+            .expect("clipped upper row should contain visible segments")
+            .base_text;
+        let first_upper_segment = cache
+            .current
+            .segments
+            .iter()
+            .position(|segment| &segment.base_text == first_upper_text)
+            .expect("visible upper segment should come from the scroll cache");
+        assert_eq!(
+            upper_alignment.visible_start_width,
+            cache.current.segment_prefix_width[first_upper_segment] as u32
         );
 
         let first_completed_text = lower_segments
@@ -1640,14 +1773,14 @@ mod tests {
                     anchor,
                     shift,
                     align,
-                    line_width,
+                    line_alignment,
                     ..
                 } => {
                     assert_line_left_matches_scroll_offset(
                         *anchor,
                         *shift,
                         *align,
-                        *line_width,
+                        line_alignment.full_line_width,
                         scroll_offset,
                     );
                     checked_rows += 1;

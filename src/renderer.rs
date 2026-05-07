@@ -89,6 +89,60 @@ struct TextMetrics {
     height: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PixelClip {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+impl PixelClip {
+    const fn new(left: i32, top: i32, right: i32, bottom: i32) -> Self {
+        Self {
+            left,
+            top,
+            right,
+            bottom,
+        }
+    }
+
+    fn for_buffer(stride: usize, height: usize) -> Self {
+        Self::new(0, 0, stride as i32, height as i32)
+    }
+
+    fn is_empty(self) -> bool {
+        self.left >= self.right || self.top >= self.bottom
+    }
+
+    fn intersects_f32(self, left: f32, top: f32, right: f32, bottom: f32) -> bool {
+        !self.is_empty()
+            && right > self.left as f32
+            && left < self.right as f32
+            && bottom > self.top as f32
+            && top < self.bottom as f32
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TextDrawOptions {
+    pos: (f32, f32),
+    font_size: f32,
+    color: u32,
+    clip: PixelClip,
+}
+
+impl TextDrawOptions {
+    const fn new(pos: (f32, f32), font_size: f32, color: u32, clip: PixelClip) -> Self {
+        Self {
+            pos,
+            font_size,
+            color,
+            clip,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct TextMeasureCacheEntry {
     font_key: usize,
@@ -313,7 +367,7 @@ fn render_argb(
                 shift,
                 align,
                 font_size,
-                line_width,
+                line_alignment,
             } => draw_typing_upper(
                 &mut frame,
                 fonts,
@@ -325,7 +379,7 @@ fn render_argb(
                         align: *align,
                         font_size: *font_size,
                     },
-                    line_width: *line_width,
+                    line_alignment: *line_alignment,
                 },
                 cache,
             ),
@@ -404,6 +458,37 @@ impl PixelFrame<'_> {
         )
     }
 
+    fn frame_clip(&self) -> PixelClip {
+        let left = self.viewport.x.min(self.stride) as i32;
+        let top = self.viewport.y.min(self.frame_height) as i32;
+        let right = (self.viewport.x + self.viewport.width).min(self.stride) as i32;
+        let bottom = (self.viewport.y + self.viewport.height).min(self.frame_height) as i32;
+        PixelClip::new(left, top, right, bottom)
+    }
+
+    fn local_rect_intersects_viewport(&self, left: f32, top: f32, right: f32, bottom: f32) -> bool {
+        right > 0.0 && left < self.width() as f32 && bottom > 0.0 && top < self.height() as f32
+    }
+
+    fn draw_text_clipped<F: Font>(
+        &mut self,
+        font: &F,
+        text: &str,
+        pos: (f32, f32),
+        font_size: f32,
+        color: u32,
+    ) {
+        let frame_pos = self.offset_position(pos);
+        let clip = self.frame_clip();
+        gui_renderer::draw_text_clipped(
+            self.pixels,
+            self.stride,
+            font,
+            text,
+            TextDrawOptions::new(frame_pos, font_size, color, clip),
+        );
+    }
+
     fn fill_viewport(&mut self, color: u32) {
         for y in self.viewport.y..(self.viewport.y + self.viewport.height).min(self.frame_height) {
             let row_start = y * self.stride;
@@ -452,7 +537,7 @@ struct TextPlacement {
 #[derive(Clone, Copy)]
 struct TypingUpperPlacement {
     text: TextPlacement,
-    line_width: u32,
+    line_alignment: ui::TypingLineAlignment,
 }
 
 #[derive(Clone, Copy)]
@@ -476,6 +561,30 @@ struct ProgressColors {
     foreground: u32,
 }
 
+fn draw_text_if_visible<F: Font>(
+    frame: &mut PixelFrame<'_>,
+    font: &F,
+    text: &str,
+    pos: (f32, f32),
+    size: f32,
+    color: u32,
+    metrics: TextMetrics,
+) {
+    if metrics.width == 0 || metrics.height == 0 {
+        return;
+    }
+
+    let (x, y) = pos;
+    if frame.local_rect_intersects_viewport(
+        x,
+        y - size * 0.2,
+        x + metrics.width as f32,
+        y + metrics.height as f32 + size * 0.2,
+    ) {
+        frame.draw_text_clipped(font, text, pos, size, color);
+    }
+}
+
 fn draw_aligned_text<F: Font>(
     frame: &mut PixelFrame<'_>,
     font: &F,
@@ -496,14 +605,14 @@ fn draw_aligned_text<F: Font>(
     );
     let (x, y) =
         ui::calculate_aligned_position(anchor_pos, metrics.width, metrics.height, placement.align);
-    gui_renderer::draw_text(
-        frame.pixels,
-        frame.stride,
+    draw_text_if_visible(
+        frame,
         font,
         text,
-        frame.offset_position((x as f32, y as f32)),
+        (x as f32, y as f32),
         pixel_font_size,
         color,
+        metrics,
     );
 }
 
@@ -538,36 +647,42 @@ fn draw_typing_upper(
     );
     let (mut pen_x, y) = ui::calculate_aligned_position(
         anchor_pos,
-        placement.line_width,
+        placement.line_alignment.full_line_width,
         total_height,
         placement.text.align,
     );
+    pen_x += placement.line_alignment.visible_start_width as i32;
 
     for (segment, segment_width) in segments.iter().zip(segment_widths.iter().copied()) {
         let color = upper_segment_color(segment.state);
         let font = fonts.get_for_script(segment.script);
-        gui_renderer::draw_text(
-            frame.pixels,
-            frame.stride,
+        let base_metrics = TextMetrics {
+            width: segment_width,
+            height: total_height,
+        };
+        draw_text_if_visible(
+            frame,
             font,
             &segment.base_text,
-            frame.offset_position((pen_x as f32, y as f32)),
+            (pen_x as f32, y as f32),
             pixel_font_size,
             color,
+            base_metrics,
         );
 
         if let Some(ruby) = &segment.ruby_text {
-            let ruby_width = cache.measure_text(font, ruby, ruby_pixel_font_size).width;
+            let ruby_metrics = cache.measure_text(font, ruby, ruby_pixel_font_size);
+            let ruby_width = ruby_metrics.width;
             let ruby_x = pen_x as f32 + (segment_width as f32 - ruby_width as f32) / 2.0;
             let ruby_y = y as f32 - ruby_pixel_font_size * 0.5;
-            gui_renderer::draw_text(
-                frame.pixels,
-                frame.stride,
+            draw_text_if_visible(
+                frame,
                 font,
                 ruby,
-                frame.offset_position((ruby_x, ruby_y)),
+                (ruby_x, ruby_y),
                 ruby_pixel_font_size,
                 color,
+                ruby_metrics,
             );
         }
 
@@ -602,8 +717,6 @@ fn draw_typing_lower(
         placement.text.align,
     );
     pen_x += placement.line_alignment.visible_start_width as i32;
-    let visible_left = -100;
-    let visible_right = frame.width() as i32 + 100;
 
     for segment in segments {
         match segment {
@@ -621,34 +734,35 @@ fn draw_typing_lower(
                     ui::INCORRECT_COLOR
                 };
                 let segment_width_px = *segment_width as i32;
-                if segment_width_px > 0
-                    && pen_x <= visible_right
-                    && pen_x + segment_width_px >= visible_left
-                {
-                    gui_renderer::draw_text(
-                        frame.pixels,
-                        frame.stride,
+                if segment_width_px > 0 {
+                    let base_metrics = TextMetrics {
+                        width: *segment_width,
+                        height: total_height,
+                    };
+                    draw_text_if_visible(
+                        frame,
                         font,
                         base_text,
-                        frame.offset_position((pen_x as f32, y as f32)),
+                        (pen_x as f32, y as f32),
                         pixel_font_size,
                         color,
+                        base_metrics,
                     );
 
                     if let Some(ruby) = ruby_text {
-                        let ruby_width = cache.measure_text(font, ruby, ruby_pixel_font_size).width;
-                        if ruby_width > 0 {
-                            let ruby_x =
-                                pen_x as f32 + (*segment_width as f32 - ruby_width as f32) / 2.0;
+                        let ruby_metrics = cache.measure_text(font, ruby, ruby_pixel_font_size);
+                        if ruby_metrics.width > 0 {
+                            let ruby_x = pen_x as f32
+                                + (*segment_width as f32 - ruby_metrics.width as f32) / 2.0;
                             let ruby_y = y as f32 - ruby_pixel_font_size * 0.5;
-                            gui_renderer::draw_text(
-                                frame.pixels,
-                                frame.stride,
+                            draw_text_if_visible(
+                                frame,
                                 font,
                                 ruby,
-                                frame.offset_position((ruby_x, ruby_y)),
+                                (ruby_x, ruby_y),
                                 ruby_pixel_font_size,
                                 color,
+                                ruby_metrics,
                             );
                         }
                     }
@@ -659,19 +773,17 @@ fn draw_typing_lower(
                 let font = fonts.get_for_script(*script);
                 for element in elements {
                     let (text, color) = active_lower_text_and_color(element);
-                    let text_width = cache.measure_text(font, &text, pixel_font_size).width as i32;
-                    if text_width > 0
-                        && pen_x <= visible_right
-                        && pen_x + text_width >= visible_left
-                    {
-                        gui_renderer::draw_text(
-                            frame.pixels,
-                            frame.stride,
+                    let text_metrics = cache.measure_text(font, &text, pixel_font_size);
+                    let text_width = text_metrics.width as i32;
+                    if text_width > 0 {
+                        draw_text_if_visible(
+                            frame,
                             font,
                             &text,
-                            frame.offset_position((pen_x as f32, y as f32)),
+                            (pen_x as f32, y as f32),
                             pixel_font_size,
                             color,
+                            text_metrics,
                         );
                     }
                     pen_x += text_width;
@@ -765,11 +877,36 @@ pub mod gui_renderer {
         font_size: f32,
         color: u32,
     ) {
-        let scale = PxScale::from(font_size);
+        if stride == 0 {
+            return;
+        }
+        let height = buffer.len() / stride;
+        draw_text_clipped(
+            buffer,
+            stride,
+            font,
+            text,
+            TextDrawOptions::new(pos, font_size, color, PixelClip::for_buffer(stride, height)),
+        );
+    }
+
+    /// 指定されたclip内に収まるピクセルだけにテキストを描画する
+    pub(super) fn draw_text_clipped<F: Font>(
+        buffer: &mut [u32],
+        stride: usize,
+        font: &F,
+        text: &str,
+        options: TextDrawOptions,
+    ) {
+        if stride == 0 || options.clip.is_empty() {
+            return;
+        }
+
+        let scale = PxScale::from(options.font_size);
         let scaled_font = font.as_scaled(scale);
         let ascent = scaled_font.ascent();
-        let mut pen_x = pos.0;
-        let pen_y = pos.1 + ascent;
+        let mut pen_x = options.pos.0;
+        let pen_y = options.pos.1 + ascent;
 
         let mut last_glyph = None;
         for character in text.chars() {
@@ -779,7 +916,21 @@ pub mod gui_renderer {
             }
             let glyph = glyph_id.with_scale_and_position(scale, point(pen_x, pen_y));
             if let Some(outlined) = font.outline_glyph(glyph) {
-                draw_glyph_to_pixel_buffer(buffer, stride, &outlined, color);
+                let bounds = outlined.px_bounds();
+                if options.clip.intersects_f32(
+                    bounds.min.x,
+                    bounds.min.y,
+                    bounds.max.x,
+                    bounds.max.y,
+                ) {
+                    draw_glyph_to_pixel_buffer(
+                        buffer,
+                        stride,
+                        &outlined,
+                        options.color,
+                        options.clip,
+                    );
+                }
             }
             pen_x += scaled_font.h_advance(glyph_id);
             last_glyph = Some(glyph_id);
@@ -792,6 +943,7 @@ pub mod gui_renderer {
         stride: usize,
         outlined: &OutlinedGlyph,
         color: u32,
+        clip: PixelClip,
     ) {
         let bounds = outlined.px_bounds();
         // バッファ高さとテキスト色チャンネルをクロージャ外で一度だけ計算する。
@@ -811,7 +963,11 @@ pub mod gui_renderer {
 
             let buffer_x = bounds.min.x as i32 + x as i32;
             let buffer_y = bounds.min.y as i32 + y as i32;
-            if buffer_x < 0
+            if buffer_x < clip.left
+                || buffer_x >= clip.right
+                || buffer_y < clip.top
+                || buffer_y >= clip.bottom
+                || buffer_x < 0
                 || buffer_x >= stride as i32
                 || buffer_y < 0
                 || buffer_y >= buf_height as i32
@@ -1131,7 +1287,7 @@ pub mod tui_renderer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::display::DisplaySettings;
+    use crate::display::{DisplayAspectRatio, DisplaySettings};
     use crate::font::Fonts;
     use crate::ui::{Align, Anchor, FontSize, HorizontalAlign, Renderable, Shift, VerticalAlign};
     use ab_glyph::FontVec;
@@ -1185,5 +1341,51 @@ mod tests {
             surface.render(&fonts, DisplaySettings::default(), &render_list, &mut cache);
         }
         assert_eq!(cache.text_measure_cache_len(), cache_len_after_first_render);
+    }
+
+    #[test]
+    fn argb_surface_clips_text_to_display_viewport() {
+        let fonts = test_fonts();
+        let render_list = vec![
+            Renderable::Background {
+                gradient: crate::ui::Gradient {
+                    start_color: 0xFF_222222,
+                    end_color: 0xFF_222222,
+                },
+            },
+            Renderable::Text {
+                text: "WWWW".to_string(),
+                anchor: Anchor::TopLeft,
+                shift: Shift { x: -0.45, y: 0.25 },
+                align: Align {
+                    horizontal: HorizontalAlign::Left,
+                    vertical: VerticalAlign::Top,
+                },
+                font_size: FontSize::WindowHeight(0.3),
+                color: 0xFF_FFFFFF,
+            },
+        ];
+        let settings = DisplaySettings {
+            aspect_ratio: DisplayAspectRatio::Square1x1,
+            scale: crate::display::DisplayScale::Percent100,
+        };
+        let mut cache = RenderCache::new();
+        let mut pixels = vec![0u32; 200 * 100];
+
+        {
+            let mut surface = ArgbSurface::new(200, 100, &mut pixels)
+                .expect("surface dimensions should be valid");
+            surface.render(&fonts, settings, &render_list, &mut cache);
+        }
+
+        for y in 0..100 {
+            for x in 0..50 {
+                assert_eq!(
+                    pixels[y * 200 + x],
+                    BG_COLOR,
+                    "left letterbox pixel ({x},{y}) should stay clipped"
+                );
+            }
+        }
     }
 }

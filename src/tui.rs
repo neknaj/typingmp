@@ -336,6 +336,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     shift,
                     align,
                     font_size,
+                    line_alignment,
                     ..
                 } => {
                     match display_mode {
@@ -357,21 +358,48 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 tui_renderer::render_text_to_art
                             };
 
-                            let total_width_cells = segments
+                            let Some(typing_model) = app.typing_model() else {
+                                continue;
+                            };
+                            let full_line_words =
+                                &typing_model.content.lines[typing_model.status.line.get()].words;
+
+                            let (total_width_cells, total_width_pixels) = full_line_words
                                 .iter()
-                                .map(|seg| {
-                                    renderer(
-                                        fonts.get_for_script(seg.script),
-                                        &seg.base_text,
-                                        render_font_size,
-                                    )
-                                    .1 as u32
-                                })
-                                .sum::<u32>();
+                                .flat_map(|w| &w.segments)
+                                .fold((0_u32, 0.0_f32), |(acc_cells, acc_pixels), seg| {
+                                    let text = match seg {
+                                        Segment::Plain { text } => text.clone(),
+                                        Segment::Annotated { base, .. } => base.clone(),
+                                        Segment::Anno { inner, .. } => inner
+                                            .iter()
+                                            .map(|s| match s {
+                                                Segment::Plain { text } => text.as_str(),
+                                                Segment::Annotated { base, .. } => base.as_str(),
+                                                Segment::Anno { .. } => "",
+                                            })
+                                            .collect(),
+                                    };
+                                    let font = fonts.get_for_script(script_for_segment(seg));
+                                    let cells = renderer(font, &text, render_font_size).1 as u32;
+                                    let pixels =
+                                        gui_renderer::measure_text(font, &text, font_size_px).0
+                                            as f32;
+                                    (acc_cells + cells, acc_pixels + pixels)
+                                });
 
                             if total_width_cells == 0 {
                                 continue;
                             }
+                            let pixels_per_cell =
+                                if total_width_cells > 0 && total_width_pixels > 0.0 {
+                                    total_width_pixels as f64 / total_width_cells as f64
+                                } else {
+                                    1.0
+                                };
+                            let visible_start_cells =
+                                (line_alignment.visible_start_width as f64 / pixels_per_cell)
+                                    .round() as i32;
 
                             let (_, _, line_total_height, line_ascent) =
                                 renderer(primary_font, "|", render_font_size);
@@ -384,6 +412,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 line_total_height as u32,
                                 align,
                             );
+                            pen_x += visible_start_cells;
                             let line_baseline_y = line_start_y + line_ascent as i32;
 
                             for seg in segments {
@@ -472,9 +501,29 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         TuiDisplayMode::SimpleText => {
                             // Calculate total width for centering
-                            let total_width = segments
+                            let Some(typing_model) = app.typing_model() else {
+                                continue;
+                            };
+                            let full_line_words =
+                                &typing_model.content.lines[typing_model.status.line.get()].words;
+                            let total_width = full_line_words
                                 .iter()
-                                .map(|s| s.base_text.chars().count())
+                                .flat_map(|w| &w.segments)
+                                .map(|seg| {
+                                    let text = match seg {
+                                        Segment::Plain { text } => text.clone(),
+                                        Segment::Annotated { base, .. } => base.clone(),
+                                        Segment::Anno { inner, .. } => inner
+                                            .iter()
+                                            .map(|s| match s {
+                                                Segment::Plain { text } => text.as_str(),
+                                                Segment::Annotated { base, .. } => base.as_str(),
+                                                Segment::Anno { .. } => "",
+                                            })
+                                            .collect(),
+                                    };
+                                    text.chars().count()
+                                })
                                 .sum::<usize>();
                             let anchor_pos =
                                 ui::calculate_anchor_position(anchor, shift, cols, rows);
@@ -484,6 +533,15 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 1,
                                 align,
                             );
+                            let visible_start_chars = if line_alignment.full_line_width > 0 {
+                                (line_alignment.visible_start_width as f64
+                                    / line_alignment.full_line_width as f64
+                                    * total_width as f64)
+                                    .round() as i32
+                            } else {
+                                0
+                            };
+                            pen_x += visible_start_chars;
 
                             for seg in segments {
                                 let color = u32_to_crossterm_color(match seg.state {
@@ -565,11 +623,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 continue;
                             }
 
-                            let pixels_per_cell = if total_width_cells > 0 {
-                                total_width_pixels as f64 / total_width_cells as f64
-                            } else {
-                                1.0
-                            };
+                            let pixels_per_cell =
+                                if total_width_cells > 0 && total_width_pixels > 0.0 {
+                                    total_width_pixels as f64 / total_width_cells as f64
+                                } else {
+                                    1.0
+                                };
 
                             let (_, _, line_total_height, line_ascent) =
                                 renderer(primary_font, "|", render_font_size);
