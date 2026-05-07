@@ -718,15 +718,13 @@ impl App {
                     {
                         let font_count = self.available_fonts.len();
                         match event {
-                            AppEvent::Up => {
-                                if self.selected_font_item > 0 {
-                                    self.selected_font_item -= 1;
-                                }
+                            AppEvent::Up if self.selected_font_item > 0 => {
+                                self.selected_font_item -= 1;
                             }
-                            AppEvent::Down => {
-                                if font_count > 0 && self.selected_font_item < font_count - 1 {
-                                    self.selected_font_item += 1;
-                                }
+                            AppEvent::Down
+                                if font_count > 0 && self.selected_font_item < font_count - 1 =>
+                            {
+                                self.selected_font_item += 1;
                             }
                             AppEvent::Enter => {
                                 if self.selected_font_item < font_count {
@@ -761,17 +759,14 @@ impl App {
             AppState::ProblemSelection => {
                 self.status_text = "Select a problem to type.".to_string();
                 match event {
-                    AppEvent::Up => {
-                        if self.selected_problem_item > 0 {
-                            self.selected_problem_item -= 1;
-                        }
+                    AppEvent::Up if self.selected_problem_item > 0 => {
+                        self.selected_problem_item -= 1;
                     }
-                    AppEvent::Down => {
+                    AppEvent::Down
                         if self.problem_count() > 0
-                            && self.selected_problem_item < self.problem_count() - 1
-                        {
-                            self.selected_problem_item += 1;
-                        }
+                            && self.selected_problem_item < self.problem_count() - 1 =>
+                    {
+                        self.selected_problem_item += 1;
                     }
                     AppEvent::Enter => {
                         let idx = self.selected_problem_item;
@@ -788,27 +783,19 @@ impl App {
                     AppEvent::Char { c, .. } => {
                         let idx = self.selected_problem_item;
                         match c {
-                            'v' | 'V' => {
-                                if !self.is_open_file_entry(idx) {
-                                    self.source_scroll = 0;
-                                    self.state = AppState::ProblemSource;
-                                    self.on_event(AppEvent::ChangeScene);
-                                }
+                            'v' | 'V' if !self.is_open_file_entry(idx) => {
+                                self.source_scroll = 0;
+                                self.state = AppState::ProblemSource;
+                                self.on_event(AppEvent::ChangeScene);
                             }
-                            'x' | 'X' => {
-                                if self.is_custom_problem(idx) {
-                                    self.delete_custom_problem_at(idx);
-                                }
+                            'x' | 'X' if self.is_custom_problem(idx) => {
+                                self.delete_custom_problem_at(idx);
                             }
-                            'u' | 'U' => {
-                                if self.is_custom_problem(idx) {
-                                    self.move_custom_problem_up_at(idx);
-                                }
+                            'u' | 'U' if self.is_custom_problem(idx) => {
+                                self.move_custom_problem_up_at(idx);
                             }
-                            'd' | 'D' => {
-                                if self.is_custom_problem(idx) {
-                                    self.move_custom_problem_down_at(idx);
-                                }
+                            'd' | 'D' if self.is_custom_problem(idx) => {
+                                self.move_custom_problem_down_at(idx);
                             }
                             _ => {}
                         }
@@ -820,10 +807,8 @@ impl App {
                 }
             }
             AppState::ProblemSource => match event {
-                AppEvent::Up => {
-                    if self.source_scroll > 0 {
-                        self.source_scroll -= 1;
-                    }
+                AppEvent::Up if self.source_scroll > 0 => {
+                    self.source_scroll -= 1;
                 }
                 AppEvent::Down => {
                     let total = self
@@ -843,10 +828,8 @@ impl App {
             AppState::HowToUse => {
                 self.status_text = "How to Use".to_string();
                 match event {
-                    AppEvent::Up => {
-                        if self.how_to_use_scroll > 0 {
-                            self.how_to_use_scroll -= 1;
-                        }
+                    AppEvent::Up if self.how_to_use_scroll > 0 => {
+                        self.how_to_use_scroll -= 1;
                     }
                     AppEvent::Down => {
                         let total = crate::ui::HOW_TO_USE_CONTENT.len();

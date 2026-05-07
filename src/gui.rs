@@ -84,19 +84,17 @@ pub fn run() -> Result<(), Box<dyn Error>> {
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
 
-                WindowEvent::Resized(new_size) => {
-                    if new_size.width > 0 && new_size.height > 0 {
-                        width = new_size.width as usize;
-                        height = new_size.height as usize;
-                        pixel_buffer.resize(width * height, 0);
-                        if let Err(err) = pixels.resize_surface(new_size.width, new_size.height) {
-                            eprintln!("Failed to resize window surface: {err}");
-                            *control_flow = ControlFlow::Exit;
-                        }
-                        if let Err(err) = pixels.resize_buffer(new_size.width, new_size.height) {
-                            eprintln!("Failed to resize pixel buffer: {err}");
-                            *control_flow = ControlFlow::Exit;
-                        }
+                WindowEvent::Resized(new_size) if new_size.width > 0 && new_size.height > 0 => {
+                    width = new_size.width as usize;
+                    height = new_size.height as usize;
+                    pixel_buffer.resize(width * height, 0);
+                    if let Err(err) = pixels.resize_surface(new_size.width, new_size.height) {
+                        eprintln!("Failed to resize window surface: {err}");
+                        *control_flow = ControlFlow::Exit;
+                    }
+                    if let Err(err) = pixels.resize_buffer(new_size.width, new_size.height) {
+                        eprintln!("Failed to resize pixel buffer: {err}");
+                        *control_flow = ControlFlow::Exit;
                     }
                 }
 
@@ -138,13 +136,11 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                     _ => {}
                 },
 
-                WindowEvent::ReceivedCharacter(c) => {
-                    if !c.is_control() {
-                        app.on_event(AppEvent::Char {
-                            c,
-                            timestamp: crate::timestamp::now(),
-                        });
-                    }
+                WindowEvent::ReceivedCharacter(c) if !c.is_control() => {
+                    app.on_event(AppEvent::Char {
+                        c,
+                        timestamp: crate::timestamp::now(),
+                    });
                 }
 
                 _ => {}
