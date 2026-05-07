@@ -18,6 +18,7 @@ use crate::io::{FontAssetId, ProblemRepository};
 use crate::model::{
     CharIndex, LineIndex, ResultModel, Scroll, SegmentIndex, TypingModel, TypingStatus, WordIndex,
 };
+use crate::screen_keyboard::ScreenKeyboardUiCommand;
 use alloc::{
     format,
     string::{String, ToString},
@@ -209,6 +210,19 @@ impl UiCommand {
             Self::Up => AppEvent::Up,
             Self::Down => AppEvent::Down,
             Self::CycleTuiMode => AppEvent::CycleTuiMode,
+        }
+    }
+}
+
+impl From<ScreenKeyboardUiCommand> for UiCommand {
+    fn from(value: ScreenKeyboardUiCommand) -> Self {
+        match value {
+            ScreenKeyboardUiCommand::Backspace => Self::Backspace,
+            ScreenKeyboardUiCommand::Enter => Self::Enter,
+            ScreenKeyboardUiCommand::Escape => Self::Escape,
+            ScreenKeyboardUiCommand::Up => Self::Up,
+            ScreenKeyboardUiCommand::Down => Self::Down,
+            ScreenKeyboardUiCommand::CycleTuiMode => Self::CycleTuiMode,
         }
     }
 }

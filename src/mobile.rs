@@ -2,7 +2,7 @@
 // Slint バックエンド — Android / デスクトップ Mobile UI
 
 use ab_glyph::FontVec;
-use slint::{Image, Rgb8Pixel, SharedPixelBuffer};
+use slint::{Image, ModelRc, Rgb8Pixel, SharedPixelBuffer, SharedString, VecModel};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Instant;
@@ -11,9 +11,118 @@ use crate::app::{App, AppEvent, Fonts, UiCommand};
 use crate::backend::BackendError;
 use crate::io::{AssetProvider, BundledFont, DesktopAssetProvider};
 use crate::renderer::{ArgbSurface, RenderCache};
+use crate::screen_keyboard::{
+    self, ScreenKeyboardAction, ScreenKeyboardInputState, ScreenKeyboardKey,
+    ScreenKeyboardKeyClass, ScreenKeyboardKeyRole, ScreenKeyboardKeyWidth,
+    ScreenKeyboardLayoutKind,
+};
 use crate::ui;
 
 slint::include_modules!();
+
+fn shared(value: &str) -> SharedString {
+    SharedString::from(value)
+}
+
+fn optional_shared(value: Option<&str>) -> SharedString {
+    SharedString::from(value.unwrap_or(""))
+}
+
+fn mobile_visual_kind(class: ScreenKeyboardKeyClass) -> KeyboardVisualKind {
+    match class {
+        ScreenKeyboardKeyClass::Text => KeyboardVisualKind::Text,
+        ScreenKeyboardKeyClass::Special => KeyboardVisualKind::Special,
+        ScreenKeyboardKeyClass::Backspace => KeyboardVisualKind::Backspace,
+        ScreenKeyboardKeyClass::Enter => KeyboardVisualKind::Enter,
+        ScreenKeyboardKeyClass::Modifier => KeyboardVisualKind::Modifier,
+        ScreenKeyboardKeyClass::Spacer => KeyboardVisualKind::Spacer,
+    }
+}
+
+fn mobile_width_kind(width: ScreenKeyboardKeyWidth) -> KeyboardWidthKind {
+    match width {
+        ScreenKeyboardKeyWidth::Normal => KeyboardWidthKind::Normal,
+        ScreenKeyboardKeyWidth::Wide => KeyboardWidthKind::Wide,
+        ScreenKeyboardKeyWidth::Space => KeyboardWidthKind::Space,
+    }
+}
+
+fn mobile_key_view(key: &ScreenKeyboardKey) -> KeyboardKeyView {
+    let (up, right, down, left) = match key.role {
+        ScreenKeyboardKeyRole::Flick(map) => (map.up, map.right, map.down, map.left),
+        ScreenKeyboardKeyRole::Action(_) | ScreenKeyboardKeyRole::Spacer => {
+            (None, None, None, None)
+        }
+    };
+
+    KeyboardKeyView {
+        label: shared(key.label),
+        up: optional_shared(up),
+        right: optional_shared(right),
+        down: optional_shared(down),
+        left: optional_shared(left),
+        visual_kind: mobile_visual_kind(key.class),
+        width_kind: mobile_width_kind(key.width),
+        interactive: !matches!(key.role, ScreenKeyboardKeyRole::Spacer),
+    }
+}
+
+fn mobile_row_model(keys: &[ScreenKeyboardKey]) -> ModelRc<KeyboardKeyView> {
+    ModelRc::new(VecModel::from(
+        keys.iter().map(mobile_key_view).collect::<Vec<_>>(),
+    ))
+}
+
+fn apply_screen_keyboard_layout(window: &AppWindow, kind: ScreenKeyboardLayoutKind) {
+    let layout = screen_keyboard::layout(kind);
+    window.set_keyboard_row_0(mobile_row_model(layout.rows[0].keys));
+    window.set_keyboard_row_1(mobile_row_model(layout.rows[1].keys));
+    window.set_keyboard_row_2(mobile_row_model(layout.rows[2].keys));
+    window.set_keyboard_row_3(mobile_row_model(layout.rows[3].keys));
+}
+
+fn send_screen_keyboard_text(app: &mut App, state: &mut ScreenKeyboardInputState, text: &str) {
+    let timestamp = crate::timestamp::now();
+    for ch in text.chars() {
+        app.on_event(AppEvent::Char { c: ch, timestamp });
+    }
+    state.record_text(text, !app.has_pending_input_correction());
+}
+
+fn dispatch_screen_keyboard_action(
+    app: &mut App,
+    state: &mut ScreenKeyboardInputState,
+    layout_kind: &mut ScreenKeyboardLayoutKind,
+    window: &AppWindow,
+    action: ScreenKeyboardAction,
+) {
+    match action {
+        ScreenKeyboardAction::Text(text) => {
+            send_screen_keyboard_text(app, state, text);
+        }
+        ScreenKeyboardAction::UiCommand(command) => {
+            state.clear();
+            let command = UiCommand::from(command);
+            app.on_event(command.app_event());
+        }
+        ScreenKeyboardAction::TransformLastText => {
+            if let Some(next_char) = state.pending_modified_char() {
+                app.on_event(AppEvent::Backspace);
+                let mut buf = [0_u8; 4];
+                send_screen_keyboard_text(app, state, next_char.encode_utf8(&mut buf));
+            }
+        }
+        ScreenKeyboardAction::SwitchLayout => {
+            state.clear();
+            *layout_kind = (*layout_kind).next();
+            apply_screen_keyboard_layout(window, *layout_kind);
+        }
+        ScreenKeyboardAction::SwitchInputSource => {
+            state.clear();
+        }
+        ScreenKeyboardAction::None => {}
+    }
+}
 
 fn argb_to_rgb8(src: &[u32], dst: &mut [Rgb8Pixel]) {
     for (s, d) in src.iter().zip(dst.iter_mut()) {
@@ -91,12 +200,17 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let window = AppWindow::new()?;
+    let screen_keyboard_layout = Rc::new(RefCell::new(ScreenKeyboardLayoutKind::default()));
+    let screen_keyboard_input_state = Rc::new(RefCell::new(ScreenKeyboardInputState::new()));
+    apply_screen_keyboard_layout(&window, *screen_keyboard_layout.borrow());
 
     // --- コールバック: フリック文字 ---
     {
         let app = Rc::clone(&app_state);
+        let screen_keyboard_input_state = Rc::clone(&screen_keyboard_input_state);
         let win = window.as_weak();
         window.on_char_input(move |c| {
+            screen_keyboard_input_state.borrow_mut().clear();
             let timestamp = crate::timestamp::now();
             let Ok(mut a) = app.try_borrow_mut() else {
                 return;
@@ -113,8 +227,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     // --- コールバック: 特殊キー ---
     {
         let app = Rc::clone(&app_state);
+        let screen_keyboard_input_state = Rc::clone(&screen_keyboard_input_state);
         let win = window.as_weak();
         window.on_special_input(move |action| {
+            screen_keyboard_input_state.borrow_mut().clear();
             let Ok(mut a) = app.try_borrow_mut() else {
                 return;
             };
@@ -124,6 +240,34 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(w) = win.upgrade() {
                 w.set_keyboard_visible(a.is_typing_active());
             }
+        });
+    }
+
+    // --- コールバック: 共通スクリーンキーボード ---
+    {
+        let app = Rc::clone(&app_state);
+        let screen_keyboard_input_state = Rc::clone(&screen_keyboard_input_state);
+        let screen_keyboard_layout = Rc::clone(&screen_keyboard_layout);
+        let win = window.as_weak();
+        window.on_screen_keyboard_gesture(move |row, key, dx, dy| {
+            let Some(window) = win.upgrade() else {
+                return;
+            };
+            let Ok(mut a) = app.try_borrow_mut() else {
+                return;
+            };
+            let mut layout_kind = screen_keyboard_layout.borrow_mut();
+            let mut input_state = screen_keyboard_input_state.borrow_mut();
+            let action =
+                screen_keyboard::resolve_key(*layout_kind, row as usize, key as usize, dx, dy);
+            dispatch_screen_keyboard_action(
+                &mut a,
+                &mut input_state,
+                &mut layout_kind,
+                &window,
+                action,
+            );
+            window.set_keyboard_visible(a.is_typing_active());
         });
     }
 

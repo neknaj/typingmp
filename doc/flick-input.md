@@ -2,24 +2,27 @@
 
 ## 概要
 
-Neknaj Typing MP の Web 版・モバイル版において、タッチデバイス上でのかな入力を実現するフリックキーボードの仕様を記す。
+Neknaj Typing MP の Web 版・モバイル版において、タッチデバイス上での入力を実現するスクリーンキーボードの仕様を記す。
+
+キー配列、フリック解決、後置修飾、レイアウト切替は `src/screen_keyboard.rs` が所有する。WASM の DOM と Slint mobile は共通コアから渡されたキー配列を描画し、タッチ座標差 `dx/dy` を共通コアへ返すアダプタである。詳細設計は `doc/screen-keyboard-platform-design20260507.md` を参照する。
 
 ---
 
 ## キーボードレイアウト
 
-5列 × 4行の固定グリッド。
+かなフリックは 5列 × 4行の固定グリッド。
 
 ```
 [Esc  ] [あ行] [か行] [さ行] [⌫  ]
 [▲   ] [た行] [な行] [は行] [▼  ]
-[    ] [ま行] [や行] [ら行] [ー  ]
-[⌨   ] [大⇔小] [わ行] [。行] [↩  ]
+[ABC ] [ま行] [や行] [ら行] [ー  ]
+[     ] [大⇔小] [わ行] [。行] [↩  ]
 ```
 
-- **左列 / 右列**: 特殊キー（ナビゲーション・BS・Enter・キーボード切替）
+- **左列 / 右列**: 特殊キー（ナビゲーション・BS・Enter）
 - **中3列**: かなフリックキー（各行の行見出し文字を表示）
-- **大⇔小キー**: わ行左・ま行下に配置（後述）
+- **ABCキー**: QWERTY スクリーンキーボードへ切替
+- **大⇔小キー**: 後置修飾キー（後述）
 
 ---
 
@@ -57,7 +60,7 @@ Neknaj Typing MP の Web 版・モバイル版において、タッチデバイ�
 
 ### 入力経路
 
-フリックキーボードはかな1文字を確定し `send_char(char)` (WASM 関数) 経由で Rust のタイピングエンジンに直接送る。ローマ字の中間状態（unconfirmed バッファ）を経由しない。
+スクリーンキーボードは共通コアの `ScreenKeyboardAction::Text` をバックエンドが受け取り、アプリの `AppEvent::Char` へ変換する。WASM では `send_char`、Slint mobile では Rust コールバックを経由する。かなフリックはかな1文字を直接送るため、ローマ字の中間状態（unconfirmed バッファ）を経由しない。
 
 ### typing.rs での判定ロジック
 
@@ -104,14 +107,14 @@ Gboard と同じ**後置修飾**方式を採用する。デッドキー（先に
 
 **直前のフリック入力が誤りだった場合にのみ作動する。**
 
-JS 側で以下の状態を追跡する:
+各バックエンドは共通の `ScreenKeyboardInputState` 相当の状態を追跡する:
 
-- `lastFlickChar`: 直前に送信したかな文字（`null` = なし）
-- `lastFlickAccepted`: `send_char` 後に `has_wrong_input()` = false なら `true`
+- `last_text`: 直前にスクリーンキーボードから送信した1文字
+- `last_accepted`: 送信後にアプリが正解として受理したか
 
 `has_wrong_input()` は Rust 側 WASM エクスポート関数で、`last_wrong_keydown.is_some() || !unconfirmed.is_empty()` を返す。
 
-### 変換サイクル (DAIKOSHO_MAP)
+### 変換サイクル
 
 大⇔小キーを繰り返し押すことで以下の連鎖を巡回する。
 
@@ -125,26 +128,26 @@ JS 側で以下の状態を追跡する:
 ### 処理フロー
 
 ```
-1. lastFlickAccepted = false かつ lastFlickChar != null の場合のみ実行
-2. DAIKOSHO_MAP.get(lastFlickChar) で次の形を取得
+1. `last_accepted = false` かつ `last_text` が存在する場合のみ実行
+2. `screen_keyboard::modified_kana(last_text)` で次の形を取得
 3. trigger_event('Backspace'):
    - last_wrong_keydown をクリア
    - typing_correctness[現在位置] を Incorrect → Pending にリセット
-4. sendFlickChar(nextChar):
+4. 変換後の `Text` action と同じ経路で `next_char` を送信:
    - send_char(nextChar) を呼び出す
-   - lastFlickChar = nextChar を更新
-   - has_wrong_input() で受理状態を確認し lastFlickAccepted を更新
+   - `last_text = next_char` を更新
+   - アプリの誤り状態を確認し `last_accepted` を更新
 ```
 
 ### 状態リセットのタイミング
 
-`lastFlickChar` と `lastFlickAccepted` は以下の操作でリセットされる:
+`last_text` と `last_accepted` は以下の操作でリセットされる:
 
 - Backspace キー押下
 - Enter キー押下
 - Esc キー押下
 - ▲ / ▼ ナビゲーションキー押下
-- ー (長音符) 送信（`sendFlickChar` 経由のため `lastFlickChar = 'ー'` に更新される）
+- ー (長音符) 送信（通常の `Text` action として `last_text = 'ー'` に更新される）
 
 ---
 
@@ -161,7 +164,20 @@ JS 側で以下の状態を追跡する:
 
 ---
 
-## キーボードモード切替
+## レイアウト切替
+
+スクリーンキーボードは `ScreenKeyboardLayoutKind` でレイアウトを切り替える。
+
+| レイアウト | 目的 |
+|------------|------|
+| `KanaFlick` | 日本語かなのフリック入力 |
+| `Qwerty` | 英字・基本記号の直接入力 |
+
+- かなフリックの `ABC` キーで QWERTY へ切り替える。
+- QWERTY の `かな` キーでかなフリックへ戻る。
+- レイアウト切替は WASM と Slint mobile の両方で同じ `ScreenKeyboardAction::SwitchLayout` を使う。
+
+## 入力ソース切替
 
 Web 版では OS 仮想キーボードとアプリ提供フリックキーボードを切り替えられる。
 
@@ -172,7 +188,8 @@ Web 版では OS 仮想キーボードとアプリ提供フリックキーボー
 
 - 設定は `localStorage` の `typingmp_kb_mode` キーに永続化される。
 - デスクトップ (非タッチ) では app モードでも `inputmode="none"` および blur を適用しないため、物理キーボード入力が常に機能する。
-- フリックキーボードの表示制御は `is_typing_active()` と `navigator.maxTouchPoints > 0` の AND 条件で行う。
+- スクリーンキーボードの表示制御は `is_typing_active()` と `navigator.maxTouchPoints > 0` の AND 条件で行う。
+- Slint mobile はアプリ提供キーボードを主経路とし、物理キーボード入力は FocusScope で受ける。OS IME 連携を追加する場合は `ScreenKeyboardAction::SwitchInputSource` に接続する。
 
 ---
 

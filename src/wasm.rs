@@ -4,6 +4,9 @@ use crate::app::{App, AppEvent, CustomProblem, Fonts, UiCommand};
 use crate::backend::BackendError;
 use crate::io::{PersistentStore, ProviderError, ProviderErrorKind};
 use crate::renderer::{ArgbSurface, RenderCache};
+use crate::screen_keyboard::{
+    self, ScreenKeyboardAction, ScreenKeyboardKeyRole, ScreenKeyboardLayoutKind,
+};
 use crate::ui;
 use ab_glyph::FontVec;
 use std::cell::RefCell;
@@ -17,6 +20,7 @@ use web_sys::{
 };
 
 const LS_KEY: &str = "typingmp_custom_problems";
+type AnimationFrameCallback = Rc<RefCell<Option<Closure<dyn FnMut()>>>>;
 
 #[derive(Debug, Clone, Copy, Default)]
 struct WebCustomProblemStore;
@@ -136,13 +140,13 @@ impl PersistentStore for WebCustomProblemStore {
 }
 
 thread_local! {
-    static APP_INSTANCE: RefCell<Option<Rc<RefCell<App>>>> = RefCell::new(None);
+    static APP_INSTANCE: RefCell<Option<Rc<RefCell<App>>>> = const { RefCell::new(None) };
     /// フレームごとの再確保を避けるためピクセルバッファを永続化する
-    static PIXEL_BUFFER: RefCell<Vec<u32>> = RefCell::new(Vec::new());
+    static PIXEL_BUFFER: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
     /// ImageData 生成用 u8 バッファを永続化する
-    static U8_BUFFER: RefCell<Vec<u8>> = RefCell::new(Vec::new());
+    static U8_BUFFER: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
     /// Pixel render state shared across animation frames.
-    static RENDER_CACHE: RefCell<RenderCache> = RefCell::new(RenderCache::new());
+    static RENDER_CACHE: RefCell<RenderCache> = const { RefCell::new(RenderCache::new()) };
 }
 
 // --- デバッグ用のログ出力ヘルパー関数を追加 ---
@@ -177,7 +181,7 @@ pub fn is_typing_active() -> bool {
         instance
             .borrow()
             .as_ref()
-            .map_or(false, |app_rc| app_rc.borrow().is_typing_active())
+            .is_some_and(|app_rc| app_rc.borrow().is_typing_active())
     })
 }
 
@@ -188,9 +192,10 @@ pub fn is_typing_active() -> bool {
 #[wasm_bindgen]
 pub fn has_wrong_input() -> bool {
     APP_INSTANCE.with(|instance| {
-        instance.borrow().as_ref().map_or(false, |app_rc| {
-            app_rc.borrow().has_pending_input_correction()
-        })
+        instance
+            .borrow()
+            .as_ref()
+            .is_some_and(|app_rc| app_rc.borrow().has_pending_input_correction())
     })
 }
 
@@ -219,6 +224,150 @@ pub fn trigger_event(event_type: &str) {
             }
         }
     });
+}
+
+#[wasm_bindgen]
+pub fn screen_keyboard_layout(kind: &str) -> JsValue {
+    let kind = ScreenKeyboardLayoutKind::from_bridge_label(kind).unwrap_or_default();
+    let layout = screen_keyboard::layout(kind);
+    let obj = js_sys::Object::new();
+    set_js_prop(
+        &obj,
+        "kind",
+        JsValue::from_str(layout.kind.bridge_label()).as_ref(),
+    );
+    set_js_prop(&obj, "label", JsValue::from_str(layout.label).as_ref());
+
+    let rows = js_sys::Array::new();
+    for row in layout.rows {
+        let row_array = js_sys::Array::new();
+        for key in row.keys {
+            row_array.push(&screen_keyboard_key_to_js(key));
+        }
+        rows.push(&row_array);
+    }
+    set_js_prop(&obj, "rows", rows.as_ref());
+    obj.into()
+}
+
+#[wasm_bindgen]
+pub fn screen_keyboard_resolve(
+    kind: &str,
+    row_index: u32,
+    key_index: u32,
+    dx: f32,
+    dy: f32,
+) -> JsValue {
+    let kind = ScreenKeyboardLayoutKind::from_bridge_label(kind).unwrap_or_default();
+    screen_keyboard_action_to_js(screen_keyboard::resolve_key(
+        kind,
+        row_index as usize,
+        key_index as usize,
+        dx,
+        dy,
+    ))
+}
+
+#[wasm_bindgen]
+pub fn screen_keyboard_next_layout(kind: &str) -> String {
+    ScreenKeyboardLayoutKind::from_bridge_label(kind)
+        .unwrap_or_default()
+        .next()
+        .bridge_label()
+        .to_string()
+}
+
+#[wasm_bindgen]
+pub fn screen_keyboard_modified_char(value: String) -> String {
+    let mut chars = value.chars();
+    match (chars.next(), chars.next()) {
+        (Some(c), None) => screen_keyboard::modified_kana(c)
+            .map(|c| c.to_string())
+            .unwrap_or_default(),
+        _ => String::new(),
+    }
+}
+
+fn set_js_prop(obj: &js_sys::Object, name: &str, value: &JsValue) {
+    let _ = js_sys::Reflect::set(obj, &JsValue::from_str(name), value);
+}
+
+fn screen_keyboard_key_to_js(key: &screen_keyboard::ScreenKeyboardKey) -> JsValue {
+    let obj = js_sys::Object::new();
+    set_js_prop(&obj, "label", JsValue::from_str(key.label).as_ref());
+    set_js_prop(
+        &obj,
+        "class",
+        JsValue::from_str(key.class.bridge_label()).as_ref(),
+    );
+    set_js_prop(
+        &obj,
+        "width",
+        JsValue::from_str(key.width.bridge_label()).as_ref(),
+    );
+    let interactive = !matches!(key.role, ScreenKeyboardKeyRole::Spacer);
+    set_js_prop(
+        &obj,
+        "interactive",
+        JsValue::from_bool(interactive).as_ref(),
+    );
+
+    if let ScreenKeyboardKeyRole::Flick(map) = key.role {
+        set_js_prop(&obj, "center", JsValue::from_str(map.center).as_ref());
+        if let Some(value) = map.up {
+            set_js_prop(&obj, "up", JsValue::from_str(value).as_ref());
+        }
+        if let Some(value) = map.right {
+            set_js_prop(&obj, "right", JsValue::from_str(value).as_ref());
+        }
+        if let Some(value) = map.down {
+            set_js_prop(&obj, "down", JsValue::from_str(value).as_ref());
+        }
+        if let Some(value) = map.left {
+            set_js_prop(&obj, "left", JsValue::from_str(value).as_ref());
+        }
+    }
+
+    obj.into()
+}
+
+fn screen_keyboard_action_to_js(action: ScreenKeyboardAction) -> JsValue {
+    let obj = js_sys::Object::new();
+    match action {
+        ScreenKeyboardAction::Text(value) => {
+            set_js_prop(&obj, "kind", JsValue::from_str("text").as_ref());
+            set_js_prop(&obj, "value", JsValue::from_str(value).as_ref());
+        }
+        ScreenKeyboardAction::UiCommand(command) => {
+            set_js_prop(&obj, "kind", JsValue::from_str("command").as_ref());
+            set_js_prop(
+                &obj,
+                "value",
+                JsValue::from_str(command.bridge_label()).as_ref(),
+            );
+        }
+        ScreenKeyboardAction::TransformLastText => {
+            set_js_prop(
+                &obj,
+                "kind",
+                JsValue::from_str("transform-last-text").as_ref(),
+            );
+        }
+        ScreenKeyboardAction::SwitchLayout => {
+            set_js_prop(&obj, "kind", JsValue::from_str("switch-layout").as_ref());
+        }
+        ScreenKeyboardAction::SwitchInputSource => {
+            set_js_prop(
+                &obj,
+                "kind",
+                JsValue::from_str("switch-input-source").as_ref(),
+            );
+        }
+        ScreenKeyboardAction::None => {
+            set_js_prop(&obj, "kind", JsValue::from_str("none").as_ref());
+        }
+    }
+    obj.into()
 }
 
 /// フォントを `fonts/` 相対パスから非同期に fetch して Vec<u8> で返す
@@ -455,11 +604,11 @@ async fn start_async() -> Result<(), JsValue> {
                     // タップ → Enter
                     app_clone.borrow_mut().on_event(AppEvent::Enter);
                     if app_clone.borrow_mut().take_file_open_request() {
-                        let _ = file_input_clone.click();
+                        file_input_clone.click();
                     }
                 } else if dist >= SWIPE_MIN_DIST && dy.abs() > dx.abs() {
                     // 縦スワイプ: 距離に応じてステップ数を調整 (最小 1、最大 5)
-                    let steps = ((dy.abs() / SWIPE_STEP_PX).ceil() as u32).max(1).min(5);
+                    let steps = ((dy.abs() / SWIPE_STEP_PX).ceil() as u32).clamp(1, 5);
                     let mut a = app_clone.borrow_mut();
                     for _ in 0..steps {
                         if dy < 0.0 {
@@ -485,9 +634,9 @@ async fn start_async() -> Result<(), JsValue> {
             e.prevent_default();
             let delta = e.delta_y();
             let steps = match e.delta_mode() {
-                0 => ((delta.abs() / 50.0).ceil() as u32).max(1).min(5), // ピクセル単位
-                1 => (delta.abs() as u32).max(1).min(5),                 // 行単位
-                _ => 1,                                                  // ページ単位など
+                0 => ((delta.abs() / 50.0).ceil() as u32).clamp(1, 5), // ピクセル単位
+                1 => (delta.abs() as u32).clamp(1, 5),                 // 行単位
+                _ => 1,                                                // ページ単位など
             };
             let mut a = app_clone.borrow_mut();
             for _ in 0..steps {
@@ -539,7 +688,7 @@ async fn start_async() -> Result<(), JsValue> {
                 event.prevent_default();
                 app_clone.borrow_mut().on_event(command.app_event());
                 if command == UiCommand::Enter && app_clone.borrow_mut().take_file_open_request() {
-                    let _ = file_input_clone.click();
+                    file_input_clone.click();
                 }
             }
         });
@@ -730,7 +879,7 @@ fn report_provider_error(app: &mut App, context: &str, error: ProviderError) {
     app.report_visible_error(message);
 }
 
-fn schedule_next_frame(callback: &Rc<RefCell<Option<Closure<dyn FnMut()>>>>) {
+fn schedule_next_frame(callback: &AnimationFrameCallback) {
     let borrowed = callback.borrow();
     let Some(callback) = borrowed.as_ref() else {
         web_sys::console::error_1(&js_backend_error(BackendError::state(

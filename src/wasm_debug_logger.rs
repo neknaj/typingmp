@@ -16,8 +16,8 @@ fn console_log_styled(message: &str, style: &str) {
 }
 
 thread_local! {
-    static WS_CONNECTION: RefCell<Option<WebSocket>> = RefCell::new(None);
-    static CONNECTION_ID: RefCell<String> = RefCell::new(String::new());
+    static WS_CONNECTION: RefCell<Option<WebSocket>> = const { RefCell::new(None) };
+    static CONNECTION_ID: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
 pub fn init() {
