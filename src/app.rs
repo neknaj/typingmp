@@ -12,7 +12,7 @@ use crate::app::scroll::{
 };
 use crate::display::DisplaySettings;
 pub use crate::font::{FontScript as Script, Fonts};
-#[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
+#[cfg(not(any(feature = "wasm", feature = "wasi-tui", feature = "uefi")))]
 use crate::io::FontEntry;
 use crate::io::{FontAssetId, ProblemRepository};
 use crate::model::{
@@ -89,11 +89,11 @@ impl MainMenuItem {
             Self::Start => Self::HowToUse,
             Self::HowToUse => Self::Settings,
             Self::Settings => {
-                #[cfg(target_arch = "wasm32")]
+                #[cfg(feature = "wasm")]
                 {
                     Self::Settings
                 }
-                #[cfg(not(target_arch = "wasm32"))]
+                #[cfg(not(feature = "wasm"))]
                 {
                     Self::Quit
                 }
@@ -258,32 +258,33 @@ pub struct App {
     /// フォントピッカーを開いているか
     pub(crate) settings_picking_font: bool,
     /// フォントピッカー内の選択インデックス
+    #[cfg(not(any(feature = "wasm", feature = "wasi-tui", feature = "uefi")))]
     pub(crate) selected_font_item: usize,
     /// 発見されたフォント一覧（起動時にディスカバリー）
-    #[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
+    #[cfg(not(any(feature = "wasm", feature = "wasi-tui", feature = "uefi")))]
     pub(crate) available_fonts: Vec<FontEntry>,
     requested_font_load: Option<FontLoadRequest>,
     pub(crate) fps: f64,
     pub(crate) source_scroll: usize, // ProblemSource でのスクロール行数
     pub(crate) how_to_use_scroll: usize, // HowToUse でのスクロール行数
     scroll_cache: Option<ScrollCache>,
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "wasm")]
     pub(crate) should_reset_ime: bool,
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "wasm")]
     pub(crate) should_save_custom_problems: bool, // localStorage への保存要求フラグ
 }
 
 impl App {
     /// Appの新しいインスタンスを生成する
     pub fn new(fonts: Fonts) -> Self {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "wasm")]
         let custom_source_label = "W";
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(not(feature = "wasm"))]
         let custom_source_label = "F";
 
-        #[cfg(any(feature = "gui", target_arch = "wasm32"))]
+        #[cfg(any(feature = "gui", feature = "wasm"))]
         let open_file_enabled = true;
-        #[cfg(not(any(feature = "gui", target_arch = "wasm32")))]
+        #[cfg(not(any(feature = "gui", feature = "wasm")))]
         let open_file_enabled = false;
 
         let problem_repository = ProblemRepository::new(
@@ -309,17 +310,18 @@ impl App {
             fonts,
             display_settings: DisplaySettings::default(),
             settings_picking_font: false,
+            #[cfg(not(any(feature = "wasm", feature = "wasi-tui", feature = "uefi")))]
             selected_font_item: 0,
-            #[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
+            #[cfg(not(any(feature = "wasm", feature = "wasi-tui", feature = "uefi")))]
             available_fonts: Vec::new(),
             requested_font_load: None,
             fps: 0.0,
             source_scroll: 0,
             how_to_use_scroll: 0,
             scroll_cache: None,
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(feature = "wasm")]
             should_reset_ime: false,
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(feature = "wasm")]
             should_save_custom_problems: false,
         }
     }
@@ -352,14 +354,14 @@ impl App {
         should_open
     }
 
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "wasm")]
     pub fn take_ime_reset_request(&mut self) -> bool {
         let should_reset = self.should_reset_ime;
         self.should_reset_ime = false;
         should_reset
     }
 
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(feature = "wasm")]
     pub fn take_custom_problem_save_request(&mut self) -> bool {
         let should_save = self.should_save_custom_problems;
         self.should_save_custom_problems = false;
@@ -483,7 +485,7 @@ impl App {
         self.state = AppState::Typing;
         self.on_event(AppEvent::ChangeScene);
 
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(feature = "wasm")]
         {
             self.should_reset_ime = true; // タイピング開始時にIMEをリセット（フォーカスを当てる）
         }
@@ -688,7 +690,7 @@ impl App {
                             self.on_event(AppEvent::ChangeScene);
                         }
                         MainMenuItem::Quit => {
-                            #[cfg(not(target_arch = "wasm32"))]
+                            #[cfg(not(feature = "wasm"))]
                             {
                                 self.should_quit = true;
                             }
@@ -711,8 +713,25 @@ impl App {
                         }
                         AppEvent::Enter => {
                             if self.selected_settings_item.font_script().is_some() {
-                                self.settings_picking_font = true;
-                                self.selected_font_item = 0;
+                                #[cfg(not(any(
+                                    feature = "wasm",
+                                    feature = "wasi-tui",
+                                    feature = "uefi"
+                                )))]
+                                {
+                                    self.settings_picking_font = true;
+                                    self.selected_font_item = 0;
+                                }
+                                #[cfg(any(
+                                    feature = "wasm",
+                                    feature = "wasi-tui",
+                                    feature = "uefi"
+                                ))]
+                                {
+                                    self.status_text =
+                                        "Font assignment is unavailable on this backend."
+                                            .to_string();
+                                }
                             } else {
                                 self.advance_selected_display_setting();
                             }
@@ -728,7 +747,7 @@ impl App {
                     }
                 } else {
                     // フォントピッカーモード: Up/Down で available_fonts を選択、Enter で適用
-                    #[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
+                    #[cfg(not(any(feature = "wasm", feature = "wasi-tui", feature = "uefi")))]
                     {
                         let font_count = self.available_fonts.len();
                         match event {
@@ -758,8 +777,8 @@ impl App {
                             _ => {}
                         }
                     }
-                    // WASM / UEFI ではフォントピッカー操作なし
-                    #[cfg(any(target_arch = "wasm32", feature = "uefi"))]
+                    // WASM / WASI / UEFI ではフォントピッカー操作なし
+                    #[cfg(any(feature = "wasm", feature = "wasi-tui", feature = "uefi"))]
                     {
                         match event {
                             AppEvent::Escape | AppEvent::Enter => {
@@ -863,11 +882,11 @@ impl App {
                 match event {
                     AppEvent::Char { c, timestamp } => {
                         let mut finished = false;
-                        #[cfg(target_arch = "wasm32")]
+                        #[cfg(feature = "wasm")]
                         let mut reset_ime = false;
 
                         if let Some(model) = self.typing_model.as_mut() {
-                            #[cfg(target_arch = "wasm32")]
+                            #[cfg(feature = "wasm")]
                             let old_position = (model.status.line, model.status.word);
 
                             finished = matches!(
@@ -875,13 +894,13 @@ impl App {
                                 typing::TypingTransition::Finished
                             );
 
-                            #[cfg(target_arch = "wasm32")]
+                            #[cfg(feature = "wasm")]
                             {
                                 reset_ime = (model.status.line, model.status.word) != old_position;
                             }
                         }
 
-                        #[cfg(target_arch = "wasm32")]
+                        #[cfg(feature = "wasm")]
                         {
                             if reset_ime {
                                 self.should_reset_ime = true;

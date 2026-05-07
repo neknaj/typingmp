@@ -227,10 +227,10 @@ pub(crate) const HOW_TO_USE_CONTENT: &[(&str, u32)] = &[
     ),
 ];
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "wasm")]
 const MENU_ITEMS: [&str; 3] = ["Start Typing", "How to Use", "Settings"];
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(feature = "wasm"))]
 const MENU_ITEMS: [&str; 4] = ["Start Typing", "How to Use", "Settings", "Quit"];
 
 pub const BASE_FONT_SIZE_RATIO: f32 = 0.2;

@@ -1,6 +1,6 @@
 // src/timestamp.rs
 
-#[cfg(all(not(target_arch = "wasm32"), not(feature = "uefi")))]
+#[cfg(all(not(feature = "wasm"), not(feature = "uefi")))]
 pub fn now() -> f64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     match SystemTime::now().duration_since(UNIX_EPOCH) {
@@ -9,7 +9,7 @@ pub fn now() -> f64 {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(feature = "wasm")]
 pub fn now() -> f64 {
     js_sys::Date::now()
 }

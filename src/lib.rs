@@ -38,6 +38,10 @@ pub mod gui;
 #[cfg(feature = "tui")]
 pub mod tui;
 
+// WASI/WASIX runtime 向けのANSI TUIバックエンド
+#[cfg(feature = "wasi-tui")]
+pub mod wasi_tui;
+
 // "wasm" featureが有効な時だけコンパイルされるWASMバックエンドモジュール
 #[cfg(feature = "wasm")]
 pub mod wasm;

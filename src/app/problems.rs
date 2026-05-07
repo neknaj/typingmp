@@ -1,7 +1,7 @@
 extern crate alloc;
 
 use super::{App, AppEvent};
-#[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
+#[cfg(not(any(feature = "wasm", feature = "wasi-tui", feature = "uefi")))]
 use crate::io::FontEntry;
 use crate::io::{CustomProblem, ProblemSourceProvider};
 use alloc::{
@@ -75,7 +75,7 @@ impl App {
             if count > 0 && self.selected_problem_item >= count {
                 self.selected_problem_item = count - 1;
             }
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(feature = "wasm")]
             {
                 self.should_save_custom_problems = true;
             }
@@ -86,7 +86,7 @@ impl App {
     pub fn move_custom_problem_up_at(&mut self, idx: usize) {
         if self.problem_repository.move_custom_problem_up_at(idx) {
             self.selected_problem_item -= 1;
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(feature = "wasm")]
             {
                 self.should_save_custom_problems = true;
             }
@@ -97,7 +97,7 @@ impl App {
     pub fn move_custom_problem_down_at(&mut self, idx: usize) {
         if self.problem_repository.move_custom_problem_down_at(idx) {
             self.selected_problem_item += 1;
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(feature = "wasm")]
             {
                 self.should_save_custom_problems = true;
             }
@@ -116,7 +116,7 @@ impl App {
         }
     }
 
-    #[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
+    #[cfg(not(any(feature = "wasm", feature = "wasi-tui", feature = "uefi")))]
     pub fn set_available_fonts(&mut self, entries: Vec<FontEntry>) {
         self.available_fonts = entries;
         if self.selected_font_item >= self.available_fonts.len() {

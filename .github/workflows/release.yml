@@ -82,6 +82,12 @@ jobs:
           - name: wasm-release-check
             targets: wasm32-unknown-unknown
             command: cargo check --release --target wasm32-unknown-unknown --no-default-features --features wasm
+          - name: wasi-tui-wasip1-check
+            targets: wasm32-wasip1
+            command: cargo check --target wasm32-wasip1 --no-default-features --features wasi-tui
+          - name: wasi-tui-wasip2-check
+            targets: wasm32-wasip2
+            command: cargo check --target wasm32-wasip2 --no-default-features --features wasi-tui
           - name: uefi-no-std-check
             targets: x86_64-unknown-uefi
             command: cargo check --target x86_64-unknown-uefi --no-default-features --features uefi
@@ -240,9 +246,41 @@ jobs:
           name: pages-artifact
           path: dist
 
+  build-wasi-tui:
+    name: Build WASI TUI
+    needs: [quality, feature-matrix]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1, wasm32-wasip2
+
+      - name: Build WASIp1 TUI
+        run: cargo build --release --bin ${{ env.APP_NAME }} --target wasm32-wasip1 --no-default-features --features wasi-tui
+
+      - name: Build WASIp2 TUI
+        run: cargo build --release --bin ${{ env.APP_NAME }} --target wasm32-wasip2 --no-default-features --features wasi-tui
+
+      - name: Prepare WASI artifacts
+        run: |
+          mkdir wasi-artifacts
+          cp target/wasm32-wasip1/release/${{ env.APP_NAME }}.wasm wasi-artifacts/${{ env.APP_NAME }}-tui-wasm32-wasip1.wasm
+          cp target/wasm32-wasip2/release/${{ env.APP_NAME }}.wasm wasi-artifacts/${{ env.APP_NAME }}-tui-wasm32-wasip2.wasm
+
+      - name: Upload WASI TUI artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasi-tui-artifacts
+          path: wasi-artifacts/*.wasm
+
   release:
     name: Create Release
-    needs: [build-binaries, build-uefi]
+    needs: [build-binaries, build-uefi, build-wasi-tui]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
@@ -268,6 +306,9 @@ jobs:
             target_name=$(basename "$(dirname "$file")" | sed 's/binaries-//')
             ext=$(echo "$file" | grep -oE '\.[^.]*$|')
             mv "$file" "release-files/${{ env.APP_NAME }}-gui-${target_name}${ext}"
+          done
+          find artifacts -type f -name "${{ env.APP_NAME }}-tui-wasm32-wasip*.wasm" | while read -r file; do
+            mv "$file" "release-files/$(basename "$file")"
           done
           mv artifacts/uefi-binary/${{ env.APP_NAME }}.efi release-files/
 
