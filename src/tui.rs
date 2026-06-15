@@ -1353,8 +1353,8 @@ fn blit_art(
         let local_y = placement.position.y + y as isize;
         for x in 0..placement.width {
             let local_x = placement.position.x + x as isize;
-            let frame_x = viewport.x as isize + local_x;
-            let frame_y = viewport.y as isize + local_y;
+            let frame_x = viewport.x + local_x;
+            let frame_y = viewport.y + local_y;
             if viewport.contains(frame_x, frame_y) {
                 let art_char = art[y * placement.width + x];
                 if art_char != ' ' {
