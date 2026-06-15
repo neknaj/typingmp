@@ -186,17 +186,43 @@ struct GradientCache {
     pixels: Vec<u32>,
 }
 
+struct TextBitmapCacheEntry {
+    font_key: usize,
+    text: String,
+    size_bits: u32,
+    frac_x_key: u8,
+    frac_y_key: u8,
+    hash: usize,
+    bitmap: RasterizedText,
+}
+
+struct RasterizedText {
+    offset_x: i32,
+    offset_y: i32,
+    width: usize,
+    height: usize,
+    alpha: Vec<u8>,
+}
+
 /// Shared render cache used by pixel backends.
 pub struct RenderCache {
     font_generation: u64,
     text_metrics: Vec<Option<TextMeasureCacheEntry>>,
     text_metric_count: usize,
     gradient: Option<GradientCache>,
+    text_bitmaps: Vec<Option<TextBitmapCacheEntry>>,
+    text_bitmap_count: usize,
+    text_bitmap_bytes: usize,
 }
 
 impl RenderCache {
     const TEXT_MEASURE_CACHE_LIMIT: usize = 2048;
     const TEXT_MEASURE_CACHE_PROBE_LIMIT: usize = 4;
+    const TEXT_BITMAP_CACHE_LIMIT: usize = 512;
+    const TEXT_BITMAP_CACHE_PROBE_LIMIT: usize = 4;
+    const TEXT_BITMAP_CACHE_MAX_BYTES: usize = 4 * 1024 * 1024;
+    const TEXT_BITMAP_MAX_SINGLE_BYTES: usize = 512 * 1024;
+    const SUBPIXEL_BUCKETS: f32 = 64.0;
 
     pub const fn new() -> Self {
         Self {
@@ -204,6 +230,9 @@ impl RenderCache {
             text_metrics: Vec::new(),
             text_metric_count: 0,
             gradient: None,
+            text_bitmaps: Vec::new(),
+            text_bitmap_count: 0,
+            text_bitmap_bytes: 0,
         }
     }
 
@@ -213,6 +242,7 @@ impl RenderCache {
             self.font_generation = font_generation;
             self.text_metrics.clear();
             self.text_metric_count = 0;
+            self.clear_text_bitmaps();
         }
     }
 
@@ -223,6 +253,20 @@ impl RenderCache {
                 .resize_with(Self::TEXT_MEASURE_CACHE_LIMIT, || None);
             self.text_metric_count = 0;
         }
+    }
+
+    fn ensure_text_bitmap_slots(&mut self) {
+        if self.text_bitmaps.len() != Self::TEXT_BITMAP_CACHE_LIMIT {
+            self.clear_text_bitmaps();
+            self.text_bitmaps
+                .resize_with(Self::TEXT_BITMAP_CACHE_LIMIT, || None);
+        }
+    }
+
+    fn clear_text_bitmaps(&mut self) {
+        self.text_bitmaps.clear();
+        self.text_bitmap_count = 0;
+        self.text_bitmap_bytes = 0;
     }
 
     fn measure_text<F: Font>(&mut self, font: &F, text: &str, size: f32) -> TextMetrics {
@@ -264,6 +308,88 @@ impl RenderCache {
             metrics,
         });
         metrics
+    }
+
+    fn rasterized_text<F: Font>(
+        &mut self,
+        font: &F,
+        text: &str,
+        size: f32,
+        pos: (f32, f32),
+    ) -> Option<&RasterizedText> {
+        if text.is_empty() {
+            return None;
+        }
+
+        let font_key = core::ptr::from_ref(font).cast::<()>() as usize;
+        let size_bits = size.to_bits();
+        let frac_x_key = subpixel_key(pos.0);
+        let frac_y_key = subpixel_key(pos.1);
+        let hash = text_bitmap_hash(font_key, size_bits, frac_x_key, frac_y_key, text);
+        self.ensure_text_bitmap_slots();
+
+        let primary_slot = hash % Self::TEXT_BITMAP_CACHE_LIMIT;
+        let mut insert_slot = primary_slot;
+        for offset in 0..Self::TEXT_BITMAP_CACHE_PROBE_LIMIT {
+            let slot = (primary_slot + offset) % Self::TEXT_BITMAP_CACHE_LIMIT;
+            match &self.text_bitmaps[slot] {
+                Some(entry)
+                    if entry.hash == hash
+                        && entry.font_key == font_key
+                        && entry.size_bits == size_bits
+                        && entry.frac_x_key == frac_x_key
+                        && entry.frac_y_key == frac_y_key
+                        && entry.text == text =>
+                {
+                    return self.text_bitmaps[slot].as_ref().map(|entry| &entry.bitmap);
+                }
+                None => {
+                    insert_slot = slot;
+                    break;
+                }
+                Some(_) => {}
+            }
+        }
+
+        let bitmap = rasterize_text_alpha(
+            font,
+            text,
+            size,
+            subpixel_value(frac_x_key),
+            subpixel_value(frac_y_key),
+        )?;
+        let bitmap_bytes = bitmap.alpha.len();
+        if bitmap_bytes > Self::TEXT_BITMAP_MAX_SINGLE_BYTES {
+            return None;
+        }
+        if self.text_bitmap_bytes + bitmap_bytes > Self::TEXT_BITMAP_CACHE_MAX_BYTES {
+            self.clear_text_bitmaps();
+            self.ensure_text_bitmap_slots();
+            insert_slot = primary_slot;
+        }
+
+        if let Some(existing) = &self.text_bitmaps[insert_slot] {
+            self.text_bitmap_bytes = self
+                .text_bitmap_bytes
+                .saturating_sub(existing.bitmap.alpha.len());
+        } else {
+            self.text_bitmap_count += 1;
+        }
+
+        self.text_bitmap_bytes += bitmap_bytes;
+        self.text_bitmaps[insert_slot] = Some(TextBitmapCacheEntry {
+            font_key,
+            text: text.to_string(),
+            size_bits,
+            frac_x_key,
+            frac_y_key,
+            hash,
+            bitmap,
+        });
+
+        self.text_bitmaps[insert_slot]
+            .as_ref()
+            .map(|entry| &entry.bitmap)
     }
 
     fn gradient_pixels(
@@ -311,6 +437,11 @@ impl RenderCache {
     fn text_measure_cache_len(&self) -> usize {
         self.text_metric_count
     }
+
+    #[cfg(test)]
+    fn text_bitmap_cache_len(&self) -> usize {
+        self.text_bitmap_count
+    }
 }
 
 fn text_metric_hash(font_key: usize, size_bits: u32, text: &str) -> usize {
@@ -325,6 +456,127 @@ fn text_metric_hash(font_key: usize, size_bits: u32, text: &str) -> usize {
         hash = hash.wrapping_mul(16_777_619) ^ usize::from(*byte);
     }
     hash
+}
+
+fn text_bitmap_hash(
+    font_key: usize,
+    size_bits: u32,
+    frac_x_key: u8,
+    frac_y_key: u8,
+    text: &str,
+) -> usize {
+    let mut hash = text_metric_hash(font_key, size_bits, text);
+    hash = hash.wrapping_mul(16_777_619) ^ usize::from(frac_x_key);
+    hash = hash.wrapping_mul(16_777_619) ^ usize::from(frac_y_key);
+    hash
+}
+
+fn subpixel_key(value: f32) -> u8 {
+    let floor = value.floor();
+    let fraction = (value - floor).clamp(0.0, 0.999_999);
+    (fraction * RenderCache::SUBPIXEL_BUCKETS) as u8
+}
+
+fn subpixel_value(key: u8) -> f32 {
+    f32::from(key) / RenderCache::SUBPIXEL_BUCKETS
+}
+
+fn rasterize_text_alpha<F: Font>(
+    font: &F,
+    text: &str,
+    size: f32,
+    frac_x: f32,
+    frac_y: f32,
+) -> Option<RasterizedText> {
+    let scale = PxScale::from(size);
+    let scaled_font = font.as_scaled(scale);
+    let ascent = scaled_font.ascent();
+    let pen_y = frac_y + ascent;
+    let mut pen_x = frac_x;
+    let mut last_glyph = None;
+    let mut min_x = i32::MAX;
+    let mut min_y = i32::MAX;
+    let mut max_x = i32::MIN;
+    let mut max_y = i32::MIN;
+
+    for character in text.chars() {
+        let glyph_id = font.glyph_id(character);
+        if let Some(last) = last_glyph {
+            pen_x += scaled_font.kern(last, glyph_id);
+        }
+        if let Some(outlined) =
+            font.outline_glyph(glyph_id.with_scale_and_position(scale, point(pen_x, pen_y)))
+        {
+            let bounds = outlined.px_bounds();
+            let left = bounds.min.x as i32;
+            let top = bounds.min.y as i32;
+            min_x = min_x.min(left);
+            min_y = min_y.min(top);
+            max_x = max_x.max(bounds.max.x.ceil() as i32);
+            max_y = max_y.max(bounds.max.y.ceil() as i32);
+        }
+        pen_x += scaled_font.h_advance(glyph_id);
+        last_glyph = Some(glyph_id);
+    }
+
+    if min_x >= max_x || min_y >= max_y {
+        return None;
+    }
+
+    let width = usize::try_from(max_x - min_x).ok()?;
+    let height = usize::try_from(max_y - min_y).ok()?;
+    let len = width.checked_mul(height)?;
+    if len == 0 {
+        return None;
+    }
+    let mut alpha = vec![0_u8; len];
+
+    pen_x = frac_x;
+    last_glyph = None;
+    for character in text.chars() {
+        let glyph_id = font.glyph_id(character);
+        if let Some(last) = last_glyph {
+            pen_x += scaled_font.kern(last, glyph_id);
+        }
+        let glyph = glyph_id.with_scale_and_position(scale, point(pen_x, pen_y));
+        if let Some(outlined) = font.outline_glyph(glyph) {
+            let bounds = outlined.px_bounds();
+            let bounds_left = bounds.min.x as i32;
+            let bounds_top = bounds.min.y as i32;
+            outlined.draw(|x, y, coverage| {
+                if coverage < 0.004 {
+                    return;
+                }
+                let local_x = bounds_left + x as i32 - min_x;
+                let local_y = bounds_top + y as i32 - min_y;
+                if local_x < 0 || local_y < 0 {
+                    return;
+                }
+                let local_x = local_x as usize;
+                let local_y = local_y as usize;
+                if local_x >= width || local_y >= height {
+                    return;
+                }
+                let index = local_y * width + local_x;
+                let value = if coverage > 0.996 {
+                    u8::MAX
+                } else {
+                    (coverage * 255.0) as u8
+                };
+                alpha[index] = alpha[index].max(value);
+            });
+        }
+        pen_x += scaled_font.h_advance(glyph_id);
+        last_glyph = Some(glyph_id);
+    }
+
+    Some(RasterizedText {
+        offset_x: min_x,
+        offset_y: min_y,
+        width,
+        height,
+        alpha,
+    })
 }
 
 fn frame_clip_for_viewport(
@@ -642,6 +894,58 @@ impl PixelFrame<'_> {
         );
     }
 
+    fn draw_text_bitmap(&mut self, bitmap: &RasterizedText, pos: (f32, f32), color: u32) {
+        if bitmap.width == 0 || bitmap.height == 0 || bitmap.alpha.is_empty() {
+            return;
+        }
+
+        let base_x = pos.0.floor() as i32 + self.viewport.x + bitmap.offset_x;
+        let base_y = pos.1.floor() as i32 + self.viewport.y + bitmap.offset_y;
+        let clip = self.frame_clip();
+        if clip.is_empty() {
+            return;
+        }
+
+        let left = base_x.max(clip.left);
+        let top = base_y.max(clip.top);
+        let right = (base_x + bitmap.width as i32).min(clip.right);
+        let bottom = (base_y + bitmap.height as i32).min(clip.bottom);
+        if left >= right || top >= bottom {
+            return;
+        }
+
+        let text_r = (color >> 16) & 0xFF;
+        let text_g = (color >> 8) & 0xFF;
+        let text_b = color & 0xFF;
+
+        for y in top..bottom {
+            let src_y = (y - base_y) as usize;
+            let src_row = src_y * bitmap.width;
+            let dst_row = y as usize * self.stride;
+            for x in left..right {
+                let alpha = u32::from(bitmap.alpha[src_row + (x - base_x) as usize]);
+                if alpha == 0 {
+                    continue;
+                }
+                let dst_index = dst_row + x as usize;
+                if alpha == 255 {
+                    self.pixels[dst_index] = 0xFF_000000 | (text_r << 16) | (text_g << 8) | text_b;
+                    continue;
+                }
+
+                let inverse = 255 - alpha;
+                let bg = self.pixels[dst_index];
+                let bg_r = (bg >> 16) & 0xFF;
+                let bg_g = (bg >> 8) & 0xFF;
+                let bg_b = bg & 0xFF;
+                let r = (text_r * alpha + bg_r * inverse) / 255;
+                let g = (text_g * alpha + bg_g * inverse) / 255;
+                let b = (text_b * alpha + bg_b * inverse) / 255;
+                self.pixels[dst_index] = 0xFF_000000 | (r << 16) | (g << 8) | b;
+            }
+        }
+    }
+
     fn fill_frame_rect(&mut self, rect: PixelClip, color: u32) {
         let frame_clip = self.frame_clip();
         let left = rect.left.max(frame_clip.left);
@@ -729,15 +1033,22 @@ struct ProgressColors {
     foreground: u32,
 }
 
+#[derive(Clone, Copy)]
+struct VisibleTextPlacement {
+    pos: (f32, f32),
+    size: f32,
+    metrics: TextMetrics,
+}
+
 fn draw_text_if_visible<F: Font>(
     frame: &mut PixelFrame<'_>,
     font: &F,
     text: &str,
-    pos: (f32, f32),
-    size: f32,
+    placement: VisibleTextPlacement,
     color: u32,
-    metrics: TextMetrics,
+    cache: &mut RenderCache,
 ) {
+    let VisibleTextPlacement { pos, size, metrics } = placement;
     if metrics.width == 0 || metrics.height == 0 {
         return;
     }
@@ -749,7 +1060,11 @@ fn draw_text_if_visible<F: Font>(
         x + metrics.width as f32,
         y + metrics.height as f32 + size * 0.2,
     ) {
-        frame.draw_text_clipped(font, text, pos, size, color);
+        if let Some(bitmap) = cache.rasterized_text(font, text, size, pos) {
+            frame.draw_text_bitmap(bitmap, pos, color);
+        } else {
+            frame.draw_text_clipped(font, text, pos, size, color);
+        }
     }
 }
 
@@ -774,10 +1089,13 @@ fn draw_aligned_text<F: Font>(
         frame,
         font,
         text,
-        (x as f32, y as f32),
-        pixel_font_size,
+        VisibleTextPlacement {
+            pos: (x as f32, y as f32),
+            size: pixel_font_size,
+            metrics,
+        },
         color,
-        metrics,
+        cache,
     );
 }
 
@@ -822,10 +1140,13 @@ fn draw_typing_upper(
             frame,
             font,
             &segment.base_text,
-            (base_x, y as f32),
-            base_size,
+            VisibleTextPlacement {
+                pos: (base_x, y as f32),
+                size: base_size,
+                metrics: base_metrics,
+            },
             color,
-            base_metrics,
+            cache,
         );
 
         if let Some(ruby) = &segment.ruby_text {
@@ -840,10 +1161,13 @@ fn draw_typing_upper(
                 frame,
                 ruby_font,
                 ruby,
-                (ruby_x, ruby_y),
-                ruby_pixel_font_size,
+                VisibleTextPlacement {
+                    pos: (ruby_x, ruby_y),
+                    size: ruby_pixel_font_size,
+                    metrics: ruby_metrics,
+                },
                 color,
-                ruby_metrics,
+                cache,
             );
         }
 
@@ -866,10 +1190,13 @@ fn draw_typing_upper(
                 frame,
                 anno_font,
                 anno,
-                (anno_x, anno_y),
-                anno_pixel_font_size,
+                VisibleTextPlacement {
+                    pos: (anno_x, anno_y),
+                    size: anno_pixel_font_size,
+                    metrics: anno_metrics,
+                },
                 color,
-                anno_metrics,
+                cache,
             );
         }
 
@@ -1055,10 +1382,13 @@ fn draw_typing_lower(
                         frame,
                         font,
                         base_text,
-                        (base_x, y as f32),
-                        base_size,
+                        VisibleTextPlacement {
+                            pos: (base_x, y as f32),
+                            size: base_size,
+                            metrics: base_metrics,
+                        },
                         color,
-                        base_metrics,
+                        cache,
                     );
 
                     if let Some(ruby) = ruby_text {
@@ -1075,10 +1405,13 @@ fn draw_typing_lower(
                                 frame,
                                 ruby_font,
                                 ruby,
-                                (ruby_x, ruby_y),
-                                ruby_pixel_font_size,
+                                VisibleTextPlacement {
+                                    pos: (ruby_x, ruby_y),
+                                    size: ruby_pixel_font_size,
+                                    metrics: ruby_metrics,
+                                },
                                 color,
-                                ruby_metrics,
+                                cache,
                             );
                         }
                     }
@@ -1109,10 +1442,13 @@ fn draw_typing_lower(
                             frame,
                             font,
                             &text,
-                            (pen_x as f32, y as f32),
-                            size,
+                            VisibleTextPlacement {
+                                pos: (pen_x as f32, y as f32),
+                                size,
+                                metrics: text_metrics,
+                            },
                             color,
-                            text_metrics,
+                            cache,
                         );
                     }
                     pen_x += text_width;
@@ -1741,7 +2077,10 @@ mod tests {
             surface.render(&fonts, DisplaySettings::default(), &render_list, &mut cache);
         }
         let cache_len_after_first_render = cache.text_measure_cache_len();
+        let bitmap_cache_len_after_first_render = cache.text_bitmap_cache_len();
+        let first_pixels = pixels.clone();
         assert!(cache_len_after_first_render > 0);
+        assert!(bitmap_cache_len_after_first_render > 0);
         assert!(pixels.iter().any(|pixel| *pixel != 0));
 
         {
@@ -1750,6 +2089,11 @@ mod tests {
             surface.render(&fonts, DisplaySettings::default(), &render_list, &mut cache);
         }
         assert_eq!(cache.text_measure_cache_len(), cache_len_after_first_render);
+        assert_eq!(
+            cache.text_bitmap_cache_len(),
+            bitmap_cache_len_after_first_render
+        );
+        assert_eq!(pixels, first_pixels);
     }
 
     #[test]
