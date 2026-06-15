@@ -2118,6 +2118,16 @@ fn build_typing_ui(
                             });
                         }
 
+                        if !status.unconfirmed.is_empty() {
+                            let unconfirmed_text: String = status.unconfirmed.iter().collect();
+                            push_unconfirmed_input_elements(
+                                &mut active_elements,
+                                active_seg_content,
+                                unconfirmed_text,
+                                active_script,
+                            );
+                        }
+
                         if let Some(wrong_char) = status.last_wrong_keydown {
                             active_elements.push(ActiveLowerElement::LastIncorrectInput {
                                 character: wrong_char,
@@ -2129,15 +2139,6 @@ fn build_typing_ui(
                                 ),
                             });
                         } else {
-                            if !status.unconfirmed.is_empty() {
-                                let unconfirmed_text: String = status.unconfirmed.iter().collect();
-                                push_unconfirmed_input_elements(
-                                    &mut active_elements,
-                                    active_seg_content,
-                                    unconfirmed_text,
-                                    active_script,
-                                );
-                            }
                             active_elements.push(ActiveLowerElement::Cursor);
                         }
 
@@ -2228,6 +2229,16 @@ fn build_typing_ui(
                         });
                     }
 
+                    if !status.unconfirmed.is_empty() {
+                        let unconfirmed_text: String = status.unconfirmed.iter().collect();
+                        push_unconfirmed_input_elements(
+                            &mut active_elements,
+                            active_seg_content,
+                            unconfirmed_text,
+                            active_script,
+                        );
+                    }
+
                     if let Some(wrong_char) = status.last_wrong_keydown {
                         active_elements.push(ActiveLowerElement::LastIncorrectInput {
                             character: wrong_char,
@@ -2239,15 +2250,6 @@ fn build_typing_ui(
                             ),
                         });
                     } else {
-                        if !status.unconfirmed.is_empty() {
-                            let unconfirmed_text: String = status.unconfirmed.iter().collect();
-                            push_unconfirmed_input_elements(
-                                &mut active_elements,
-                                active_seg_content,
-                                unconfirmed_text,
-                                active_script,
-                            );
-                        }
                         active_elements.push(ActiveLowerElement::Cursor);
                     }
 
@@ -3081,6 +3083,38 @@ mod tests {
                 assert_eq!(*script, FontScript::ChineseSimplified);
             }
             _ => panic!("Chinese unconfirmed feedback should be a tone-marked Chinese run"),
+        }
+    }
+
+    #[test]
+    fn wrong_key_feedback_keeps_unconfirmed_prefix_visible() {
+        let mut app = typing_app("#title Test\n[\u{8272}/\u{3057}]\u{3042}");
+        app.on_event(AppEvent::Char {
+            c: 's',
+            timestamp: 1.0,
+        });
+        app.on_event(AppEvent::Char {
+            c: 'x',
+            timestamp: 2.0,
+        });
+
+        let render_list = build_ui(&app, app.fonts(), 800, 500);
+        let (_, lower_segments) = typing_rows(&render_list);
+
+        let LowerTypingSegment::Active { elements, .. } = &lower_segments[0] else {
+            panic!("first lower segment should be active");
+        };
+        match elements.as_slice() {
+            [ActiveLowerElement::UnconfirmedInput { text, script }, ActiveLowerElement::LastIncorrectInput {
+                character,
+                script: wrong_script,
+            }] => {
+                assert_eq!(text, "s");
+                assert_eq!(*script, FontScript::Japanese);
+                assert_eq!(*character, 'x');
+                assert_eq!(*wrong_script, FontScript::Japanese);
+            }
+            _ => panic!("wrong feedback should keep the accepted romaji prefix visible"),
         }
     }
 

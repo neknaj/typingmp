@@ -100,7 +100,7 @@
 | 操作 | キー |
 |------|------|
 | 文字入力 | 通常のキー |
-| フォント切替 | F キー |
+| フォント変更 | Settings の font picker |
 
 ### TUI（端末）
 
@@ -118,7 +118,9 @@
 ### WASM（ブラウザ）
 
 - 通常のキーボード入力
-- IME（日本語入力）は非表示の `<input>` 要素で処理
+- IME Input 設定は既定で disabled
+- disabled のとき printable key は `keydown` で処理し、非表示の `<input>` と OS スクリーンキーボードは使わない
+- enabled のときだけ非表示の `<input>` 経由で IME 入力を受け付け、OS / app keyboard の入力ソース切替を許可する
 
 ### UEFI（ベアメタル）
 

@@ -78,13 +78,13 @@ Neknaj Typing MP の Web 版・モバイル版において、タッチデバイ�
 3. **誤り入力**
    - Path 1・2 どちらでも一致しなかった場合。
    - `last_wrong_keydown = Some(input)` をセット。
-   - `unconfirmed` をクリア。
+   - `unconfirmed` はクリアせず、正しく入力済みのローマ字 prefix を保持する。
    - `typing_correctness[line][word][seg][char]` を `Incorrect` に更新。
 
 ### Backspace の動作
 
-- `unconfirmed` が非空の場合: 末尾の1文字を削除（ローマ字入力の訂正）。
-- `last_wrong_keydown` が Some の場合: 誤り状態をクリアし、同時に `typing_correctness` の該当位置を `Incorrect → Pending` にリセットする。これにより大⇔小キーで誤りを修正した後に赤表示が残らない。
+- `last_wrong_keydown` が Some の場合: 誤入力だけを取り消し、同時に `typing_correctness` の該当位置を `Incorrect → Pending` にリセットする。このとき `unconfirmed` のローマ字 prefix は保持する。
+- `last_wrong_keydown` が None かつ `unconfirmed` が非空の場合: 末尾の1文字を削除（ローマ字入力の訂正）。
 - いずれの場合も位置（line/word/segment/char）は後退しない。
 
 ### 正誤の視覚表示
@@ -133,6 +133,7 @@ Gboard と同じ**後置修飾**方式を採用する。デッドキー（先に
 3. trigger_event('Backspace'):
    - last_wrong_keydown をクリア
    - typing_correctness[現在位置] を Incorrect → Pending にリセット
+   - unconfirmed prefix は保持
 4. 変換後の `Text` action と同じ経路で `next_char` を送信:
    - send_char(nextChar) を呼び出す
    - `last_text = next_char` を更新
@@ -179,15 +180,18 @@ Gboard と同じ**後置修飾**方式を採用する。デッドキー（先に
 
 ## 入力ソース切替
 
-Web 版では OS 仮想キーボードとアプリ提供フリックキーボードを切り替えられる。
+Web 版では IME Input が enabled のときだけ、OS 仮想キーボードとアプリ提供フリックキーボードを切り替えられる。既定の disabled では app モードに固定し、OS スクリーンキーボードを起動しない。
 
 | モード | inputmode | blur 動作 | 物理キーボード |
 |--------|-----------|-----------|----------------|
-| app (フリック) | none (タッチ時) / text (デスクトップ) | タッチ時のみ即時 blur | デスクトップでは有効 |
+| app (IME disabled) | none | 即時 blur | `keydown` 経路で有効 |
+| app (IME enabled) | none (タッチ時) / text (デスクトップ) | タッチ時のみ即時 blur | デスクトップでは有効 |
 | device (OS IME) | text | blur しない | 有効 |
 
 - 設定は `localStorage` の `typingmp_kb_mode` キーに永続化される。
-- デスクトップ (非タッチ) では app モードでも `inputmode="none"` および blur を適用しないため、物理キーボード入力が常に機能する。
+- IME Input が disabled の間は `typingmp_kb_mode` に関係なく app モードとして扱い、printable key は WASM の `keydown` 経路で処理する。
+- デスクトップ (非タッチ) で app モードかつ IME Input が enabled の場合は `inputmode="none"` および blur を適用しないため、物理キーボード入力が hidden input 経由でも機能する。
+- 物理 `keydown` または hidden input の `input` を受けた場合、WASM 側のスクリーンキーボード補助状態 (`last_text` / `last_accepted`) は stale な後置修飾を避けるためリセットする。
 - スクリーンキーボードの表示制御は `is_typing_active()` と `navigator.maxTouchPoints > 0` の AND 条件で行う。
 - Slint mobile はアプリ提供キーボードを主経路とし、物理キーボード入力は FocusScope で受ける。OS IME 連携を追加する場合は `ScreenKeyboardAction::SwitchInputSource` に接続する。
 

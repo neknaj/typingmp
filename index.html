@@ -563,7 +563,15 @@
                         setTimeout(() => hiddenInput && hiddenInput.blur(), 0);
                     }
                 });
+                hiddenInput.addEventListener('input', () => {
+                    resetScreenKeyboardState();
+                }, true);
             }
+            document.addEventListener('keydown', (event) => {
+                if (!event.target?.closest?.('#screen-keyboard')) {
+                    resetScreenKeyboardState();
+                }
+            }, true);
             updateKeyboardSourceButtons();
 
             const adjustHeight = () => {

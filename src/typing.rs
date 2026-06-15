@@ -44,7 +44,10 @@ fn normalize_typing_char(c: char) -> char {
 
 fn is_n_auto_commit_trigger(unconfirmed: &[char], input_lower: char, target_slice: &str) -> bool {
     matches!(
-        (unconfirmed, target_slice.chars().next()),
+        (
+            unconfirmed,
+            target_slice.chars().next().map(normalize_typing_char)
+        ),
         (['n'], Some('ん'))
             if !matches!(input_lower, 'a' | 'i' | 'u' | 'e' | 'o' | 'n' | 'y' | '\'')
     )
@@ -350,7 +353,6 @@ pub fn key_input(model: &mut TypingModel, input: char, timestamp: f64) -> Typing
         }
     } else {
         model.status.last_wrong_keydown = Some(input);
-        model.status.unconfirmed.clear();
         let Some(correctness_segment) = model
             .typing_correctness
             .lines
@@ -563,5 +565,38 @@ mod tests {
         assert_eq!(model.status.unconfirmed, ['k']);
         assert_eq!(model.status.char_, CharIndex::new(1));
         assert_eq!(model.total_type_count, 2);
+    }
+
+    #[test]
+    fn katakana_n_auto_commit_mutates_in_place_before_original_key() {
+        let mut model = typing_model_from_problem("#title Test\n\u{30f3}\u{30ab}");
+
+        assert_eq!(key_input(&mut model, 'n', 10.0), TypingTransition::Continue);
+        assert_eq!(model.status.unconfirmed, ['n']);
+        assert_eq!(model.status.char_, CharIndex::ZERO);
+
+        assert_eq!(key_input(&mut model, 'k', 20.0), TypingTransition::Continue);
+        assert_eq!(model.status.unconfirmed, ['k']);
+        assert_eq!(model.status.char_, CharIndex::new(1));
+        assert_eq!(model.total_type_count, 2);
+    }
+
+    #[test]
+    fn wrong_key_preserves_unconfirmed_prefix_for_backspace_recovery() {
+        let mut model = typing_model_from_problem("#title Test\n[\u{8272}/\u{3057}]\u{3042}");
+
+        assert_eq!(key_input(&mut model, 's', 10.0), TypingTransition::Continue);
+        assert_eq!(model.status.unconfirmed, ['s']);
+
+        assert_eq!(key_input(&mut model, 'x', 20.0), TypingTransition::Continue);
+
+        assert_eq!(model.status.unconfirmed, ['s']);
+        assert_eq!(model.status.last_wrong_keydown, Some('x'));
+        assert_eq!(model.total_type_count, 1);
+        assert_eq!(model.total_miss_count, 1);
+        assert_eq!(
+            model.typing_correctness.lines[0].words[0].segments[0].chars[0],
+            TypingCorrectnessChar::Incorrect
+        );
     }
 }

@@ -936,7 +936,8 @@ impl App {
                     }
                     AppEvent::Backspace => {
                         if let Some(model) = self.typing_model.as_mut() {
-                            if model.status.last_wrong_keydown.is_some() {
+                            let had_wrong_keydown = model.status.last_wrong_keydown.is_some();
+                            if had_wrong_keydown {
                                 let line = model.status.line.get();
                                 let word = model.status.word.get();
                                 let seg = model.status.segment.get();
@@ -954,7 +955,9 @@ impl App {
                                     }
                                 }
                             }
-                            model.status.unconfirmed.pop();
+                            if !had_wrong_keydown {
+                                model.status.unconfirmed.pop();
+                            }
                             model.status.last_wrong_keydown = None;
                         }
                     }
@@ -1093,6 +1096,54 @@ mod tests {
             timestamp: 1.0,
         });
         assert!(!app.accepts_ime_input());
+    }
+
+    #[test]
+    fn backspace_after_wrong_key_preserves_unconfirmed_prefix() {
+        let mut app = App::new(test_fonts());
+        app.add_custom_problem(
+            "Backspace".to_string(),
+            "#title Test\n[\u{8272}/\u{3057}]\u{3042}".to_string(),
+            0,
+        );
+        app.on_event(AppEvent::Enter);
+
+        app.on_event(AppEvent::Char {
+            c: 's',
+            timestamp: 1.0,
+        });
+        app.on_event(AppEvent::Char {
+            c: 'x',
+            timestamp: 2.0,
+        });
+        app.on_event(AppEvent::Backspace);
+
+        let model = app
+            .typing_model
+            .as_ref()
+            .expect("typing model should remain active");
+        assert_eq!(model.status.unconfirmed, ['s']);
+        assert_eq!(model.status.last_wrong_keydown, None);
+        assert_eq!(
+            model.typing_correctness.lines[0].words[0].segments[0].chars[0],
+            crate::model::TypingCorrectnessChar::Pending
+        );
+
+        app.on_event(AppEvent::Char {
+            c: 'i',
+            timestamp: 3.0,
+        });
+
+        let model = app
+            .typing_model
+            .as_ref()
+            .expect("typing model should remain active after completing first segment");
+        assert!(model.status.unconfirmed.is_empty());
+        assert_eq!(model.status.word, WordIndex::new(1));
+        assert_eq!(
+            model.typing_correctness.lines[0].words[0].segments[0].chars[0],
+            crate::model::TypingCorrectnessChar::Correct
+        );
     }
 
     #[test]
