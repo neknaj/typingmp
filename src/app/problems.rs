@@ -8,7 +8,7 @@ use alloc::{
 };
 
 impl App {
-    /// 組み込み問題 + カスタム問題 + (gui/wasm では「Open File」エントリ1件) の合計数
+    /// 組み込み問題 + カスタム問題 + (gui-file/wasm では「Open File」エントリ1件) の合計数
     pub fn problem_count(&self) -> usize {
         self.problem_repository.problem_count()
     }

@@ -1,7 +1,9 @@
 use crate::app::{App, AppEvent, FontBundle, Fonts};
 use crate::backend::BackendError;
+use crate::display::DisplayViewport;
 use crate::io::{bundled_font_data, bundled_font_entries};
 use crate::model::Segment;
+use crate::terminal_width;
 use crate::ui::{self, ActiveLowerElement, Align, Anchor, LowerTypingSegment, Renderable, Shift};
 use ab_glyph::FontVec;
 use std::io::{self, Write};
@@ -10,6 +12,7 @@ const VIRTUAL_PIXEL_WIDTH: usize = 1000;
 const DEFAULT_COLUMNS: usize = 100;
 const DEFAULT_LINES: usize = 30;
 const TUI_CHAR_ASPECT_RATIO: f32 = 2.0;
+const CONTINUATION_CELL: char = '\0';
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AnsiColor {
@@ -40,13 +43,86 @@ impl Default for Cell {
 
 #[derive(Clone, Copy)]
 struct CellViewport {
+    x: usize,
+    y: usize,
     columns: usize,
     rows: usize,
+    frame_columns: usize,
+    frame_rows: usize,
 }
 
 impl CellViewport {
     const fn new(columns: usize, rows: usize) -> Self {
-        Self { columns, rows }
+        Self {
+            x: 0,
+            y: 0,
+            columns,
+            rows,
+            frame_columns: columns,
+            frame_rows: rows,
+        }
+    }
+
+    fn from_virtual_viewport(
+        frame: Self,
+        virtual_height: usize,
+        virtual_viewport: DisplayViewport,
+    ) -> Self {
+        if frame.frame_columns == 0 || frame.frame_rows == 0 {
+            return frame;
+        }
+
+        let map_x = |value: usize| -> usize {
+            ((value as f64 / VIRTUAL_PIXEL_WIDTH.max(1) as f64) * frame.frame_columns as f64)
+                .round()
+                .clamp(0.0, frame.frame_columns as f64) as usize
+        };
+        let map_y = |value: usize| -> usize {
+            if virtual_height == 0 {
+                0
+            } else {
+                ((value as f64 / virtual_height as f64) * frame.frame_rows as f64)
+                    .round()
+                    .clamp(0.0, frame.frame_rows as f64) as usize
+            }
+        };
+
+        let x = map_x(virtual_viewport.x);
+        let y = map_y(virtual_viewport.y);
+        let right = map_x(virtual_viewport.x.saturating_add(virtual_viewport.width));
+        let bottom = map_y(virtual_viewport.y.saturating_add(virtual_viewport.height));
+
+        Self {
+            x,
+            y,
+            columns: right.saturating_sub(x).max(1).min(frame.frame_columns - x),
+            rows: bottom.saturating_sub(y).max(1).min(frame.frame_rows - y),
+            frame_columns: frame.frame_columns,
+            frame_rows: frame.frame_rows,
+        }
+    }
+
+    fn frame_len(self) -> usize {
+        self.frame_columns * self.frame_rows
+    }
+
+    fn contains(self, x: isize, y: isize) -> bool {
+        x >= self.x as isize
+            && y >= self.y as isize
+            && x < self.x.saturating_add(self.columns) as isize
+            && y < self.y.saturating_add(self.rows) as isize
+            && x < self.frame_columns as isize
+            && y < self.frame_rows as isize
+    }
+
+    fn local_to_frame(self, x: i32, y: i32) -> Option<(usize, usize)> {
+        let frame_x = self.x as isize + x as isize;
+        let frame_y = self.y as isize + y as isize;
+        if self.contains(frame_x, frame_y) {
+            Some((frame_x as usize, frame_y as usize))
+        } else {
+            None
+        }
     }
 }
 
@@ -114,12 +190,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        let frame = render_frame(
-            &app,
-            viewport,
-            virtual_viewport.width,
-            virtual_viewport.height,
-        );
+        let frame = render_frame(&app, viewport, virtual_height, virtual_viewport);
         write_frame(&mut stdout, &frame, viewport)?;
         if app.snapshot().should_quit {
             break;
@@ -208,12 +279,19 @@ fn virtual_height(viewport: CellViewport) -> usize {
 
 fn render_frame(
     app: &App,
-    viewport: CellViewport,
-    virtual_width: usize,
+    frame_viewport: CellViewport,
     virtual_height: usize,
+    virtual_viewport: DisplayViewport,
 ) -> Vec<Cell> {
-    let mut cells = vec![Cell::default(); viewport.columns * viewport.rows];
-    let render_list = ui::build_ui(app, app.fonts(), virtual_width, virtual_height);
+    let viewport =
+        CellViewport::from_virtual_viewport(frame_viewport, virtual_height, virtual_viewport);
+    let mut cells = vec![Cell::default(); frame_viewport.frame_len()];
+    let render_list = ui::build_ui(
+        app,
+        app.fonts(),
+        virtual_viewport.width,
+        virtual_viewport.height,
+    );
 
     for item in render_list {
         match item {
@@ -265,15 +343,15 @@ fn render_frame(
                 for segment in segments {
                     if let Some(ruby) = &segment.ruby_text {
                         let ruby_x = pen_x
-                            + (segment.base_text.chars().count() as i32
-                                - ruby.chars().count() as i32)
+                            + (terminal_width::text_width(&segment.base_text) as i32
+                                - terminal_width::text_width(ruby) as i32)
                                 / 2;
                         draw_plain_text_at(
                             &mut cells,
                             ruby,
                             ruby_x,
                             pen_y - 1,
-                            viewport.columns,
+                            viewport,
                             upper_segment_color(segment.state),
                         );
                     }
@@ -282,10 +360,10 @@ fn render_frame(
                         &segment.base_text,
                         pen_x,
                         pen_y,
-                        viewport.columns,
+                        viewport,
                         upper_segment_color(segment.state),
                     );
-                    pen_x += segment.base_text.chars().count() as i32;
+                    pen_x += terminal_width::text_width(&segment.base_text) as i32;
                 }
             }
             Renderable::TypingLower {
@@ -318,40 +396,30 @@ fn render_frame(
                             };
                             if let Some(ruby) = ruby_text {
                                 let ruby_x = pen_x
-                                    + (base_text.chars().count() as i32
-                                        - ruby.chars().count() as i32)
+                                    + (terminal_width::text_width(&base_text) as i32
+                                        - terminal_width::text_width(&ruby) as i32)
                                         / 2;
                                 draw_plain_text_at(
                                     &mut cells,
                                     &ruby,
                                     ruby_x,
                                     pen_y - 1,
-                                    viewport.columns,
+                                    viewport,
                                     color,
                                 );
                             }
                             draw_plain_text_at(
-                                &mut cells,
-                                &base_text,
-                                pen_x,
-                                pen_y,
-                                viewport.columns,
-                                color,
+                                &mut cells, &base_text, pen_x, pen_y, viewport, color,
                             );
-                            pen_x += base_text.chars().count() as i32;
+                            pen_x += terminal_width::text_width(&base_text) as i32;
                         }
                         LowerTypingSegment::Active { elements, .. } => {
                             for element in elements {
                                 let (text, color) = active_lower_text_and_color(&element);
                                 draw_plain_text_at(
-                                    &mut cells,
-                                    &text,
-                                    pen_x,
-                                    pen_y,
-                                    viewport.columns,
-                                    color,
+                                    &mut cells, &text, pen_x, pen_y, viewport, color,
                                 );
-                                pen_x += text.chars().count() as i32;
+                                pen_x += terminal_width::text_width(&text) as i32;
                             }
                         }
                     }
@@ -408,7 +476,7 @@ fn current_line_base_char_count(app: &App) -> usize {
                 .iter()
                 .flat_map(|word| &word.segments)
                 .map(segment_base_text)
-                .map(|text| text.chars().count())
+                .map(|text| terminal_width::text_width(&text))
                 .sum()
         })
         .unwrap_or(0)
@@ -417,7 +485,7 @@ fn current_line_base_char_count(app: &App) -> usize {
 fn upper_segments_char_count(segments: &[ui::UpperTypingSegment]) -> usize {
     segments
         .iter()
-        .map(|segment| segment.base_text.chars().count())
+        .map(|segment| terminal_width::text_width(&segment.base_text))
         .sum()
 }
 
@@ -436,7 +504,7 @@ fn draw_plain_text(
     viewport: CellViewport,
     color: AnsiColor,
 ) {
-    let text_width = text.chars().count() as u32;
+    let text_width = terminal_width::text_width(text) as u32;
     let anchor_pos = ui::calculate_anchor_position(
         placement.anchor,
         placement.shift,
@@ -444,7 +512,7 @@ fn draw_plain_text(
         viewport.rows,
     );
     let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, 1, placement.align);
-    draw_plain_text_at(buffer, text, x, y, viewport.columns, color);
+    draw_plain_text_at(buffer, text, x, y, viewport, color);
 }
 
 fn draw_plain_text_at(
@@ -452,22 +520,50 @@ fn draw_plain_text_at(
     text: &str,
     x: i32,
     y: i32,
-    width: usize,
+    viewport: CellViewport,
     color: AnsiColor,
 ) {
-    if width == 0 || y < 0 || y >= (buffer.len() / width) as i32 {
-        return;
-    }
-
-    for (offset, character) in text.chars().enumerate() {
-        let current_x = x + offset as i32;
-        if current_x < 0 || current_x >= width as i32 {
+    let mut pen_x = x;
+    for character in text.chars() {
+        let char_width = terminal_width::char_width(character);
+        if char_width == 0 {
             continue;
         }
-        let index = y as usize * width + current_x as usize;
-        if let Some(cell) = buffer.get_mut(index) {
-            *cell = Cell { character, color };
+        if pen_x + char_width as i32 <= 0 {
+            pen_x += char_width as i32;
+            continue;
         }
+        if pen_x < 0 {
+            pen_x += char_width as i32;
+            continue;
+        }
+        if pen_x >= viewport.columns as i32 {
+            break;
+        }
+        if char_width > 1 && pen_x + char_width as i32 > viewport.columns as i32 {
+            break;
+        }
+
+        if let Some((frame_x, frame_y)) = viewport.local_to_frame(pen_x, y) {
+            let index = frame_y * viewport.frame_columns + frame_x;
+            if let Some(cell) = buffer.get_mut(index) {
+                *cell = Cell { character, color };
+            }
+        }
+        for continuation in 1..char_width {
+            if let Some((frame_x, frame_y)) =
+                viewport.local_to_frame(pen_x + continuation as i32, y)
+            {
+                let index = frame_y * viewport.frame_columns + frame_x;
+                if let Some(cell) = buffer.get_mut(index) {
+                    *cell = Cell {
+                        character: CONTINUATION_CELL,
+                        color,
+                    };
+                }
+            }
+        }
+        pen_x += char_width as i32;
     }
 }
 
@@ -497,22 +593,21 @@ fn draw_progress_bar(
     let filled = (width as f32 * placement.progress.clamp(0.0, 1.0)).round() as usize;
     for offset in 0..width {
         let x = start_x + offset as i32;
-        if x < 0 || x >= viewport.columns as i32 {
-            continue;
-        }
-        let index = y as usize * viewport.columns + x as usize;
-        if let Some(cell) = buffer.get_mut(index) {
-            *cell = if offset < filled {
-                Cell {
-                    character: '#',
-                    color: colors.foreground,
-                }
-            } else {
-                Cell {
-                    character: '-',
-                    color: colors.background,
-                }
-            };
+        if let Some((frame_x, frame_y)) = viewport.local_to_frame(x, y) {
+            let index = frame_y * viewport.frame_columns + frame_x;
+            if let Some(cell) = buffer.get_mut(index) {
+                *cell = if offset < filled {
+                    Cell {
+                        character: '#',
+                        color: colors.foreground,
+                    }
+                } else {
+                    Cell {
+                        character: '-',
+                        color: colors.background,
+                    }
+                };
+            }
         }
     }
 }
@@ -521,17 +616,20 @@ fn write_frame(stdout: &mut impl Write, frame: &[Cell], viewport: CellViewport) 
     write!(stdout, "\x1b[?25l\x1b[2J\x1b[H")?;
     let mut current_color = AnsiColor::Reset;
 
-    for row in 0..viewport.rows {
-        let row_start = row * viewport.columns;
-        let row_end = (row_start + viewport.columns).min(frame.len());
+    for row in 0..viewport.frame_rows {
+        let row_start = row * viewport.frame_columns;
+        let row_end = (row_start + viewport.frame_columns).min(frame.len());
         for cell in &frame[row_start..row_end] {
+            if cell.character == CONTINUATION_CELL {
+                continue;
+            }
             if cell.color != current_color {
                 write_color(stdout, cell.color)?;
                 current_color = cell.color;
             }
             write!(stdout, "{}", cell.character)?;
         }
-        if row + 1 < viewport.rows {
+        if row + 1 < viewport.frame_rows {
             writeln!(stdout)?;
         }
     }
@@ -611,6 +709,7 @@ fn handle_line_input(app: &mut App, line: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::display::{DisplayAspectRatio, DisplayScale, DisplaySettings};
 
     #[test]
     fn line_commands_map_to_app_events() {
@@ -622,5 +721,65 @@ mod tests {
         assert!(handle_line_input(&mut app, "/up"));
         assert!(handle_line_input(&mut app, ""));
         assert!(!handle_line_input(&mut app, "/q"));
+    }
+
+    #[test]
+    fn cell_viewport_maps_display_aspect_to_frame_cells() {
+        let frame = CellViewport::new(80, 40);
+        let settings = DisplaySettings {
+            aspect_ratio: DisplayAspectRatio::Square1x1,
+            scale: DisplayScale::Percent100,
+        };
+        let virtual_height = 500;
+        let virtual_viewport = settings.viewport(VIRTUAL_PIXEL_WIDTH, virtual_height);
+
+        let viewport = CellViewport::from_virtual_viewport(frame, virtual_height, virtual_viewport);
+
+        assert_eq!(viewport.x, 20);
+        assert_eq!(viewport.y, 0);
+        assert_eq!(viewport.columns, 40);
+        assert_eq!(viewport.rows, 40);
+        assert_eq!(viewport.frame_columns, 80);
+        assert_eq!(viewport.frame_rows, 40);
+    }
+
+    #[test]
+    fn draw_plain_text_at_clips_to_cell_viewport() {
+        let viewport = CellViewport {
+            x: 2,
+            y: 1,
+            columns: 4,
+            rows: 2,
+            frame_columns: 8,
+            frame_rows: 4,
+        };
+        let mut buffer = vec![Cell::default(); viewport.frame_len()];
+
+        draw_plain_text_at(&mut buffer, "abcdef", -1, 0, viewport, AnsiColor::Rgb(1));
+        draw_plain_text_at(&mut buffer, "Z", 0, -1, viewport, AnsiColor::Rgb(2));
+
+        let row = &buffer[viewport.frame_columns..viewport.frame_columns * 2];
+        assert_eq!(row[0].character, ' ');
+        assert_eq!(row[1].character, ' ');
+        assert_eq!(row[2].character, 'b');
+        assert_eq!(row[3].character, 'c');
+        assert_eq!(row[4].character, 'd');
+        assert_eq!(row[5].character, 'e');
+        assert_eq!(row[6].character, ' ');
+        assert_eq!(row[2].color, AnsiColor::Rgb(1));
+    }
+
+    #[test]
+    fn draw_plain_text_at_marks_wide_character_continuation_cells() {
+        let viewport = CellViewport::new(8, 2);
+        let mut buffer = vec![Cell::default(); viewport.frame_len()];
+
+        draw_plain_text_at(&mut buffer, "春A", 0, 0, viewport, AnsiColor::Rgb(3));
+
+        assert_eq!(buffer[0].character, '春');
+        assert_eq!(buffer[1].character, CONTINUATION_CELL);
+        assert_eq!(buffer[2].character, 'A');
+        assert_eq!(buffer[0].color, AnsiColor::Rgb(3));
+        assert_eq!(buffer[1].color, AnsiColor::Rgb(3));
     }
 }

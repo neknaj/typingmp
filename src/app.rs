@@ -275,7 +275,7 @@ pub struct App {
     pub(crate) instructions_text: String,
     pub(crate) tui_display_mode: TuiDisplayMode,
     pub(crate) should_quit: bool,
-    /// ファイルダイアログを開く要求フラグ（gui/wasm のみ）
+    /// ファイルダイアログを開く要求フラグ（gui-file/wasm のみ）
     pub(crate) should_open_file_dialog: bool,
     pub(crate) fonts: Fonts,
     pub(crate) display_settings: DisplaySettings,
@@ -304,9 +304,9 @@ impl App {
         #[cfg(not(feature = "wasm"))]
         let custom_source_label = "F";
 
-        #[cfg(any(feature = "gui", feature = "wasm"))]
+        #[cfg(any(feature = "gui-file", feature = "wasm"))]
         let open_file_enabled = true;
-        #[cfg(not(any(feature = "gui", feature = "wasm")))]
+        #[cfg(not(any(feature = "gui-file", feature = "wasm")))]
         let open_file_enabled = false;
 
         let problem_repository = ProblemRepository::new(
@@ -1053,6 +1053,14 @@ mod tests {
     }
 
     #[test]
+    fn builtin_problem_files_parse_successfully() {
+        for (index, name) in PROBLEM_FILES_NAMES.iter().enumerate() {
+            parser::parse_problem(get_problem_content(index))
+                .unwrap_or_else(|diagnostics| panic!("{name} should parse: {diagnostics}"));
+        }
+    }
+
+    #[test]
     fn snapshot_exposes_immutable_view_state() {
         let mut app = App::new(test_fonts());
 
@@ -1068,5 +1076,13 @@ mod tests {
         );
         assert!(!snapshot.should_quit);
         assert!(!snapshot.should_open_file_dialog);
+    }
+
+    #[test]
+    #[cfg(not(any(feature = "gui-file", feature = "wasm")))]
+    fn app_does_not_advertise_open_file_without_backend_support() {
+        let app = App::new(test_fonts());
+
+        assert!((0..app.problem_count()).all(|index| !app.is_open_file_entry(index)));
     }
 }

@@ -257,8 +257,13 @@ const MENU_ITEMS: [&str; 3] = ["Start Typing", "How to Use", "Settings"];
 const MENU_ITEMS: [&str; 4] = ["Start Typing", "How to Use", "Settings", "Quit"];
 
 pub const BASE_FONT_SIZE_RATIO: f32 = 0.2;
-const UPPER_ROW_Y_OFFSET_FACTOR: f32 = 1.3;
-const LOWER_ROW_Y_OFFSET_FACTOR: f32 = 0.2;
+const TYPING_TITLE_FONT_SIZE_RATIO: f32 = 0.10;
+const TYPING_CONTEXT_FONT_SIZE_RATIO: f32 = 0.06;
+const TYPING_CORE_CENTER_RATIO: f32 = 0.51;
+const TYPING_CORE_MIN_GAP_RATIO: f32 = 0.012;
+const TYPING_FLOAT_TOP_MARGIN_RATIO: f32 = 0.035;
+const TYPING_FLOAT_MIN_GAP_RATIO: f32 = 0.008;
+const TYPING_NEXT_CONTEXT_BOTTOM_LIMIT_RATIO: f32 = 0.9;
 
 pub const CORRECT_COLOR: u32 = 0xFF_9097FF;
 pub const INCORRECT_COLOR: u32 = 0xFF_FF9898;
@@ -267,6 +272,133 @@ pub const ACTIVE_COLOR: u32 = 0xFF_FFFFFF;
 pub const WRONG_KEY_COLOR: u32 = 0xFF_F55252;
 pub const CURSOR_COLOR: u32 = 0xFF_FFFFFF;
 pub const UNCONFIRMED_COLOR: u32 = 0xFF_CCCCCC;
+
+#[derive(Debug, Clone, Copy)]
+struct TypingLineVerticalMetrics {
+    base_height: f32,
+    top_extra: f32,
+    bottom_extra: f32,
+}
+
+impl TypingLineVerticalMetrics {
+    fn total_height(self) -> f32 {
+        self.top_extra + self.base_height + self.bottom_extra
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TypingCoreVerticalLayout {
+    upper_shift_y: f32,
+    lower_shift_y: f32,
+    top: f32,
+    bottom: f32,
+}
+
+fn typing_core_vertical_layout(
+    height: usize,
+    upper: TypingLineVerticalMetrics,
+    lower: TypingLineVerticalMetrics,
+) -> TypingCoreVerticalLayout {
+    let viewport_height = height.max(1) as f32;
+    let gap = viewport_height * TYPING_CORE_MIN_GAP_RATIO;
+    let upper_height = upper.total_height();
+    let lower_height = lower.total_height();
+    let group_height = upper_height + gap + lower_height;
+    let preferred_top = viewport_height * TYPING_CORE_CENTER_RATIO - group_height * 0.5;
+    let max_top = (viewport_height - group_height).max(0.0);
+    let top = preferred_top.clamp(0.0, max_top);
+    let upper_base_y = top + upper.top_extra;
+    let upper_anchor_y = upper_base_y + upper.base_height * 0.5;
+    let upper_bottom = top + upper_height;
+    let lower_top = upper_bottom + gap;
+    let lower_base_y = lower_top + lower.top_extra;
+    let lower_anchor_y = lower_base_y;
+
+    TypingCoreVerticalLayout {
+        upper_shift_y: (upper_anchor_y - viewport_height * 0.5) / viewport_height,
+        lower_shift_y: (lower_anchor_y - viewport_height * 0.5) / viewport_height,
+        top,
+        bottom: lower_top + lower_height,
+    }
+}
+
+fn upper_typing_vertical_metrics(
+    segments: &[UpperTypingSegment],
+    fonts: &Fonts,
+    pixel_font_size: f32,
+) -> TypingLineVerticalMetrics {
+    let ruby_pixel_font_size = pixel_font_size * 0.4;
+    let base_height = gui_renderer::measure_text(fonts.primary(), " ", pixel_font_size).1 as f32;
+    let mut top_extra = 0.0_f32;
+    let mut bottom_extra = 0.0_f32;
+
+    for segment in segments {
+        if let Some(ruby) = &segment.ruby_text {
+            let ruby_font = fonts.get_ruby_for_script(segment.script);
+            let ruby_height =
+                gui_renderer::measure_text(ruby_font, ruby, ruby_pixel_font_size).1 as f32;
+            let ruby_y = -ruby_pixel_font_size * 0.5;
+            top_extra = top_extra.max(-ruby_y);
+            bottom_extra = bottom_extra.max((ruby_y + ruby_height - base_height).max(0.0));
+        }
+    }
+
+    TypingLineVerticalMetrics {
+        base_height,
+        top_extra,
+        bottom_extra,
+    }
+}
+
+fn lower_typing_vertical_metrics(
+    segments: &[LowerTypingSegment],
+    fonts: &Fonts,
+    pixel_font_size: f32,
+) -> TypingLineVerticalMetrics {
+    let ruby_pixel_font_size = pixel_font_size * 0.3;
+    let base_height = gui_renderer::measure_text(fonts.primary(), " ", pixel_font_size).1 as f32;
+    let mut top_extra = 0.0_f32;
+    let mut bottom_extra = 0.0_f32;
+
+    for segment in segments {
+        if let LowerTypingSegment::Completed {
+            ruby_text: Some(ruby),
+            script,
+            ..
+        } = segment
+        {
+            let ruby_font = fonts.get_ruby_for_script(*script);
+            let ruby_height =
+                gui_renderer::measure_text(ruby_font, ruby, ruby_pixel_font_size).1 as f32;
+            let ruby_y = -ruby_pixel_font_size * 0.5;
+            top_extra = top_extra.max(-ruby_y);
+            bottom_extra = bottom_extra.max((ruby_y + ruby_height - base_height).max(0.0));
+        }
+    }
+
+    TypingLineVerticalMetrics {
+        base_height,
+        top_extra,
+        bottom_extra,
+    }
+}
+
+fn top_anchor_shift_y_for_box_top(
+    box_top: f32,
+    metrics: TypingLineVerticalMetrics,
+    height: usize,
+) -> f32 {
+    (box_top + metrics.top_extra) / height.max(1) as f32
+}
+
+fn center_anchor_top_shift_y_for_box_top(
+    box_top: f32,
+    metrics: TypingLineVerticalMetrics,
+    height: usize,
+) -> f32 {
+    let viewport_height = height.max(1) as f32;
+    (box_top + metrics.top_extra - viewport_height * 0.5) / viewport_height
+}
 
 pub fn build_ui(app: &App, fonts: &Fonts, width: usize, height: usize) -> Vec<Renderable> {
     let mut render_list = Vec::new();
@@ -1435,28 +1567,15 @@ fn build_typing_ui(
     render_list.push(Renderable::Background { gradient });
 
     if let Some(model) = app.typing_model() {
-        let title_font_size = FontSize::WindowHeight(0.12);
+        let title_font_size = FontSize::WindowHeight(TYPING_TITLE_FONT_SIZE_RATIO);
         let title_pixel_font_size = calculate_pixel_font_size(title_font_size, width, height)
             * app.display_settings().scale.multiplier();
         let title_segments =
             upper_segments_for_line(&model.content.title, UpperSegmentState::Active);
-        if !title_segments.is_empty() {
-            render_list.push(Renderable::TypingUpper {
-                segments: title_segments,
-                anchor: Anchor::TopCenter,
-                shift: Shift { x: 0.0, y: 0.06 },
-                align: Align {
-                    horizontal: HorizontalAlign::Center,
-                    vertical: VerticalAlign::Top,
-                },
-                font_size: title_font_size,
-                line_alignment: TypingLineAlignment::full_line(measure_line_base_width(
-                    &model.content.title,
-                    fonts,
-                    title_pixel_font_size,
-                )),
-            });
-        }
+        let title_line_width =
+            measure_line_base_width(&model.content.title, fonts, title_pixel_font_size);
+        let title_vertical_metrics =
+            upper_typing_vertical_metrics(&title_segments, fonts, title_pixel_font_size);
 
         let base_font_size = FontSize::WindowHeight(BASE_FONT_SIZE_RATIO);
         let base_pixel_font_size = calculate_pixel_font_size(base_font_size, width, height)
@@ -1624,23 +1743,6 @@ fn build_typing_ui(
                 );
             }
         }
-
-        let upper_y_shift_from_center =
-            -(base_pixel_font_size * UPPER_ROW_Y_OFFSET_FACTOR) / height as f32 + 0.17;
-        render_list.push(Renderable::TypingUpper {
-            segments: upper_segments,
-            anchor: Anchor::Center,
-            shift: Shift {
-                x: line_shift_x,
-                y: upper_y_shift_from_center,
-            },
-            align: Align {
-                horizontal: HorizontalAlign::Left,
-                vertical: VerticalAlign::Center,
-            },
-            font_size: base_font_size,
-            line_alignment: TypingLineAlignment::new(full_line_width, upper_visible_start_width),
-        });
 
         let mut lower_segments = Vec::new();
         let mut lower_visible_start_width = 0;
@@ -1912,14 +2014,104 @@ fn build_typing_ui(
             }
         }
 
-        let lower_y_shift_from_center =
-            (base_pixel_font_size * LOWER_ROW_Y_OFFSET_FACTOR) / height as f32 + 0.01;
+        let upper_vertical_metrics =
+            upper_typing_vertical_metrics(&upper_segments, fonts, base_pixel_font_size);
+        let lower_vertical_metrics =
+            lower_typing_vertical_metrics(&lower_segments, fonts, base_pixel_font_size);
+        let core_layout =
+            typing_core_vertical_layout(height, upper_vertical_metrics, lower_vertical_metrics);
+
+        let line_count = model.content.lines.len();
+        let context_font_size = FontSize::WindowHeight(TYPING_CONTEXT_FONT_SIZE_RATIO);
+        let context_pixel_font_size = calculate_pixel_font_size(context_font_size, width, height)
+            * app.display_settings().scale.multiplier();
+        let float_gap = height.max(1) as f32 * TYPING_FLOAT_MIN_GAP_RATIO;
+        let top_margin = height.max(1) as f32 * TYPING_FLOAT_TOP_MARGIN_RATIO;
+
+        let mut previous_context_top = None;
+        let mut previous_context_renderable = None;
+        let previous_line_to_display = model.status.line.get() as isize - 1;
+        if previous_line_to_display >= 0 {
+            let line_idx_context = previous_line_to_display as usize;
+            if let Some(context_line) = model.content.lines.get(line_idx_context) {
+                let segments = upper_segments_for_line(context_line, UpperSegmentState::Muted);
+                let metrics =
+                    upper_typing_vertical_metrics(&segments, fonts, context_pixel_font_size);
+                let top = core_layout.top - float_gap - metrics.total_height();
+                if top >= top_margin {
+                    previous_context_top = Some(top);
+                    previous_context_renderable = Some(Renderable::TypingUpper {
+                        segments,
+                        anchor: Anchor::Center,
+                        shift: Shift {
+                            x: 0.0,
+                            y: center_anchor_top_shift_y_for_box_top(top, metrics, height),
+                        },
+                        align: Align {
+                            horizontal: HorizontalAlign::Center,
+                            vertical: VerticalAlign::Top,
+                        },
+                        font_size: context_font_size,
+                        line_alignment: TypingLineAlignment::full_line(measure_line_base_width(
+                            context_line,
+                            fonts,
+                            context_pixel_font_size,
+                        )),
+                    });
+                }
+            }
+        }
+
+        if !title_segments.is_empty() {
+            let title_top = top_margin;
+            let title_limit = previous_context_top.unwrap_or(core_layout.top);
+            if title_top + title_vertical_metrics.total_height() + float_gap <= title_limit {
+                render_list.push(Renderable::TypingUpper {
+                    segments: title_segments,
+                    anchor: Anchor::TopCenter,
+                    shift: Shift {
+                        x: 0.0,
+                        y: top_anchor_shift_y_for_box_top(
+                            title_top,
+                            title_vertical_metrics,
+                            height,
+                        ),
+                    },
+                    align: Align {
+                        horizontal: HorizontalAlign::Center,
+                        vertical: VerticalAlign::Top,
+                    },
+                    font_size: title_font_size,
+                    line_alignment: TypingLineAlignment::full_line(title_line_width),
+                });
+            }
+        }
+
+        if let Some(renderable) = previous_context_renderable {
+            render_list.push(renderable);
+        }
+
+        render_list.push(Renderable::TypingUpper {
+            segments: upper_segments,
+            anchor: Anchor::Center,
+            shift: Shift {
+                x: line_shift_x,
+                y: core_layout.upper_shift_y,
+            },
+            align: Align {
+                horizontal: HorizontalAlign::Left,
+                vertical: VerticalAlign::Center,
+            },
+            font_size: base_font_size,
+            line_alignment: TypingLineAlignment::new(full_line_width, upper_visible_start_width),
+        });
+
         render_list.push(Renderable::TypingLower {
             segments: lower_segments,
             anchor: Anchor::Center,
             shift: Shift {
                 x: line_shift_x,
-                y: lower_y_shift_from_center,
+                y: core_layout.lower_shift_y,
             },
             align: Align {
                 horizontal: HorizontalAlign::Left,
@@ -1929,26 +2121,24 @@ fn build_typing_ui(
             line_alignment: TypingLineAlignment::new(full_line_width, lower_visible_start_width),
         });
 
-        let line_count = model.content.lines.len();
-        for &offset in &[-1, 1] {
-            let line_to_display_signed = model.status.line.get() as isize + offset;
-            if line_to_display_signed >= 0 && (line_to_display_signed as usize) < line_count {
-                let line_idx_context = line_to_display_signed as usize;
-                let context_font_size = FontSize::WindowHeight(0.08);
-                let context_pixel_font_size =
-                    calculate_pixel_font_size(context_font_size, width, height)
-                        * app.display_settings().scale.multiplier();
-                let context_line = &model.content.lines[line_idx_context];
+        let next_line_to_display = model.status.line.get() + 1;
+        if let Some(context_line) = model.content.lines.get(next_line_to_display) {
+            let segments = upper_segments_for_line(context_line, UpperSegmentState::Muted);
+            let metrics = upper_typing_vertical_metrics(&segments, fonts, context_pixel_font_size);
+            let top = core_layout.bottom + float_gap;
+            if top + metrics.total_height()
+                <= height.max(1) as f32 * TYPING_NEXT_CONTEXT_BOTTOM_LIMIT_RATIO
+            {
                 render_list.push(Renderable::TypingUpper {
-                    segments: upper_segments_for_line(context_line, UpperSegmentState::Muted),
+                    segments,
                     anchor: Anchor::Center,
                     shift: Shift {
                         x: 0.0,
-                        y: (offset as f32 * 0.37) + 0.05,
+                        y: center_anchor_top_shift_y_for_box_top(top, metrics, height),
                     },
                     align: Align {
                         horizontal: HorizontalAlign::Center,
-                        vertical: VerticalAlign::Center,
+                        vertical: VerticalAlign::Top,
                     },
                     font_size: context_font_size,
                     line_alignment: TypingLineAlignment::full_line(measure_line_base_width(
@@ -2271,6 +2461,224 @@ mod tests {
         );
     }
 
+    #[derive(Debug)]
+    struct VerticalTextBox {
+        name: &'static str,
+        top: f32,
+        bottom: f32,
+    }
+
+    fn upper_renderable_vertical_box(
+        item: &Renderable,
+        fonts: &Fonts,
+        width: usize,
+        height: usize,
+        display_scale: f32,
+        name: &'static str,
+    ) -> Option<VerticalTextBox> {
+        let Renderable::TypingUpper {
+            segments,
+            anchor,
+            shift,
+            align,
+            font_size,
+            line_alignment,
+        } = item
+        else {
+            return None;
+        };
+
+        let pixel_font_size = calculate_pixel_font_size(*font_size, width, height) * display_scale;
+        let ruby_pixel_font_size = pixel_font_size * 0.4;
+        let total_height = gui_renderer::measure_text(fonts.primary(), " ", pixel_font_size).1;
+        let anchor_pos = calculate_anchor_position(*anchor, *shift, width, height);
+        let (_, y) = calculate_aligned_position(
+            anchor_pos,
+            line_alignment.full_line_width,
+            total_height,
+            *align,
+        );
+        let mut top = y as f32;
+        let mut bottom = y as f32 + total_height as f32;
+
+        for segment in segments {
+            if let Some(ruby) = &segment.ruby_text {
+                let ruby_font = fonts.get_ruby_for_script(segment.script);
+                let ruby_height =
+                    gui_renderer::measure_text(ruby_font, ruby, ruby_pixel_font_size).1 as f32;
+                let ruby_y = y as f32 - ruby_pixel_font_size * 0.5;
+                top = top.min(ruby_y);
+                bottom = bottom.max(ruby_y + ruby_height);
+            }
+        }
+
+        Some(VerticalTextBox { name, top, bottom })
+    }
+
+    fn lower_renderable_vertical_box(
+        item: &Renderable,
+        fonts: &Fonts,
+        width: usize,
+        height: usize,
+        display_scale: f32,
+        name: &'static str,
+    ) -> Option<VerticalTextBox> {
+        let Renderable::TypingLower {
+            segments,
+            anchor,
+            shift,
+            align,
+            font_size,
+            line_alignment,
+        } = item
+        else {
+            return None;
+        };
+
+        let pixel_font_size = calculate_pixel_font_size(*font_size, width, height) * display_scale;
+        let ruby_pixel_font_size = pixel_font_size * 0.3;
+        let total_height = gui_renderer::measure_text(fonts.primary(), " ", pixel_font_size).1;
+        let anchor_pos = calculate_anchor_position(*anchor, *shift, width, height);
+        let (_, y) = calculate_aligned_position(
+            anchor_pos,
+            line_alignment.full_line_width,
+            total_height,
+            *align,
+        );
+        let mut top = y as f32;
+        let mut bottom = y as f32 + total_height as f32;
+
+        for segment in segments {
+            if let LowerTypingSegment::Completed {
+                ruby_text: Some(ruby),
+                script,
+                ..
+            } = segment
+            {
+                let ruby_font = fonts.get_ruby_for_script(*script);
+                let ruby_height =
+                    gui_renderer::measure_text(ruby_font, ruby, ruby_pixel_font_size).1 as f32;
+                let ruby_y = y as f32 - ruby_pixel_font_size * 0.5;
+                top = top.min(ruby_y);
+                bottom = bottom.max(ruby_y + ruby_height);
+            }
+        }
+
+        Some(VerticalTextBox { name, top, bottom })
+    }
+
+    fn play_typing_text_boxes(
+        render_list: &[Renderable],
+        fonts: &Fonts,
+        width: usize,
+        height: usize,
+        display_scale: f32,
+    ) -> Vec<VerticalTextBox> {
+        render_list
+            .iter()
+            .filter_map(|item| match item {
+                Renderable::TypingUpper {
+                    anchor: Anchor::TopCenter,
+                    ..
+                } => upper_renderable_vertical_box(
+                    item,
+                    fonts,
+                    width,
+                    height,
+                    display_scale,
+                    "title",
+                ),
+                Renderable::TypingUpper {
+                    anchor: Anchor::Center,
+                    shift,
+                    align:
+                        Align {
+                            horizontal: HorizontalAlign::Center,
+                            ..
+                        },
+                    ..
+                } if shift.y < 0.0 => upper_renderable_vertical_box(
+                    item,
+                    fonts,
+                    width,
+                    height,
+                    display_scale,
+                    "previous_context",
+                ),
+                Renderable::TypingUpper {
+                    anchor: Anchor::Center,
+                    shift,
+                    align:
+                        Align {
+                            horizontal: HorizontalAlign::Center,
+                            ..
+                        },
+                    ..
+                } if shift.y > 0.0 => upper_renderable_vertical_box(
+                    item,
+                    fonts,
+                    width,
+                    height,
+                    display_scale,
+                    "next_context",
+                ),
+                Renderable::TypingUpper {
+                    anchor: Anchor::Center,
+                    align:
+                        Align {
+                            horizontal: HorizontalAlign::Left,
+                            ..
+                        },
+                    ..
+                } => upper_renderable_vertical_box(
+                    item,
+                    fonts,
+                    width,
+                    height,
+                    display_scale,
+                    "current_upper",
+                ),
+                Renderable::TypingLower { .. } => lower_renderable_vertical_box(
+                    item,
+                    fonts,
+                    width,
+                    height,
+                    display_scale,
+                    "current_lower",
+                ),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn find_box<'a>(boxes: &'a [VerticalTextBox], name: &str) -> &'a VerticalTextBox {
+        boxes
+            .iter()
+            .find(|text_box| text_box.name == name)
+            .unwrap_or_else(|| panic!("{name} vertical text box should exist: {boxes:#?}"))
+    }
+
+    fn find_optional_box<'a>(
+        boxes: &'a [VerticalTextBox],
+        name: &str,
+    ) -> Option<&'a VerticalTextBox> {
+        boxes.iter().find(|text_box| text_box.name == name)
+    }
+
+    fn assert_no_vertical_text_collisions(boxes: &[VerticalTextBox], min_gap: f32) {
+        let mut sorted: Vec<&VerticalTextBox> = boxes.iter().collect();
+        sorted.sort_by(|a, b| a.top.total_cmp(&b.top));
+
+        for pair in sorted.windows(2) {
+            let upper = pair[0];
+            let lower = pair[1];
+            assert!(
+                upper.bottom + min_gap <= lower.top,
+                "text boxes overlap or are too close: upper={upper:?}, lower={lower:?}, all boxes={boxes:#?}"
+            );
+        }
+    }
+
     #[test]
     fn active_plain_upper_segments_follow_lower_typed_colors() {
         let mut app = typing_app("#title Test\n色は句");
@@ -2517,6 +2925,88 @@ mod tests {
             .iter()
             .flat_map(|segments| segments.iter())
             .all(|segment| segment.state == UpperSegmentState::Muted));
+    }
+
+    #[test]
+    fn gui_play_title_and_previous_context_ruby_do_not_overlap() {
+        let mut app = typing_app("#title [春暁/しゅんぎょう]\n[前/まえ]\n[今/いま]\n[次/つぎ]");
+        for (index, c) in "mae".chars().enumerate() {
+            app.on_event(AppEvent::Char {
+                c,
+                timestamp: index as f64,
+            });
+        }
+
+        let width = 800;
+        let height = 500;
+        for scale in [
+            DisplayScale::Percent75,
+            DisplayScale::Percent100,
+            DisplayScale::Percent125,
+            DisplayScale::Percent150,
+            DisplayScale::Percent200,
+        ] {
+            app.display_settings.scale = scale;
+            let render_list = build_ui(&app, app.fonts(), width, height);
+            let boxes = play_typing_text_boxes(
+                &render_list,
+                app.fonts(),
+                width,
+                height,
+                scale.multiplier(),
+            );
+            if scale == DisplayScale::Percent100 {
+                let title = find_box(&boxes, "title");
+                let previous_context = find_box(&boxes, "previous_context");
+                assert!(
+                    title.bottom + 4.0 <= previous_context.top,
+                    "at scale {} title box {title:?} should leave room before previous context ruby box {previous_context:?}; all boxes: {boxes:#?}",
+                    scale.label()
+                );
+            } else if let (Some(title), Some(previous_context)) = (
+                find_optional_box(&boxes, "title"),
+                find_optional_box(&boxes, "previous_context"),
+            ) {
+                assert!(
+                    title.bottom + 4.0 <= previous_context.top,
+                    "at scale {} title box {title:?} should leave room before previous context ruby box {previous_context:?}; all boxes: {boxes:#?}",
+                    scale.label()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn gui_play_major_typing_rows_do_not_overlap() {
+        let mut app = typing_app("#title [春暁/しゅんぎょう]\n[前/まえ]\n[今/いま]\n[次/つぎ]");
+        for (index, c) in "mae".chars().enumerate() {
+            app.on_event(AppEvent::Char {
+                c,
+                timestamp: index as f64,
+            });
+        }
+
+        let width = 800;
+        let height = 500;
+        for scale in [
+            DisplayScale::Percent75,
+            DisplayScale::Percent100,
+            DisplayScale::Percent125,
+            DisplayScale::Percent150,
+            DisplayScale::Percent200,
+        ] {
+            app.display_settings.scale = scale;
+            let render_list = build_ui(&app, app.fonts(), width, height);
+            let boxes = play_typing_text_boxes(
+                &render_list,
+                app.fonts(),
+                width,
+                height,
+                scale.multiplier(),
+            );
+
+            assert_no_vertical_text_collisions(&boxes, 4.0);
+        }
     }
 
     #[test]

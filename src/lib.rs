@@ -27,6 +27,8 @@ pub mod parser;
 pub mod pinyin;
 pub mod renderer;
 pub mod screen_keyboard;
+#[cfg(any(feature = "tui", feature = "wasi-tui", test))]
+pub(crate) mod terminal_width;
 pub mod timestamp;
 pub mod typing;
 pub mod ui;

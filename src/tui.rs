@@ -5,6 +5,8 @@ use crate::app::{App, AppEvent, FontBundle, Fonts, TuiDisplayMode};
 #[cfg(not(feature = "uefi"))]
 use crate::backend::BackendError;
 #[cfg(not(feature = "uefi"))]
+use crate::display::{DisplaySettings, DisplayViewport};
+#[cfg(not(feature = "uefi"))]
 use crate::font::{script_for_segment, scripts_for_line, segment_script_runs};
 #[cfg(not(feature = "uefi"))]
 use crate::io::{AssetProvider, BundledFont, DesktopAssetProvider};
@@ -12,6 +14,8 @@ use crate::io::{AssetProvider, BundledFont, DesktopAssetProvider};
 use crate::model::{Line, Segment};
 #[cfg(not(feature = "uefi"))]
 use crate::renderer::{gui_renderer, tui_renderer}; // gui_renderer をインポート
+#[cfg(not(feature = "uefi"))]
+use crate::terminal_width;
 #[cfg(not(feature = "uefi"))]
 use crate::ui::{
     self, ActiveLowerElement, Align, Anchor, FontSize, HorizontalAlign, LowerTypingSegment,
@@ -39,6 +43,9 @@ const TUI_VIRTUAL_PIXEL_WIDTH: usize = 1000;
 #[cfg(not(feature = "uefi"))]
 type TuiGlyphRenderer = fn(&FontVec, &str, f32) -> (Vec<char>, usize, usize, usize);
 
+#[cfg(not(feature = "uefi"))]
+const CONTINUATION_CELL: char = '\0';
+
 /// ターミナルの一つのセルを表す構造体。文字と前景（文字）色を持つ。
 #[derive(Clone, Copy, PartialEq, Debug)]
 #[cfg(not(feature = "uefi"))]
@@ -50,14 +57,94 @@ struct Cell {
 #[derive(Clone, Copy)]
 #[cfg(not(feature = "uefi"))]
 struct TuiViewport {
+    x: usize,
+    y: usize,
     width: usize,
     height: usize,
+    frame_width: usize,
+    frame_height: usize,
 }
 
 #[cfg(not(feature = "uefi"))]
 impl TuiViewport {
     const fn new(width: usize, height: usize) -> Self {
-        Self { width, height }
+        Self {
+            x: 0,
+            y: 0,
+            width,
+            height,
+            frame_width: width,
+            frame_height: height,
+        }
+    }
+
+    fn from_display_settings(
+        settings: DisplaySettings,
+        frame_width: usize,
+        frame_height: usize,
+        virtual_height: usize,
+    ) -> Self {
+        let virtual_viewport = settings.viewport(TUI_VIRTUAL_PIXEL_WIDTH, virtual_height);
+        Self::from_virtual_viewport(frame_width, frame_height, virtual_height, virtual_viewport)
+    }
+
+    fn from_virtual_viewport(
+        frame_width: usize,
+        frame_height: usize,
+        virtual_height: usize,
+        virtual_viewport: DisplayViewport,
+    ) -> Self {
+        if frame_width == 0 || frame_height == 0 {
+            return Self::new(frame_width, frame_height);
+        }
+
+        let map_x = |value: usize| -> usize {
+            ((value as f64 / TUI_VIRTUAL_PIXEL_WIDTH.max(1) as f64) * frame_width as f64)
+                .round()
+                .clamp(0.0, frame_width as f64) as usize
+        };
+        let map_y = |value: usize| -> usize {
+            if virtual_height == 0 {
+                0
+            } else {
+                ((value as f64 / virtual_height as f64) * frame_height as f64)
+                    .round()
+                    .clamp(0.0, frame_height as f64) as usize
+            }
+        };
+
+        let x = map_x(virtual_viewport.x);
+        let y = map_y(virtual_viewport.y);
+        let right = map_x(virtual_viewport.x.saturating_add(virtual_viewport.width));
+        let bottom = map_y(virtual_viewport.y.saturating_add(virtual_viewport.height));
+
+        Self {
+            x,
+            y,
+            width: right.saturating_sub(x).max(1).min(frame_width - x),
+            height: bottom.saturating_sub(y).max(1).min(frame_height - y),
+            frame_width,
+            frame_height,
+        }
+    }
+
+    fn contains(self, x: isize, y: isize) -> bool {
+        x >= self.x as isize
+            && y >= self.y as isize
+            && x < self.x.saturating_add(self.width) as isize
+            && y < self.y.saturating_add(self.height) as isize
+            && x < self.frame_width as isize
+            && y < self.frame_height as isize
+    }
+
+    fn local_to_frame(self, x: i32, y: i32) -> Option<(usize, usize)> {
+        let frame_x = self.x as isize + x as isize;
+        let frame_y = self.y as isize + y as isize;
+        if self.contains(frame_x, frame_y) {
+            Some((frame_x as usize, frame_y as usize))
+        } else {
+            None
+        }
     }
 }
 
@@ -294,7 +381,7 @@ fn upper_segments_char_width(
     let mut total_pixels = 0.0_f32;
 
     for segment in segments {
-        total_chars += segment.base_text.chars().count() as u32;
+        total_chars += terminal_width::text_width(&segment.base_text) as u32;
         total_pixels += gui_renderer::measure_text(
             fonts.get_for_script(segment.script),
             &segment.base_text,
@@ -400,7 +487,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         let mut current_buffer = vec![Cell::default(); cols * rows];
-        let viewport = TuiViewport::new(cols, rows);
+        let viewport =
+            TuiViewport::from_display_settings(display_settings, cols, rows, virtual_height);
 
         let fonts = app.fonts();
         // ui.build_uiにも仮想ピクセルサイズを渡す
@@ -513,7 +601,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         let (_, _, line_total_height, line_ascent) =
                             renderer(line_font, "|", render_font_size);
 
-                        let anchor_pos = ui::calculate_anchor_position(anchor, shift, cols, rows);
+                        let anchor_pos = ui::calculate_anchor_position(
+                            anchor,
+                            shift,
+                            viewport.width,
+                            viewport.height,
+                        );
                         let (mut pen_x, line_start_y) = ui::calculate_aligned_position(
                             anchor_pos,
                             total_width_cells,
@@ -596,7 +689,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                         ruby,
                                         ruby_x,
                                         ruby_y,
-                                        cols,
+                                        viewport,
                                         ruby_color,
                                     );
                                 }
@@ -618,7 +711,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             continue;
                         }
 
-                        let anchor_pos = ui::calculate_anchor_position(anchor, shift, cols, rows);
+                        let anchor_pos = ui::calculate_anchor_position(
+                            anchor,
+                            shift,
+                            viewport.width,
+                            viewport.height,
+                        );
                         let (mut pen_x, pen_y) =
                             ui::calculate_aligned_position(anchor_pos, total_width, 1, align);
                         pen_x += visible_start_chars;
@@ -633,15 +731,15 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             });
                             if let Some(ruby) = &seg.ruby_text {
                                 let ruby_x = pen_x
-                                    + (seg.base_text.chars().count() as i32
-                                        - ruby.chars().count() as i32)
+                                    + (terminal_width::text_width(&seg.base_text) as i32
+                                        - terminal_width::text_width(ruby) as i32)
                                         / 2;
                                 draw_plain_text_at(
                                     &mut current_buffer,
                                     ruby,
                                     ruby_x,
                                     pen_y - 1,
-                                    cols,
+                                    viewport,
                                     color,
                                 );
                             }
@@ -650,10 +748,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 &seg.base_text,
                                 pen_x,
                                 pen_y,
-                                cols,
+                                viewport,
                                 color,
                             );
-                            pen_x += seg.base_text.chars().count() as i32;
+                            pen_x += terminal_width::text_width(&seg.base_text) as i32;
                         }
                     }
                 },
@@ -711,8 +809,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             let (_, _, line_total_height, line_ascent) =
                                 renderer(primary_font, "|", render_font_size);
 
-                            let anchor_pos =
-                                ui::calculate_anchor_position(anchor, shift, cols, rows);
+                            let anchor_pos = ui::calculate_anchor_position(
+                                anchor,
+                                shift,
+                                viewport.width,
+                                viewport.height,
+                            );
                             let (mut pen_x, line_start_y) = ui::calculate_aligned_position(
                                 anchor_pos,
                                 total_width_cells,
@@ -811,7 +913,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                                     &ruby,
                                                     rx,
                                                     ry,
-                                                    cols,
+                                                    viewport,
                                                     color,
                                                 );
                                             }
@@ -862,13 +964,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                                 let cursor_height = line_total_height;
                                                 for y_offset in 0..cursor_height {
                                                     let target_y = line_start_y + y_offset as i32;
-                                                    if target_y >= 0
-                                                        && target_y < rows as i32
-                                                        && pen_x >= 0
-                                                        && pen_x < cols as i32
+                                                    if let Some((frame_x, frame_y)) =
+                                                        viewport.local_to_frame(pen_x, target_y)
                                                     {
-                                                        let idx = target_y as usize * cols
-                                                            + pen_x as usize;
+                                                        let idx = frame_y * viewport.frame_width
+                                                            + frame_x;
                                                         current_buffer[idx] = Cell {
                                                             char: '|',
                                                             fg_color: color,
@@ -925,13 +1025,17 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                             })
                                             .collect(),
                                     };
-                                    text.chars().count()
+                                    terminal_width::text_width(&text)
                                 })
                                 .sum::<usize>();
 
                             // Calculate the starting position for the centered line
-                            let anchor_pos =
-                                ui::calculate_anchor_position(anchor, shift, cols, rows);
+                            let anchor_pos = ui::calculate_anchor_position(
+                                anchor,
+                                shift,
+                                viewport.width,
+                                viewport.height,
+                            );
                             let (mut pen_x, pen_y) = ui::calculate_aligned_position(
                                 anchor_pos,
                                 total_width_chars as u32,
@@ -966,10 +1070,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                             &base_text,
                                             pen_x,
                                             pen_y,
-                                            cols,
+                                            viewport,
                                             color,
                                         );
-                                        pen_x += base_text.chars().count() as i32;
+                                        pen_x += terminal_width::text_width(&base_text) as i32;
                                     }
                                     LowerTypingSegment::Active { elements, .. } => {
                                         for el in elements {
@@ -1010,10 +1114,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                                 &text,
                                                 pen_x,
                                                 pen_y,
-                                                cols,
+                                                viewport,
                                                 color,
                                             );
-                                            pen_x += text.chars().count() as i32;
+                                            pen_x += terminal_width::text_width(&text) as i32;
                                         }
                                     }
                                 }
@@ -1031,14 +1135,19 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     fg_color,
                 } => {
                     // TUIでは高さは常に1セル
-                    let bar_width_chars = (cols as f32 * width_ratio) as usize;
+                    let bar_width_chars = (viewport.width as f32 * width_ratio) as usize;
 
-                    let anchor_pos = ui::calculate_anchor_position(anchor, shift, cols, rows);
+                    let anchor_pos = ui::calculate_anchor_position(
+                        anchor,
+                        shift,
+                        viewport.width,
+                        viewport.height,
+                    );
                     // anchor_posが左下を指すので、Y座標は1引く
                     let start_x = anchor_pos.0;
                     let start_y = (anchor_pos.1 - 1).max(0);
 
-                    if start_y < 0 || start_y >= rows as i32 {
+                    if start_y < 0 || start_y >= viewport.height as i32 {
                         continue;
                     }
 
@@ -1048,8 +1157,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                     for i in 0..bar_width_chars {
                         let x = start_x + i as i32;
-                        if x >= 0 && x < cols as i32 {
-                            let idx = start_y as usize * cols + x as usize;
+                        if let Some((frame_x, frame_y)) = viewport.local_to_frame(x, start_y) {
+                            let idx = frame_y * viewport.frame_width + frame_x;
                             let (char, color) = if i < filled_chars {
                                 ('█', fg_crossterm_color)
                             } else {
@@ -1095,20 +1204,20 @@ fn blit_art(
     };
 
     for y in 0..art_h {
-        let target_y = placement.position.y + y as isize;
-        if target_y >= 0 && target_y < viewport.height as isize {
-            for x in 0..placement.width {
-                let target_x = placement.position.x + x as isize;
-                if target_x >= 0 && target_x < viewport.width as isize {
-                    let art_char = art[y * placement.width + x];
-                    if art_char != ' ' {
-                        // Don't blit spaces
-                        let idx = target_y as usize * viewport.width + target_x as usize;
-                        buffer[idx] = Cell {
-                            char: art_char,
-                            fg_color: color,
-                        };
-                    }
+        let local_y = placement.position.y + y as isize;
+        for x in 0..placement.width {
+            let local_x = placement.position.x + x as isize;
+            let frame_x = viewport.x as isize + local_x;
+            let frame_y = viewport.y as isize + local_y;
+            if viewport.contains(frame_x, frame_y) {
+                let art_char = art[y * placement.width + x];
+                if art_char != ' ' {
+                    // Don't blit spaces.
+                    let idx = frame_y as usize * viewport.frame_width + frame_x as usize;
+                    buffer[idx] = Cell {
+                        char: art_char,
+                        fg_color: color,
+                    };
                 }
             }
         }
@@ -1118,7 +1227,7 @@ fn blit_art(
 /// TUIでのテキストの寸法を計算する（文字数、1行）
 #[cfg(not(feature = "uefi"))]
 fn measure_plain_text(text: &str) -> (u32, u32) {
-    (text.chars().count() as u32, 1)
+    (terminal_width::text_width(text) as u32, 1)
 }
 
 /// 通常のテキストを描画する
@@ -1139,22 +1248,42 @@ fn draw_plain_text(
     );
     let (start_x, start_y) =
         ui::calculate_aligned_position(anchor_pos, text_width, text_height, placement.align);
-    draw_plain_text_at(buffer, text, start_x, start_y, viewport.width, color);
+    draw_plain_text_at(buffer, text, start_x, start_y, viewport, color);
 }
 
 /// 指定した座標にプレーンテキストを描画するヘルパー関数
 #[cfg(not(feature = "uefi"))]
-fn draw_plain_text_at(buffer: &mut [Cell], text: &str, x: i32, y: i32, width: usize, color: Color) {
-    if width == 0 {
-        return;
-    }
-    if y < 0 || y >= (buffer.len() / width) as i32 {
-        return;
-    }
-    for (i, c) in text.chars().enumerate() {
-        let current_x = x + i as i32;
-        if current_x >= 0 && current_x < width as i32 {
-            let idx = y as usize * width + current_x as usize;
+fn draw_plain_text_at(
+    buffer: &mut [Cell],
+    text: &str,
+    x: i32,
+    y: i32,
+    viewport: TuiViewport,
+    color: Color,
+) {
+    let mut pen_x = x;
+    for c in text.chars() {
+        let char_width = terminal_width::char_width(c);
+        if char_width == 0 {
+            continue;
+        }
+        if pen_x + char_width as i32 <= 0 {
+            pen_x += char_width as i32;
+            continue;
+        }
+        if pen_x < 0 {
+            pen_x += char_width as i32;
+            continue;
+        }
+        if pen_x >= viewport.width as i32 {
+            break;
+        }
+        if char_width > 1 && pen_x + char_width as i32 > viewport.width as i32 {
+            break;
+        }
+
+        if let Some((frame_x, frame_y)) = viewport.local_to_frame(pen_x, y) {
+            let idx = frame_y * viewport.frame_width + frame_x;
             if idx < buffer.len() {
                 buffer[idx] = Cell {
                     char: c,
@@ -1162,6 +1291,20 @@ fn draw_plain_text_at(buffer: &mut [Cell], text: &str, x: i32, y: i32, width: us
                 };
             }
         }
+        for continuation in 1..char_width {
+            if let Some((frame_x, frame_y)) =
+                viewport.local_to_frame(pen_x + continuation as i32, y)
+            {
+                let idx = frame_y * viewport.frame_width + frame_x;
+                if idx < buffer.len() {
+                    buffer[idx] = Cell {
+                        char: CONTINUATION_CELL,
+                        fg_color: color,
+                    };
+                }
+            }
+        }
+        pen_x += char_width as i32;
     }
 }
 
@@ -1235,6 +1378,69 @@ pub fn run() -> Result<(), Box<dyn core::error::Error>> {
     Err("TUI is not supported in UEFI environment yet.".into())
 }
 
+#[cfg(all(test, not(feature = "uefi")))]
+mod tests {
+    use super::*;
+    use crate::display::{DisplayAspectRatio, DisplayScale};
+
+    #[test]
+    fn tui_viewport_maps_display_aspect_to_terminal_cells() {
+        let settings = DisplaySettings {
+            aspect_ratio: DisplayAspectRatio::Square1x1,
+            scale: DisplayScale::Percent100,
+        };
+
+        let viewport = TuiViewport::from_display_settings(settings, 80, 40, 500);
+
+        assert_eq!(viewport.x, 20);
+        assert_eq!(viewport.y, 0);
+        assert_eq!(viewport.width, 40);
+        assert_eq!(viewport.height, 40);
+        assert_eq!(viewport.frame_width, 80);
+        assert_eq!(viewport.frame_height, 40);
+    }
+
+    #[test]
+    fn draw_plain_text_at_clips_to_tui_viewport() {
+        let viewport = TuiViewport {
+            x: 2,
+            y: 1,
+            width: 4,
+            height: 2,
+            frame_width: 8,
+            frame_height: 4,
+        };
+        let mut buffer = vec![Cell::default(); viewport.frame_width * viewport.frame_height];
+
+        draw_plain_text_at(&mut buffer, "abcdef", -1, 0, viewport, Color::Red);
+        draw_plain_text_at(&mut buffer, "Z", 0, -1, viewport, Color::Blue);
+
+        let row = &buffer[viewport.frame_width..viewport.frame_width * 2];
+        assert_eq!(row[0].char, ' ');
+        assert_eq!(row[1].char, ' ');
+        assert_eq!(row[2].char, 'b');
+        assert_eq!(row[3].char, 'c');
+        assert_eq!(row[4].char, 'd');
+        assert_eq!(row[5].char, 'e');
+        assert_eq!(row[6].char, ' ');
+        assert_eq!(row[2].fg_color, Color::Red);
+    }
+
+    #[test]
+    fn draw_plain_text_at_marks_wide_character_continuation_cells() {
+        let viewport = TuiViewport::new(8, 2);
+        let mut buffer = vec![Cell::default(); viewport.frame_width * viewport.frame_height];
+
+        draw_plain_text_at(&mut buffer, "春A", 0, 0, viewport, Color::Yellow);
+
+        assert_eq!(buffer[0].char, '春');
+        assert_eq!(buffer[1].char, CONTINUATION_CELL);
+        assert_eq!(buffer[2].char, 'A');
+        assert_eq!(buffer[0].fg_color, Color::Yellow);
+        assert_eq!(buffer[1].fg_color, Color::Yellow);
+    }
+}
+
 /// 差分を検出し、ターミナルに必要な部分だけ描画する。
 /// 同じ色の文字が続く場合は、まとめて描画することでパフォーマンスを最適化する。
 #[cfg(not(feature = "uefi"))]
@@ -1277,6 +1483,9 @@ fn draw_buffer_to_terminal(
         let mut batch = String::new();
 
         for cell in current_row {
+            if cell.char == CONTINUATION_CELL {
+                continue;
+            }
             if cell.fg_color != last_color {
                 if !batch.is_empty() {
                     execute!(stdout, Print(&batch))?;
