@@ -36,6 +36,9 @@ use std::time::{Duration, Instant};
 #[cfg(not(feature = "uefi"))]
 const TUI_VIRTUAL_PIXEL_WIDTH: usize = 1000;
 
+#[cfg(not(feature = "uefi"))]
+type TuiGlyphRenderer = fn(&FontVec, &str, f32) -> (Vec<char>, usize, usize, usize);
+
 /// ターミナルの一つのセルを表す構造体。文字と前景（文字）色を持つ。
 #[derive(Clone, Copy, PartialEq, Debug)]
 #[cfg(not(feature = "uefi"))]
@@ -201,7 +204,7 @@ fn u32_to_crossterm_color(c: u32) -> Color {
 fn tui_line_widths(
     line: &Line,
     fonts: &Fonts,
-    renderer: fn(&FontVec, &str, f32) -> (Vec<char>, usize, usize, usize),
+    renderer: TuiGlyphRenderer,
     render_font_size: f32,
     font_size_px: f32,
 ) -> (u32, f32) {

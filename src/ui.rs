@@ -977,14 +977,12 @@ fn segment_display_runs(
             .collect();
     }
 
-    let mut runs = Vec::new();
-    runs.push(crate::font::SegmentScriptRun {
+    Vec::from([crate::font::SegmentScriptRun {
         base_text: base_text.to_string(),
         reading_text: segment_reading_text(segment),
         ruby_text,
         script,
-    });
-    runs
+    }])
 }
 
 fn push_upper_typing_segment(
@@ -1022,12 +1020,11 @@ fn push_lower_completed_segments(
     segments: &mut Vec<LowerTypingSegment>,
     fonts: &Fonts,
     source_segment: &Segment,
-    base_text: String,
-    ruby_text: Option<String>,
-    script: FontScript,
+    display: (String, Option<String>, FontScript),
     is_correct: bool,
     font_size: f32,
 ) {
+    let (base_text, ruby_text, script) = display;
     if matches!(source_segment, Segment::Plain { .. } | Segment::Anno { .. }) {
         for run in segment_display_runs(source_segment, &base_text, ruby_text, script) {
             let width = gui_renderer::measure_text(
@@ -1591,9 +1588,7 @@ fn build_typing_ui(
                             &mut lower_segments,
                             fonts,
                             seg,
-                            base_text,
-                            ruby_text,
-                            script,
+                            (base_text, ruby_text, script),
                             is_word_correct(correctness_word),
                             base_pixel_font_size,
                         );
@@ -1620,9 +1615,7 @@ fn build_typing_ui(
                             &mut lower_segments,
                             fonts,
                             seg,
-                            base_text,
-                            ruby_text,
-                            script,
+                            (base_text, ruby_text, script),
                             is_correct,
                             base_pixel_font_size,
                         );

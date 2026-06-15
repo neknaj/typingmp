@@ -196,14 +196,14 @@ fn write_bundled_font_module(writer: &mut dyn Write, fonts: &[(String, String)])
     writeln!(writer, "];\n")?;
 
     writeln!(writer, "pub fn bundled_font_entries() -> Vec<FontEntry> {{")?;
-    writeln!(writer, "    let mut entries = Vec::new();")?;
+    writeln!(writer, "    Vec::from([")?;
     for (index, (name, _)) in fonts.iter().enumerate() {
         writeln!(
             writer,
-            "    entries.push(FontEntry {{ id: FontAssetId({index}), name: {name:?}.to_string(), source: FontSource::Bundled }});"
+            "        FontEntry {{ id: FontAssetId({index}), name: {name:?}.to_string(), source: FontSource::Bundled }},"
         )?;
     }
-    writeln!(writer, "    entries")?;
+    writeln!(writer, "    ])")?;
     writeln!(writer, "}}\n")?;
 
     writeln!(
