@@ -28,6 +28,7 @@ use crate::font::{
 use crate::model::{
     Segment, TypingCorrectnessChar, TypingCorrectnessSegment, TypingCorrectnessWord,
 };
+use crate::pinyin;
 use crate::renderer::{calculate_pixel_font_size, gui_renderer};
 use crate::typing; // For calculate_total_metrics
 
@@ -237,6 +238,14 @@ pub(crate) const HOW_TO_USE_CONTENT: &[(&str, u32)] = &[
     ("[ 問題ファイル ]", 0xFF_FFDD88),
     (
         "  .ntq ファイルでは [base/reading] 形式の注釈を使えます",
+        0xFF_CCCCCC,
+    ),
+    (
+        "  Chinese pinyin ruby uses numbered tones: [有/you3]",
+        0xFF_CCCCCC,
+    ),
+    (
+        "  Upper keeps you3; completed lower ruby shows y\u{01d2}u",
         0xFF_CCCCCC,
     ),
 ];
@@ -1227,7 +1236,7 @@ fn push_lower_completed_segments(
             .0;
             segments.push(LowerTypingSegment::Completed {
                 base_text: run.base_text,
-                ruby_text: run.ruby_text,
+                ruby_text: lower_completed_ruby_text(run.ruby_text, run.script),
                 script: run.script,
                 is_correct,
                 width,
@@ -1239,11 +1248,22 @@ fn push_lower_completed_segments(
     let width = gui_renderer::measure_text(fonts.get_for_script(script), &base_text, font_size).0;
     segments.push(LowerTypingSegment::Completed {
         base_text,
-        ruby_text,
+        ruby_text: lower_completed_ruby_text(ruby_text, script),
         script,
         is_correct,
         width,
     });
+}
+
+fn lower_completed_ruby_text(ruby_text: Option<String>, script: FontScript) -> Option<String> {
+    let ruby_text = ruby_text?;
+    if matches!(
+        script,
+        FontScript::ChineseSimplified | FontScript::TraditionalChinese
+    ) {
+        return pinyin::numbered_pinyin_to_tone_marks(&ruby_text).or(Some(ruby_text));
+    }
+    Some(ruby_text)
 }
 
 fn push_unconfirmed_input_elements(
@@ -1684,7 +1704,10 @@ fn build_typing_ui(
                     if cache_seg.display_runs.len() == 1 {
                         lower_segments.push(LowerTypingSegment::Completed {
                             base_text: cache_seg.display_runs[0].base_text.clone(),
-                            ruby_text: cache_seg.display_runs[0].ruby_text.clone(),
+                            ruby_text: lower_completed_ruby_text(
+                                cache_seg.display_runs[0].ruby_text.clone(),
+                                cache_seg.display_runs[0].script,
+                            ),
                             script: cache_seg.display_runs[0].script,
                             is_correct,
                             width: cache_seg.base_width as u32,
@@ -1699,7 +1722,10 @@ fn build_typing_ui(
                             .0;
                             lower_segments.push(LowerTypingSegment::Completed {
                                 base_text: run.base_text.clone(),
-                                ruby_text: run.ruby_text.clone(),
+                                ruby_text: lower_completed_ruby_text(
+                                    run.ruby_text.clone(),
+                                    run.script,
+                                ),
                                 script: run.script,
                                 is_correct,
                                 width,
@@ -2296,7 +2322,7 @@ mod tests {
 
     #[test]
     fn problem_readings_route_each_segment_to_its_font_script() {
-        let app = typing_app("#title Test\n[色/いろ][字/zi][字/ㄗˋ]");
+        let app = typing_app("#title Test\n[色/いろ][字/zi4][字/ㄗˋ]");
 
         let render_list = build_ui(&app, app.fonts(), 800, 500);
         let (upper_segments, lower_segments) = typing_rows(&render_list);
@@ -2366,6 +2392,69 @@ mod tests {
         assert_eq!(title[0].base_text, "春晓");
         assert_eq!(title[0].ruby_text.as_deref(), Some("chun1xiao3"));
         assert_eq!(title[0].script, FontScript::ChineseSimplified);
+    }
+
+    #[test]
+    fn completed_chinese_lower_ruby_uses_tone_marks() {
+        let mut app = typing_app("#title Test\n[\u{6709}/you3][\u{65e0}/wu2]");
+        for (index, c) in "you3".chars().enumerate() {
+            app.on_event(AppEvent::Char {
+                c,
+                timestamp: index as f64,
+            });
+        }
+        app.update(800, 500, 16.0);
+
+        let render_list = build_ui(&app, app.fonts(), 800, 500);
+        let (_, lower_segments) = typing_rows(&render_list);
+        let completed = lower_segments
+            .iter()
+            .find_map(|segment| match segment {
+                LowerTypingSegment::Completed {
+                    base_text,
+                    ruby_text,
+                    script,
+                    ..
+                } if base_text == "\u{6709}" => Some((ruby_text.as_deref(), *script)),
+                _ => None,
+            })
+            .expect("completed Chinese lower segment should exist");
+
+        assert_eq!(
+            completed,
+            (Some("y\u{01d2}u"), FontScript::ChineseSimplified)
+        );
+    }
+
+    #[test]
+    fn uncached_completed_chinese_lower_ruby_uses_tone_marks() {
+        let mut app = typing_app("#title Test\n[\u{6709}/you3][\u{65e0}/wu2]");
+        for (index, c) in "you3".chars().enumerate() {
+            app.on_event(AppEvent::Char {
+                c,
+                timestamp: index as f64,
+            });
+        }
+
+        let render_list = build_ui(&app, app.fonts(), 800, 500);
+        let (_, lower_segments) = typing_rows(&render_list);
+        let completed = lower_segments
+            .iter()
+            .find_map(|segment| match segment {
+                LowerTypingSegment::Completed {
+                    base_text,
+                    ruby_text,
+                    script,
+                    ..
+                } if base_text == "\u{6709}" => Some((ruby_text.as_deref(), *script)),
+                _ => None,
+            })
+            .expect("uncached completed Chinese lower segment should exist");
+
+        assert_eq!(
+            completed,
+            (Some("y\u{01d2}u"), FontScript::ChineseSimplified)
+        );
     }
 
     #[test]
@@ -2492,7 +2581,7 @@ mod tests {
 
     #[test]
     fn display_scale_is_applied_to_typing_line_measurement() {
-        let mut app = typing_app("#title Test\n[色/いろ][字/zi][字/ㄗˋ]");
+        let mut app = typing_app("#title Test\n[色/いろ][字/zi4][字/ㄗˋ]");
 
         let normal_width = upper_line_width(&build_ui(&app, app.fonts(), 800, 500));
         app.display_settings.scale = DisplayScale::Percent200;

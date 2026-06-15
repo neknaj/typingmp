@@ -24,6 +24,7 @@ pub mod io;
 pub mod layout_data;
 pub mod model;
 pub mod parser;
+pub mod pinyin;
 pub mod renderer;
 pub mod screen_keyboard;
 pub mod timestamp;

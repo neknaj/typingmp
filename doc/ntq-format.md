@@ -24,6 +24,17 @@ UTF-8 エンコーディングで記述します。
 
 ### ルビ記法（ruby）: `[base/reading]`
 
+#### Chinese pinyin ruby
+
+Chinese pinyin readings must be written with numbered tones in problem files.
+
+```
+[有/you3]
+[春晓/chun1xiao3]
+```
+
+Marked-tone pinyin such as `[有/yǒu]` is a parse/lint error. The upper typing prompt keeps the numbered reading (`you3`), and completed lower ruby is displayed with tone marks (`yǒu`). Bopomofo readings are treated as Traditional Chinese and are not converted by this pinyin display rule.
+
 読み仮名（ルビ）を付ける記法です。ユーザーは `reading` をタイプします。
 
 ```

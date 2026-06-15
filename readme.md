@@ -200,6 +200,16 @@ Use this to assign a specific reading (the characters to be typed) to displayed 
 
 **Format:** `[base_text/reading_text]`
 
+#### Chinese Pinyin Ruby
+
+Chinese pinyin readings in `.ntq` files must use numbered tones.
+
+**Examples:**
+*   `[有/you3]`
+*   `[春晓/chun1xiao3]`
+
+Marked-tone pinyin such as `[有/yǒu]` is rejected as a parse/lint error. During play, the upper problem prompt keeps the numbered reading (`you3`), while completed lower ruby is displayed with tone marks (`yǒu`). Bopomofo readings are used for Traditional Chinese and are not converted by this pinyin rule.
+
 **Examples:**
 *   `[漢字/かんじ]` -> Displays "漢字", requires typing "かんじ".
 *   `[Destiny/さだめ]` -> Displays "Destiny", requires typing "さだめ".

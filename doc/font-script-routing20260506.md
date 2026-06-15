@@ -1,5 +1,9 @@
 # Font Script Routing Design
 
+## Current Chinese Pinyin Rule
+
+Chinese Simplified pinyin ruby in `.ntq` files is authored with numbered tones, for example `[有/you3]` and `[春晓/chun1xiao3]`. Marked pinyin such as `[有/yǒu]` is rejected by parser diagnostics so problem files keep one canonical input form. The upper prompt and title rendering keep the numbered ruby because that is the typing target. Completed lower ruby converts numbered pinyin to tone marks for display only, for example `you3` becomes `yǒu`. Bopomofo remains the Traditional Chinese signal and is not converted by the pinyin display helper.
+
 ## 目的
 
 typingmp のフォント設定は、UI 文字用のフォントと、問題文の script 別フォントを明示的に切り替える機能である。問題文については、日本語、中国語、英語が混在する各表示 segment に対して、reading や base の文字種から適切な script を自動判定し、その script に対応するフォントで描画する。

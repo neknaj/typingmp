@@ -10,6 +10,7 @@ use alloc::{
 use core::{fmt, mem};
 
 use crate::model::{Content, Line, Segment, Word};
+use crate::pinyin;
 
 // --- パーサー実装 ---
 
@@ -95,6 +96,7 @@ pub enum ParseDiagnosticKind {
     UnclosedAnnotation,
     NestedSyntax,
     UnexpectedClosingBracket,
+    ChineseRubyMustUseNumberedPinyin,
 }
 
 impl fmt::Display for ParseDiagnosticKind {
@@ -112,6 +114,9 @@ impl fmt::Display for ParseDiagnosticKind {
             Self::UnclosedAnnotation => write!(f, "annotation segment is missing closing '}}'"),
             Self::NestedSyntax => write!(f, "nested syntax is not supported"),
             Self::UnexpectedClosingBracket => write!(f, "unexpected closing bracket"),
+            Self::ChineseRubyMustUseNumberedPinyin => {
+                write!(f, "Chinese pinyin ruby must use numbered tones")
+            }
         }
     }
 }
@@ -261,6 +266,14 @@ fn parse_ruby(
             pos.saturating_add(1),
             ParseDiagnosticKind::EmptyRubyReading,
         );
+    } else if should_validate_numbered_pinyin(&base, &reading)
+        && !pinyin::is_valid_numbered_pinyin(&reading)
+    {
+        diagnostics.push(
+            line_number,
+            start + base.chars().count() + 2,
+            ParseDiagnosticKind::ChineseRubyMustUseNumberedPinyin,
+        );
     }
 
     if pos < chars.len() && chars[pos] == ']' {
@@ -269,6 +282,45 @@ fn parse_ruby(
         diagnostics.push(line_number, start + 1, ParseDiagnosticKind::UnclosedRuby);
     }
     (Segment::Annotated { base, reading }, pos)
+}
+
+fn should_validate_numbered_pinyin(base: &str, reading: &str) -> bool {
+    contains_cjk_ideograph(base)
+        && contains_pinyin_letter(reading)
+        && !contains_kana(reading)
+        && !contains_bopomofo(reading)
+}
+
+fn contains_pinyin_letter(text: &str) -> bool {
+    text.chars().any(|character| {
+        character.is_ascii_alphabetic()
+            || character == 'ü'
+            || character == 'Ü'
+            || matches!(character as u32, 0x00C0..=0x024F)
+    })
+}
+
+fn contains_cjk_ideograph(text: &str) -> bool {
+    text.chars().any(|character| {
+        matches!(
+            character as u32,
+            0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF | 0x20000..=0x2FA1F
+        )
+    })
+}
+
+fn contains_kana(text: &str) -> bool {
+    text.chars().any(|character| {
+        matches!(
+            character as u32,
+            0x3040..=0x309F | 0x30A0..=0x30FF | 0x31F0..=0x31FF | 0xFF66..=0xFF9D
+        )
+    })
+}
+
+fn contains_bopomofo(text: &str) -> bool {
+    text.chars()
+        .any(|character| matches!(character as u32, 0x3100..=0x312F | 0x31A0..=0x31BF))
 }
 
 // anno記法 {inner/annotation} をパースする。pos は '{' の位置を指す
@@ -874,6 +926,34 @@ mod tests {
 
         let unexpected_closing = diagnostic_kinds_for_line("色]");
         assert!(unexpected_closing.contains(&ParseDiagnosticKind::UnexpectedClosingBracket));
+    }
+
+    #[test]
+    fn test_chinese_pinyin_ruby_requires_numbered_tones() {
+        parse_problem("#title Test\n[\u{6709}/you3]").expect("numbered pinyin should parse");
+        parse_problem("#title Test\n[\u{5b57}/\u{3117}\u{02cb}]")
+            .expect("bopomofo ruby should parse");
+
+        let marked = parse_problem("#title Test\n[\u{6709}/y\u{01d2}u]")
+            .expect_err("marked pinyin should be rejected");
+        assert_eq!(
+            marked.first().map(|diagnostic| &diagnostic.kind),
+            Some(&ParseDiagnosticKind::ChineseRubyMustUseNumberedPinyin)
+        );
+
+        let missing = parse_problem("#title Test\n[\u{6709}/you]")
+            .expect_err("pinyin without tone number should be rejected");
+        assert_eq!(
+            missing.first().map(|diagnostic| &diagnostic.kind),
+            Some(&ParseDiagnosticKind::ChineseRubyMustUseNumberedPinyin)
+        );
+
+        let out_of_range = parse_problem("#title Test\n[\u{6709}/you6]")
+            .expect_err("pinyin tone outside 1-5 should be rejected");
+        assert_eq!(
+            out_of_range.first().map(|diagnostic| &diagnostic.kind),
+            Some(&ParseDiagnosticKind::ChineseRubyMustUseNumberedPinyin)
+        );
     }
 
     #[test]
