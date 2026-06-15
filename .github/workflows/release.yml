@@ -30,7 +30,7 @@ jobs:
       - name: Install Linux system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libfontconfig1-dev
+          sudo apt-get install -y --no-install-recommends libfontconfig1-dev libwayland-dev
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -107,7 +107,7 @@ jobs:
       - name: Install Linux system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libfontconfig1-dev
+          sudo apt-get install -y --no-install-recommends libfontconfig1-dev libwayland-dev
 
       - name: Run matrix check
         run: ${{ matrix.command }}
@@ -159,7 +159,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libfontconfig1-dev
+          sudo apt-get install -y --no-install-recommends libfontconfig1-dev libwayland-dev
 
       - name: Install cross
         if: matrix.builder == 'cross'
