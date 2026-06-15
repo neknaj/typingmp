@@ -41,12 +41,13 @@ fn run_inner() -> core::result::Result<(), Status> {
     let ui_font_data: &[u8] = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
     let ui_font = load_embedded_font(ui_font_data)?;
 
-    let simplified_chinese_font_data: &[u8] = include_bytes!("../fonts/MaShanZheng-Regular.ttf");
+    let simplified_chinese_font_data: &[u8] = include_bytes!("../fonts/LongCang-Regular.ttf");
     let simplified_chinese_font = load_embedded_font(simplified_chinese_font_data)?;
-    let simplified_chinese_ruby_font = load_embedded_font(simplified_chinese_font_data)?;
-    let traditional_chinese_font_data: &[u8] = include_bytes!("../fonts/MaShanZheng-Regular.ttf");
+    let chinese_ruby_font_data: &[u8] = include_bytes!("../fonts/Alegreya-VariableFont_wght.ttf");
+    let simplified_chinese_ruby_font = load_embedded_font(chinese_ruby_font_data)?;
+    let traditional_chinese_font_data: &[u8] = include_bytes!("../fonts/LongCang-Regular.ttf");
     let traditional_chinese_font = load_embedded_font(traditional_chinese_font_data)?;
-    let traditional_chinese_ruby_font = load_embedded_font(traditional_chinese_font_data)?;
+    let traditional_chinese_ruby_font = load_embedded_font(chinese_ruby_font_data)?;
     let english_font_data: &[u8] = include_bytes!("../fonts/Kalam-Regular.ttf");
     let english_font = load_embedded_font(english_font_data)?;
 

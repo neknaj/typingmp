@@ -466,16 +466,16 @@ async fn start_async() -> Result<(), JsValue> {
         FontVec::try_from_vec(fetch_font_bytes("./fonts/YujiSyuku-Regular.ttf").await?)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let simplified_chinese_font =
-        FontVec::try_from_vec(fetch_font_bytes("./fonts/MaShanZheng-Regular.ttf").await?)
+        FontVec::try_from_vec(fetch_font_bytes("./fonts/LongCang-Regular.ttf").await?)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let simplified_chinese_ruby_font =
-        FontVec::try_from_vec(fetch_font_bytes("./fonts/MaShanZheng-Regular.ttf").await?)
+        FontVec::try_from_vec(fetch_font_bytes("./fonts/Alegreya-VariableFont_wght.ttf").await?)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let traditional_chinese_font =
-        FontVec::try_from_vec(fetch_font_bytes("./fonts/MaShanZheng-Regular.ttf").await?)
+        FontVec::try_from_vec(fetch_font_bytes("./fonts/LongCang-Regular.ttf").await?)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let traditional_chinese_ruby_font =
-        FontVec::try_from_vec(fetch_font_bytes("./fonts/MaShanZheng-Regular.ttf").await?)
+        FontVec::try_from_vec(fetch_font_bytes("./fonts/Alegreya-VariableFont_wght.ttf").await?)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let english_font = FontVec::try_from_vec(fetch_font_bytes("./fonts/Kalam-Regular.ttf").await?)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;

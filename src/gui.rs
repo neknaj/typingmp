@@ -48,17 +48,17 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::YujiSyukuRegular)?)
             .map_err(|_| BackendError::asset("failed to parse Yuji Syuku font"))?;
     let simplified_chinese_font =
-        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::MaShanZhengRegular)?)
-            .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::LongCangRegular)?)
+            .map_err(|_| BackendError::asset("failed to parse Long Cang font"))?;
     let simplified_chinese_ruby_font =
-        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::MaShanZhengRegular)?)
-            .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::AlegreyaRegular)?)
+            .map_err(|_| BackendError::asset("failed to parse Alegreya font"))?;
     let traditional_chinese_font =
-        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::MaShanZhengRegular)?)
-            .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::LongCangRegular)?)
+            .map_err(|_| BackendError::asset("failed to parse Long Cang font"))?;
     let traditional_chinese_ruby_font =
-        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::MaShanZhengRegular)?)
-            .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::AlegreyaRegular)?)
+            .map_err(|_| BackendError::asset("failed to parse Alegreya font"))?;
     let english_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::KalamRegular)?)
             .map_err(|_| BackendError::asset("failed to parse Kalam font"))?;

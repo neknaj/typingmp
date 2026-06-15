@@ -8,13 +8,13 @@ use alloc::{
 };
 
 pub const DEFAULT_JAPANESE_FONT_NAME: &str = "YujiSyuku";
-pub const DEFAULT_CHINESE_SIMPLIFIED_FONT_NAME: &str = "MaShanZheng";
-pub const DEFAULT_TRADITIONAL_CHINESE_FONT_NAME: &str = "MaShanZheng";
+pub const DEFAULT_CHINESE_SIMPLIFIED_FONT_NAME: &str = "LongCang";
+pub const DEFAULT_TRADITIONAL_CHINESE_FONT_NAME: &str = "LongCang";
 pub const DEFAULT_ENGLISH_FONT_NAME: &str = "Kalam";
 pub const DEFAULT_UI_FONT_NAME: &str = "NotoSerifJP";
 pub const DEFAULT_JAPANESE_RUBY_FONT_NAME: &str = "YujiSyuku";
-pub const DEFAULT_CHINESE_SIMPLIFIED_RUBY_FONT_NAME: &str = "MaShanZheng";
-pub const DEFAULT_TRADITIONAL_CHINESE_RUBY_FONT_NAME: &str = "MaShanZheng";
+pub const DEFAULT_CHINESE_SIMPLIFIED_RUBY_FONT_NAME: &str = "Alegreya";
+pub const DEFAULT_TRADITIONAL_CHINESE_RUBY_FONT_NAME: &str = "Alegreya";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FontScript {

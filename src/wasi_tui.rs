@@ -232,17 +232,17 @@ fn bundled_fonts() -> Result<Fonts, BackendError> {
         FontVec::try_from_vec(include_bytes!("../fonts/YujiSyuku-Regular.ttf").to_vec())
             .map_err(|_| BackendError::asset("failed to parse Yuji Syuku font"))?;
     let simplified_chinese_font =
-        FontVec::try_from_vec(include_bytes!("../fonts/MaShanZheng-Regular.ttf").to_vec())
-            .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
+        FontVec::try_from_vec(include_bytes!("../fonts/LongCang-Regular.ttf").to_vec())
+            .map_err(|_| BackendError::asset("failed to parse Long Cang font"))?;
     let simplified_chinese_ruby_font =
-        FontVec::try_from_vec(include_bytes!("../fonts/MaShanZheng-Regular.ttf").to_vec())
-            .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
+        FontVec::try_from_vec(include_bytes!("../fonts/Alegreya-VariableFont_wght.ttf").to_vec())
+            .map_err(|_| BackendError::asset("failed to parse Alegreya font"))?;
     let traditional_chinese_font =
-        FontVec::try_from_vec(include_bytes!("../fonts/MaShanZheng-Regular.ttf").to_vec())
-            .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
+        FontVec::try_from_vec(include_bytes!("../fonts/LongCang-Regular.ttf").to_vec())
+            .map_err(|_| BackendError::asset("failed to parse Long Cang font"))?;
     let traditional_chinese_ruby_font =
-        FontVec::try_from_vec(include_bytes!("../fonts/MaShanZheng-Regular.ttf").to_vec())
-            .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
+        FontVec::try_from_vec(include_bytes!("../fonts/Alegreya-VariableFont_wght.ttf").to_vec())
+            .map_err(|_| BackendError::asset("failed to parse Alegreya font"))?;
     let english_font = FontVec::try_from_vec(include_bytes!("../fonts/Kalam-Regular.ttf").to_vec())
         .map_err(|_| BackendError::asset("failed to parse Kalam font"))?;
 

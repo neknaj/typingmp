@@ -304,6 +304,8 @@ impl ProblemSourceProvider for ProblemRepository {
 pub enum BundledFont {
     YujiSyukuRegular,
     MaShanZhengRegular,
+    LongCangRegular,
+    AlegreyaRegular,
     KalamRegular,
     NotoSerifJpRegular,
 }
@@ -313,6 +315,8 @@ impl BundledFont {
         match self {
             Self::YujiSyukuRegular => "YujiSyuku-Regular.ttf",
             Self::MaShanZhengRegular => "MaShanZheng-Regular.ttf",
+            Self::LongCangRegular => "LongCang-Regular.ttf",
+            Self::AlegreyaRegular => "Alegreya-VariableFont_wght.ttf",
             Self::KalamRegular => "Kalam-Regular.ttf",
             Self::NotoSerifJpRegular => "NotoSerifJP-Regular.ttf",
         }
