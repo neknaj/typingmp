@@ -73,6 +73,9 @@ jobs:
           - name: gui-clippy
             targets: x86_64-unknown-linux-gnu
             command: cargo clippy --no-default-features --features gui --all-targets -- -D warnings
+          - name: gui-file-clippy
+            targets: x86_64-unknown-linux-gnu
+            command: cargo clippy --no-default-features --features gui-file --all-targets -- -D warnings
           - name: mobile-clippy
             targets: x86_64-unknown-linux-gnu
             command: cargo clippy --no-default-features --features mobile --all-targets -- -D warnings

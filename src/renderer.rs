@@ -660,14 +660,7 @@ fn draw_typing_upper(
     let pixel_font_size =
         calculate_pixel_font_size(placement.text.font_size, frame.width(), frame.height())
             * frame.scale();
-    let segment_widths: Vec<u32> = segments
-        .iter()
-        .map(|segment| {
-            let font = fonts.get_for_script(segment.script);
-            let size = fonts.scaled_size_for_script(segment.script, pixel_font_size);
-            cache.measure_text(font, &segment.base_text, size).width
-        })
-        .collect();
+    let segment_widths = adjusted_upper_segment_widths(fonts, segments, pixel_font_size, cache);
     let total_height = upper_typing_total_height(fonts, segments, pixel_font_size, cache);
     let anchor_pos = frame.anchor_position(placement.text.anchor, placement.text.shift);
     let (mut pen_x, y) = ui::calculate_aligned_position(
@@ -677,20 +670,28 @@ fn draw_typing_upper(
         placement.text.align,
     );
     pen_x += placement.line_alignment.visible_start_width as i32;
+    let mut segment_x_positions = Vec::with_capacity(segment_widths.len());
+    let mut segment_x = pen_x;
+    for width in &segment_widths {
+        segment_x_positions.push(segment_x);
+        segment_x += *width as i32;
+    }
 
-    for (segment, segment_width) in segments.iter().zip(segment_widths.iter().copied()) {
+    for (segment_index, (segment, segment_width)) in segments
+        .iter()
+        .zip(segment_widths.iter().copied())
+        .enumerate()
+    {
         let color = upper_segment_color(segment.state);
         let font = fonts.get_for_script(segment.script);
         let base_size = fonts.scaled_size_for_script(segment.script, pixel_font_size);
-        let base_metrics = TextMetrics {
-            width: segment_width,
-            height: total_height,
-        };
+        let base_metrics = cache.measure_text(font, &segment.base_text, base_size);
+        let base_x = pen_x as f32 + (segment_width as f32 - base_metrics.width as f32) / 2.0;
         draw_text_if_visible(
             frame,
             font,
             &segment.base_text,
-            (pen_x as f32, y as f32),
+            (base_x, y as f32),
             base_size,
             color,
             base_metrics,
@@ -715,8 +716,123 @@ fn draw_typing_upper(
             );
         }
 
+        if let Some(anno) = &segment.anno_text {
+            let anno_script = segment.anno_script.unwrap_or(segment.script);
+            let anno_font = fonts.get_ruby_for_script(anno_script);
+            let anno_pixel_font_size =
+                fonts.scaled_size_for_ruby_script(anno_script, pixel_font_size * 0.3);
+            let anno_metrics = cache.measure_text(anno_font, anno, anno_pixel_font_size);
+            let (anno_group_x, anno_group_width) = upper_annotation_group_bounds(
+                segment_index,
+                segment,
+                &segment_widths,
+                &segment_x_positions,
+            );
+            let anno_x =
+                anno_group_x as f32 + (anno_group_width as f32 - anno_metrics.width as f32) / 2.0;
+            let anno_y = y as f32 + base_metrics.height as f32 + anno_pixel_font_size * 0.15;
+            draw_text_if_visible(
+                frame,
+                anno_font,
+                anno,
+                (anno_x, anno_y),
+                anno_pixel_font_size,
+                color,
+                anno_metrics,
+            );
+        }
+
         pen_x += segment_width as i32;
     }
+}
+
+fn adjusted_upper_segment_widths(
+    fonts: &Fonts,
+    segments: &[ui::UpperTypingSegment],
+    pixel_font_size: f32,
+    cache: &mut RenderCache,
+) -> Vec<u32> {
+    let mut widths = segments
+        .iter()
+        .map(|segment| {
+            upper_typing_segment_width_without_annotation(fonts, segment, pixel_font_size, cache)
+        })
+        .collect::<Vec<_>>();
+
+    for (index, segment) in segments.iter().enumerate() {
+        let Some(anno_text) = segment.anno_text.as_deref() else {
+            continue;
+        };
+        let anno_script = segment.anno_script.unwrap_or(segment.script);
+        let group_start = annotation_group_start(index, segment.anno_group_run_count);
+        let group_width = widths[group_start..=index].iter().copied().sum::<u32>();
+        let anno_pixel_font_size =
+            fonts.scaled_size_for_ruby_script(anno_script, pixel_font_size * 0.3);
+        let anno_width = cache
+            .measure_text(
+                fonts.get_ruby_for_script(anno_script),
+                anno_text,
+                anno_pixel_font_size,
+            )
+            .width;
+        if anno_width > group_width {
+            widths[index] += anno_width - group_width;
+        }
+    }
+
+    widths
+}
+
+fn annotation_group_start(segment_index: usize, group_run_count: usize) -> usize {
+    segment_index + 1 - group_run_count.max(1).min(segment_index + 1)
+}
+
+fn upper_annotation_group_bounds(
+    segment_index: usize,
+    segment: &ui::UpperTypingSegment,
+    segment_widths: &[u32],
+    segment_x_positions: &[i32],
+) -> (i32, u32) {
+    let group_start = annotation_group_start(segment_index, segment.anno_group_run_count);
+    let group_x = segment_x_positions
+        .get(group_start)
+        .copied()
+        .unwrap_or_else(|| segment_x_positions.get(segment_index).copied().unwrap_or(0));
+    let group_width = segment_widths[group_start..=segment_index]
+        .iter()
+        .copied()
+        .sum::<u32>();
+
+    (group_x, group_width)
+}
+
+fn upper_typing_segment_width_without_annotation(
+    fonts: &Fonts,
+    segment: &ui::UpperTypingSegment,
+    pixel_font_size: f32,
+    cache: &mut RenderCache,
+) -> u32 {
+    let base_size = fonts.scaled_size_for_script(segment.script, pixel_font_size);
+    let base_width = cache
+        .measure_text(
+            fonts.get_for_script(segment.script),
+            &segment.base_text,
+            base_size,
+        )
+        .width;
+    let ruby_width = segment.ruby_text.as_deref().map_or(0, |ruby| {
+        let ruby_pixel_font_size =
+            fonts.scaled_size_for_ruby_script(segment.script, pixel_font_size * 0.4);
+        cache
+            .measure_text(
+                fonts.get_ruby_for_script(segment.script),
+                ruby,
+                ruby_pixel_font_size,
+            )
+            .width
+    });
+
+    base_width.max(ruby_width)
 }
 
 fn upper_typing_total_height(
@@ -746,7 +862,18 @@ fn upper_typing_total_height(
                 )
                 .height as f32;
             let ruby_y = -ruby_size * 0.5;
-            (-ruby_y + base_height.max(ruby_y + ruby_height)).ceil() as u32
+            let anno_extra = if let Some(anno_text) = segment.anno_text.as_deref() {
+                let anno_script = segment.anno_script.unwrap_or(segment.script);
+                let anno_size =
+                    fonts.scaled_size_for_ruby_script(anno_script, pixel_font_size * 0.3);
+                let anno_height = cache
+                    .measure_text(fonts.get_ruby_for_script(anno_script), anno_text, anno_size)
+                    .height as f32;
+                anno_size * 0.15 + anno_height
+            } else {
+                0.0
+            };
+            (-ruby_y + base_height.max(ruby_y + ruby_height) + anno_extra).ceil() as u32
         })
         .max()
         .unwrap_or(fallback)
@@ -790,15 +917,14 @@ fn draw_typing_lower(
                 };
                 let segment_width_px = *segment_width as i32;
                 if segment_width_px > 0 {
-                    let base_metrics = TextMetrics {
-                        width: *segment_width,
-                        height: total_height,
-                    };
+                    let base_metrics = cache.measure_text(font, base_text, base_size);
+                    let base_x =
+                        pen_x as f32 + (*segment_width as f32 - base_metrics.width as f32) / 2.0;
                     draw_text_if_visible(
                         frame,
                         font,
                         base_text,
-                        (pen_x as f32, y as f32),
+                        (base_x, y as f32),
                         base_size,
                         color,
                         base_metrics,

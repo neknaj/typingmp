@@ -102,6 +102,8 @@ pub struct UpperTypingSegment {
     pub base_text: String,
     pub ruby_text: Option<String>,
     pub anno_text: Option<String>,
+    pub anno_group_run_count: usize,
+    pub anno_script: Option<FontScript>,
     pub script: FontScript,
     pub state: UpperSegmentState,
 }
@@ -355,10 +357,23 @@ fn upper_typing_vertical_metrics(
         let ruby_height =
             gui_renderer::measure_text(ruby_font, ruby_measure_text, ruby_pixel_font_size).1 as f32;
         let ruby_y = -ruby_pixel_font_size * 0.5;
+        let anno_bottom_extra = if let Some(anno_text) = segment.anno_text.as_deref() {
+            let anno_script = segment.anno_script.unwrap_or(segment.script);
+            let anno_font = fonts.get_ruby_for_script(anno_script);
+            let anno_pixel_font_size =
+                fonts.scaled_size_for_ruby_script(anno_script, pixel_font_size * 0.3);
+            let anno_height =
+                gui_renderer::measure_text(anno_font, anno_text, anno_pixel_font_size).1 as f32;
+            anno_pixel_font_size * 0.15 + anno_height
+        } else {
+            0.0
+        };
 
         base_height = base_height.max(segment_base_height);
         top_extra = top_extra.max(-ruby_y);
-        bottom_extra = bottom_extra.max((ruby_y + ruby_height - segment_base_height).max(0.0));
+        bottom_extra = bottom_extra
+            .max((ruby_y + ruby_height - segment_base_height).max(0.0))
+            .max(anno_bottom_extra);
     }
 
     TypingLineVerticalMetrics {
@@ -1505,15 +1520,31 @@ fn push_upper_typing_segment(
     } = input;
 
     if matches!(source_segment, Segment::Plain { .. } | Segment::Anno { .. }) {
-        for run in segment_display_runs(source_segment, &base_text, ruby_text, script) {
+        let runs = segment_display_runs(source_segment, &base_text, ruby_text, script);
+        let last_run_index = runs.len().saturating_sub(1);
+        for (run_index, run) in runs.into_iter().enumerate() {
             let ruby_text = match ruby_display {
                 UpperRubyDisplay::InputKeys => run.ruby_text,
                 UpperRubyDisplay::Presentation => presentation_ruby_text(run.ruby_text, run.script),
             };
+            let run_anno_text =
+                if matches!(source_segment, Segment::Anno { .. }) && run_index == last_run_index {
+                    anno_text.clone()
+                } else {
+                    None
+                };
+            let anno_group_run_count = if run_anno_text.is_some() {
+                last_run_index + 1
+            } else {
+                0
+            };
+            let anno_script = run_anno_text.as_ref().map(|_| script);
             segments.push(UpperTypingSegment {
                 base_text: run.base_text,
                 ruby_text,
-                anno_text: None,
+                anno_text: run_anno_text,
+                anno_group_run_count,
+                anno_script,
                 script: run.script,
                 state,
             });
@@ -1525,10 +1556,14 @@ fn push_upper_typing_segment(
         UpperRubyDisplay::InputKeys => ruby_text,
         UpperRubyDisplay::Presentation => presentation_ruby_text(ruby_text, script),
     };
+    let anno_group_run_count = usize::from(anno_text.is_some());
+    let anno_script = anno_text.as_ref().map(|_| script);
     segments.push(UpperTypingSegment {
         base_text,
         ruby_text,
         anno_text,
+        anno_group_run_count,
+        anno_script,
         script,
         state,
     });
@@ -1579,14 +1614,21 @@ fn push_lower_completed_segments(
 ) {
     let (base_text, ruby_text, script) = display;
     if matches!(source_segment, Segment::Plain { .. } | Segment::Anno { .. }) {
-        for run in segment_display_runs(source_segment, &base_text, ruby_text, script) {
-            let run_font_size = fonts.scaled_size_for_script(run.script, font_size);
-            let width = gui_renderer::measure_text(
-                fonts.get_for_script(run.script),
-                &run.base_text,
-                run_font_size,
-            )
-            .0;
+        let runs = segment_display_runs(source_segment, &base_text, ruby_text, script);
+        let mut widths = runs
+            .iter()
+            .map(|run| measure_display_run_width(fonts, run, font_size))
+            .collect::<Vec<_>>();
+        if let Segment::Anno { annotation, .. } = source_segment {
+            let run_width_total = widths.iter().copied().sum::<u32>();
+            let annotation_width = measure_annotation_width(fonts, script, annotation, font_size);
+            if let Some(last_width) = widths.last_mut() {
+                if annotation_width > run_width_total {
+                    *last_width += annotation_width - run_width_total;
+                }
+            }
+        }
+        for (run, width) in runs.into_iter().zip(widths) {
             segments.push(LowerTypingSegment::Completed {
                 base_text: run.base_text,
                 ruby_text: lower_completed_ruby_text(run.ruby_text, run.script),
@@ -1598,12 +1640,13 @@ fn push_lower_completed_segments(
         return;
     }
 
-    let width = gui_renderer::measure_text(
-        fonts.get_for_script(script),
-        &base_text,
-        fonts.scaled_size_for_script(script, font_size),
-    )
-    .0;
+    let run = crate::font::SegmentScriptRun {
+        base_text: base_text.clone(),
+        reading_text: segment_reading_text(source_segment),
+        ruby_text: ruby_text.clone(),
+        script,
+    };
+    let width = measure_display_run_width(fonts, &run, font_size);
     segments.push(LowerTypingSegment::Completed {
         base_text,
         ruby_text: lower_completed_ruby_text(ruby_text, script),
@@ -1671,24 +1714,65 @@ fn measure_line_base_width(line: &crate::model::Line, fonts: &Fonts, font_size: 
         .iter()
         .flat_map(|word| &word.segments)
         .for_each(|segment| {
-            let text = segment_base_text(segment);
+            let (base_text, ruby_text, anno_text) = segment_display_parts(segment);
             let script = scripts
                 .get(segment_index)
                 .copied()
                 .unwrap_or_else(|| script_for_segment(segment));
             segment_index += 1;
-            for run in segment_display_runs(segment, &text, None, script) {
-                let run_font_size = fonts.scaled_size_for_script(run.script, font_size);
-                total += gui_renderer::measure_text(
-                    fonts.get_for_script(run.script),
-                    &run.base_text,
-                    run_font_size,
+            let mut segment_width = 0;
+            for run in segment_display_runs(segment, &base_text, ruby_text, script) {
+                segment_width += measure_display_run_width(fonts, &run, font_size);
+            }
+            if let Some(anno_text) = anno_text {
+                let anno_font_size = fonts.scaled_size_for_ruby_script(script, font_size * 0.3);
+                let anno_width = gui_renderer::measure_text(
+                    fonts.get_ruby_for_script(script),
+                    &anno_text,
+                    anno_font_size,
                 )
                 .0;
+                segment_width = segment_width.max(anno_width);
             }
+            total += segment_width;
         });
 
     total
+}
+
+fn measure_annotation_width(
+    fonts: &Fonts,
+    script: FontScript,
+    annotation: &str,
+    font_size: f32,
+) -> u32 {
+    let anno_font_size = fonts.scaled_size_for_ruby_script(script, font_size * 0.3);
+    gui_renderer::measure_text(
+        fonts.get_ruby_for_script(script),
+        annotation,
+        anno_font_size,
+    )
+    .0
+}
+
+fn measure_display_run_width(
+    fonts: &Fonts,
+    run: &crate::font::SegmentScriptRun,
+    font_size: f32,
+) -> u32 {
+    let base_font_size = fonts.scaled_size_for_script(run.script, font_size);
+    let base_width = gui_renderer::measure_text(
+        fonts.get_for_script(run.script),
+        &run.base_text,
+        base_font_size,
+    )
+    .0;
+    let ruby_width = run.ruby_text.as_deref().map_or(0, |ruby| {
+        let ruby_font_size = fonts.scaled_size_for_ruby_script(run.script, font_size * 0.4);
+        gui_renderer::measure_text(fonts.get_ruby_for_script(run.script), ruby, ruby_font_size).0
+    });
+
+    base_width.max(ruby_width)
 }
 
 const TYPING_SCROLL_OVERSCAN_RATIO: f32 = 0.25;
@@ -1960,6 +2044,8 @@ fn build_typing_ui(
                                     base_text: ch.to_string(),
                                     ruby_text: None,
                                     anno_text: None,
+                                    anno_group_run_count: 0,
+                                    anno_script: None,
                                     script: if matches!(seg, Segment::Plain { .. }) {
                                         script_for_plain_character(ch, segment_script)
                                     } else {
@@ -2058,15 +2144,19 @@ fn build_typing_ui(
                             width: cache_seg.base_width as u32,
                         });
                     } else {
-                        for run in &cache_seg.display_runs {
-                            let run_font_size =
-                                fonts.scaled_size_for_script(run.script, base_pixel_font_size);
-                            let width = gui_renderer::measure_text(
-                                fonts.get_for_script(run.script),
-                                &run.base_text,
-                                run_font_size,
-                            )
-                            .0;
+                        let mut run_widths = cache_seg
+                            .display_runs
+                            .iter()
+                            .map(|run| measure_display_run_width(fonts, run, base_pixel_font_size))
+                            .collect::<Vec<_>>();
+                        let run_width_total = run_widths.iter().copied().sum::<u32>();
+                        if let Some(last_width) = run_widths.last_mut() {
+                            let segment_width = cache_seg.base_width as u32;
+                            if segment_width > run_width_total {
+                                *last_width += segment_width - run_width_total;
+                            }
+                        }
+                        for (run, width) in cache_seg.display_runs.iter().zip(run_widths) {
                             lower_segments.push(LowerTypingSegment::Completed {
                                 base_text: run.base_text.clone(),
                                 ruby_text: lower_completed_ruby_text(
@@ -3087,6 +3177,53 @@ mod tests {
     }
 
     #[test]
+    fn typing_upper_preserves_anno_annotation() {
+        let app = typing_app("#title Test\n{[\u{60b2}/\u{304b}\u{306a}]/sad}");
+
+        let render_list = build_ui(&app, app.fonts(), 800, 500);
+        let (upper_segments, _) = typing_rows(&render_list);
+
+        assert!(upper_segments
+            .iter()
+            .any(|segment| segment.anno_text.as_deref() == Some("sad")));
+    }
+
+    #[test]
+    fn typing_upper_groups_multi_run_anno_annotation() {
+        let app = typing_app(
+            "#title Test\n{[\u{5fae}/\u{3073}\u{3076}\u{3093}][\u{4fc2}/\u{3051}\u{3044}\u{3059}\u{3046}]/coefficientcoefficient}",
+        );
+
+        let render_list = build_ui(&app, app.fonts(), 800, 500);
+        let (upper_segments, _) = typing_rows(&render_list);
+        let (upper_alignment, _) = typing_alignment(&render_list);
+
+        assert_eq!(upper_segments.len(), 2);
+        assert_eq!(
+            upper_segments[1].anno_text.as_deref(),
+            Some("coefficientcoefficient")
+        );
+        assert_eq!(upper_segments[1].anno_group_run_count, 2);
+
+        let annotation_width = gui_renderer::measure_text(
+            app.fonts().get_ruby_for_script(FontScript::Japanese),
+            "coefficientcoefficient",
+            app.fonts().scaled_size_for_ruby_script(
+                FontScript::Japanese,
+                calculate_pixel_font_size(FontSize::WindowHeight(BASE_FONT_SIZE_RATIO), 800, 500)
+                    * 0.3,
+            ),
+        )
+        .0;
+        assert!(
+            upper_alignment.full_line_width >= annotation_width,
+            "upper line width {} should reserve grouped annotation width {}",
+            upper_alignment.full_line_width,
+            annotation_width
+        );
+    }
+
+    #[test]
     fn wrong_key_feedback_keeps_unconfirmed_prefix_visible() {
         let mut app = typing_app("#title Test\n[\u{8272}/\u{3057}]\u{3042}");
         app.on_event(AppEvent::Char {
@@ -3608,6 +3745,57 @@ mod tests {
         assert_eq!(
             lower_alignment.visible_start_width,
             cache.current.segment_prefix_width[first_visible_segment] as u32
+        );
+    }
+
+    #[test]
+    fn cached_lower_multi_run_segments_use_ruby_widths() {
+        let mut app = typing_app(
+            "#title Test\n{[\u{5fae}/\u{3073}\u{3076}\u{3093}][\u{4fc2}/\u{3051}\u{3044}\u{3059}\u{3046}]/coefficient}[\u{6b21}/\u{3064}\u{304e}]",
+        );
+        for (index, c) in "\u{3073}\u{3076}\u{3093}\u{3051}\u{3044}\u{3059}\u{3046}"
+            .chars()
+            .enumerate()
+        {
+            app.on_event(AppEvent::Char {
+                c,
+                timestamp: index as f64,
+            });
+        }
+        app.update(800, 500, 100.0);
+
+        let render_list = build_ui(&app, app.fonts(), 800, 500);
+        let (_, lower_segments) = typing_rows(&render_list);
+        let completed = lower_segments
+            .iter()
+            .find_map(|segment| match segment {
+                LowerTypingSegment::Completed {
+                    base_text,
+                    ruby_text,
+                    width,
+                    ..
+                } if base_text == "\u{5fae}" => Some((ruby_text.as_deref(), *width)),
+                _ => None,
+            })
+            .expect("cached multi-run completed segment should be present");
+
+        let expected_ruby_width = gui_renderer::measure_text(
+            app.fonts().get_ruby_for_script(FontScript::Japanese),
+            "\u{3073}\u{3076}\u{3093}",
+            app.fonts().scaled_size_for_ruby_script(
+                FontScript::Japanese,
+                calculate_pixel_font_size(FontSize::WindowHeight(BASE_FONT_SIZE_RATIO), 800, 500)
+                    * 0.4,
+            ),
+        )
+        .0;
+
+        assert_eq!(completed.0, Some("\u{3073}\u{3076}\u{3093}"));
+        assert!(
+            completed.1 >= expected_ruby_width,
+            "cached lower width {} should include ruby width {}",
+            completed.1,
+            expected_ruby_width
         );
     }
 

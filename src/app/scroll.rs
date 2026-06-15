@@ -50,6 +50,13 @@ fn seg_ruby_text_owned(seg: &Segment) -> Option<String> {
     }
 }
 
+fn seg_annotation_text(seg: &Segment) -> Option<&str> {
+    match seg {
+        Segment::Anno { annotation, .. } => Some(annotation.as_str()),
+        Segment::Plain { .. } | Segment::Annotated { .. } => None,
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct ScrollLineSegmentCache {
     pub display_runs: Vec<SegmentScriptRun>,
@@ -238,6 +245,47 @@ fn display_runs_for_segment(
     }
 }
 
+fn display_run_width(fonts: &Fonts, run: &SegmentScriptRun, font_pixel_size: f32) -> f32 {
+    let base_font_size = fonts.scaled_size_for_script(run.script, font_pixel_size);
+    let base_width = gui_renderer::measure_text(
+        fonts.get_for_script(run.script),
+        &run.base_text,
+        base_font_size,
+    )
+    .0 as f32;
+    let ruby_width = run.ruby_text.as_deref().map_or(0.0, |ruby| {
+        let ruby_font_size = fonts.scaled_size_for_ruby_script(run.script, font_pixel_size * 0.4);
+        gui_renderer::measure_text(fonts.get_ruby_for_script(run.script), ruby, ruby_font_size).0
+            as f32
+    });
+
+    base_width.max(ruby_width)
+}
+
+fn segment_display_width(
+    fonts: &Fonts,
+    segment: &Segment,
+    script: FontScript,
+    display_runs: &[SegmentScriptRun],
+    font_pixel_size: f32,
+) -> f32 {
+    let run_width = display_runs
+        .iter()
+        .map(|run| display_run_width(fonts, run, font_pixel_size))
+        .sum::<f32>();
+    let annotation_width = seg_annotation_text(segment).map_or(0.0, |annotation| {
+        let annotation_font_size = fonts.scaled_size_for_ruby_script(script, font_pixel_size * 0.3);
+        gui_renderer::measure_text(
+            fonts.get_ruby_for_script(script),
+            annotation,
+            annotation_font_size,
+        )
+        .0 as f32
+    });
+
+    run_width.max(annotation_width)
+}
+
 pub(crate) fn build_scroll_line_cache(
     line: &Line,
     fonts: &Fonts,
@@ -263,18 +311,8 @@ pub(crate) fn build_scroll_line_cache(
                 .unwrap_or_else(|| script_for_segment(segment));
             flat_segment_index += 1;
             let display_runs = display_runs_for_segment(segment, &base_text, script);
-            let base_width = display_runs
-                .iter()
-                .map(|run| {
-                    let run_font_size = fonts.scaled_size_for_script(run.script, font_pixel_size);
-                    gui_renderer::measure_text(
-                        fonts.get_for_script(run.script),
-                        &run.base_text,
-                        run_font_size,
-                    )
-                    .0 as f32
-                })
-                .sum::<f32>();
+            let base_width =
+                segment_display_width(fonts, segment, script, &display_runs, font_pixel_size);
             let reading_width_prefix =
                 build_reading_width_prefix(fonts, segment, script, &reading_text, font_pixel_size);
             total_width += base_width;
@@ -324,15 +362,8 @@ fn line_total_width(line: &Line, fonts: &Fonts, font_pixel_size: f32) -> f32 {
                 .copied()
                 .unwrap_or_else(|| script_for_segment(segment));
             segment_index += 1;
-            for run in display_runs_for_segment(segment, &base_text, script) {
-                let run_font_size = fonts.scaled_size_for_script(run.script, font_pixel_size);
-                total += gui_renderer::measure_text(
-                    fonts.get_for_script(run.script),
-                    &run.base_text,
-                    run_font_size,
-                )
-                .0 as f32;
-            }
+            let display_runs = display_runs_for_segment(segment, &base_text, script);
+            total += segment_display_width(fonts, segment, script, &display_runs, font_pixel_size);
         }
     }
     total

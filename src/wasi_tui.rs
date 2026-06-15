@@ -368,7 +368,8 @@ fn render_frame(
                 line_alignment,
                 ..
             } => {
-                let visible_width_chars = upper_segments_char_count(&segments);
+                let segment_widths = upper_segment_char_counts(&segments);
+                let visible_width_chars = segment_widths.iter().copied().sum::<usize>();
                 let total_width_chars = if line_alignment.visible_start_width > 0 {
                     current_line_base_char_count(app)
                         .max(visible_width_chars)
@@ -380,13 +381,22 @@ fn render_frame(
                 let (mut pen_x, pen_y) =
                     ui::calculate_aligned_position(anchor_pos, total_width_chars as u32, 1, align);
                 pen_x += visible_start_chars(line_alignment, total_width_chars);
+                let mut segment_x_positions = Vec::with_capacity(segment_widths.len());
+                let mut segment_x = pen_x;
+                for width in &segment_widths {
+                    segment_x_positions.push(segment_x);
+                    segment_x += *width as i32;
+                }
 
-                for segment in segments {
+                for (segment_index, (segment, segment_width)) in segments
+                    .into_iter()
+                    .zip(segment_widths.iter().copied())
+                    .enumerate()
+                {
+                    let base_width = terminal_width::text_width(&segment.base_text) as i32;
                     if let Some(ruby) = &segment.ruby_text {
                         let ruby_x = pen_x
-                            + (terminal_width::text_width(&segment.base_text) as i32
-                                - terminal_width::text_width(ruby) as i32)
-                                / 2;
+                            + (segment_width as i32 - terminal_width::text_width(ruby) as i32) / 2;
                         draw_plain_text_at(
                             &mut cells,
                             ruby,
@@ -396,15 +406,35 @@ fn render_frame(
                             upper_segment_color(segment.state),
                         );
                     }
+                    let base_x = pen_x + (segment_width as i32 - base_width) / 2;
                     draw_plain_text_at(
                         &mut cells,
                         &segment.base_text,
-                        pen_x,
+                        base_x,
                         pen_y,
                         viewport,
                         upper_segment_color(segment.state),
                     );
-                    pen_x += terminal_width::text_width(&segment.base_text) as i32;
+                    if let Some(anno) = &segment.anno_text {
+                        let group_start =
+                            annotation_group_start(segment_index, segment.anno_group_run_count);
+                        let group_x = segment_x_positions[group_start];
+                        let group_width = segment_widths[group_start..=segment_index]
+                            .iter()
+                            .copied()
+                            .sum::<usize>();
+                        let anno_x = group_x
+                            + (group_width as i32 - terminal_width::text_width(anno) as i32) / 2;
+                        draw_plain_text_at(
+                            &mut cells,
+                            anno,
+                            anno_x,
+                            pen_y + 1,
+                            viewport,
+                            upper_segment_color(segment.state),
+                        );
+                    }
+                    pen_x += segment_width as i32;
                 }
             }
             Renderable::TypingLower {
@@ -427,6 +457,7 @@ fn render_frame(
                             base_text,
                             ruby_text,
                             is_correct,
+                            width,
                             ..
                         } => {
                             let color = if is_correct {
@@ -434,9 +465,20 @@ fn render_frame(
                             } else {
                                 AnsiColor::from_argb(ui::INCORRECT_COLOR)
                             };
+                            let segment_width =
+                                lower_completed_char_count(&base_text, ruby_text.as_ref());
+                            let cached_width = if line_alignment.full_line_width > 0 {
+                                (width as f64 / line_alignment.full_line_width as f64
+                                    * total_width_chars as f64)
+                                    .round() as usize
+                            } else {
+                                0
+                            };
+                            let segment_width = segment_width.max(cached_width);
+                            let base_width = terminal_width::text_width(&base_text) as i32;
                             if let Some(ruby) = ruby_text {
                                 let ruby_x = pen_x
-                                    + (terminal_width::text_width(&base_text) as i32
+                                    + (segment_width as i32
                                         - terminal_width::text_width(&ruby) as i32)
                                         / 2;
                                 draw_plain_text_at(
@@ -448,10 +490,11 @@ fn render_frame(
                                     color,
                                 );
                             }
+                            let base_x = pen_x + (segment_width as i32 - base_width) / 2;
                             draw_plain_text_at(
-                                &mut cells, &base_text, pen_x, pen_y, viewport, color,
+                                &mut cells, &base_text, base_x, pen_y, viewport, color,
                             );
-                            pen_x += terminal_width::text_width(&base_text) as i32;
+                            pen_x += segment_width as i32;
                         }
                         LowerTypingSegment::Active { elements, .. } => {
                             for element in elements {
@@ -515,25 +558,65 @@ fn current_line_base_char_count(app: &App) -> usize {
             line.words
                 .iter()
                 .flat_map(|word| &word.segments)
-                .map(segment_base_text)
-                .map(|text| terminal_width::text_width(&text))
+                .map(segment_terminal_display_width)
                 .sum()
         })
         .unwrap_or(0)
 }
 
-fn upper_segments_char_count(segments: &[ui::UpperTypingSegment]) -> usize {
-    segments
-        .iter()
-        .map(|segment| terminal_width::text_width(&segment.base_text))
-        .sum()
+fn annotation_group_start(segment_index: usize, group_run_count: usize) -> usize {
+    segment_index + 1 - group_run_count.max(1).min(segment_index + 1)
 }
 
-fn segment_base_text(segment: &Segment) -> String {
+fn upper_segment_base_char_count(segment: &ui::UpperTypingSegment) -> usize {
+    let base_width = terminal_width::text_width(&segment.base_text);
+    let ruby_width = segment
+        .ruby_text
+        .as_deref()
+        .map_or(0, terminal_width::text_width);
+
+    base_width.max(ruby_width)
+}
+
+fn upper_segment_char_counts(segments: &[ui::UpperTypingSegment]) -> Vec<usize> {
+    let mut widths = segments
+        .iter()
+        .map(upper_segment_base_char_count)
+        .collect::<Vec<_>>();
+
+    for (index, segment) in segments.iter().enumerate() {
+        let Some(anno) = segment.anno_text.as_deref() else {
+            continue;
+        };
+        let group_start = annotation_group_start(index, segment.anno_group_run_count);
+        let group_width = widths[group_start..=index].iter().copied().sum::<usize>();
+        let anno_width = terminal_width::text_width(anno);
+        if anno_width > group_width {
+            widths[index] += anno_width - group_width;
+        }
+    }
+
+    widths
+}
+
+fn lower_completed_char_count(base_text: &str, ruby_text: Option<&String>) -> usize {
+    let base_width = terminal_width::text_width(base_text);
+    let ruby_width = ruby_text.map_or(0, |text| terminal_width::text_width(text));
+
+    base_width.max(ruby_width)
+}
+
+fn segment_terminal_display_width(segment: &Segment) -> usize {
     match segment {
-        Segment::Plain { text } => text.clone(),
-        Segment::Annotated { base, .. } => base.clone(),
-        Segment::Anno { inner, .. } => inner.iter().map(segment_base_text).collect(),
+        Segment::Plain { text } => terminal_width::text_width(text),
+        Segment::Annotated { base, reading } => {
+            terminal_width::text_width(base).max(terminal_width::text_width(reading))
+        }
+        Segment::Anno { inner, annotation } => inner
+            .iter()
+            .map(segment_terminal_display_width)
+            .sum::<usize>()
+            .max(terminal_width::text_width(annotation)),
     }
 }
 

@@ -43,6 +43,14 @@ const TUI_VIRTUAL_PIXEL_WIDTH: usize = 1000;
 #[cfg(not(feature = "uefi"))]
 type TuiGlyphRenderer = fn(&FontVec, &str, f32) -> (Vec<char>, usize, usize, usize);
 
+struct UpperWidthMeasureContext<'a> {
+    fonts: &'a Fonts,
+    renderer: TuiGlyphRenderer,
+    render_font_size: f32,
+    font_size_px: f32,
+    is_braille: bool,
+}
+
 #[cfg(not(feature = "uefi"))]
 const CONTINUATION_CELL: char = '\0';
 
@@ -324,6 +332,7 @@ fn tui_line_widths(
     renderer: TuiGlyphRenderer,
     render_font_size: f32,
     font_size_px: f32,
+    is_braille: bool,
 ) -> (u32, f32) {
     let scripts = scripts_for_line(line);
     let mut total_cells = 0_u32;
@@ -338,15 +347,69 @@ fn tui_line_widths(
                 .unwrap_or_else(|| script_for_segment(segment));
             segment_index += 1;
 
+            let mut segment_cells = 0_u32;
+            let mut segment_pixels = 0.0_f32;
             for run in segment_script_runs(segment, script) {
                 let font = fonts.get_for_script(run.script);
                 let run_render_font_size =
                     fonts.scaled_size_for_script(run.script, render_font_size);
                 let run_font_size_px = fonts.scaled_size_for_script(run.script, font_size_px);
-                total_cells += renderer(font, &run.base_text, run_render_font_size).1 as u32;
-                total_pixels +=
+                let mut run_cells = renderer(font, &run.base_text, run_render_font_size).1 as u32;
+                let mut run_pixels =
                     gui_renderer::measure_text(font, &run.base_text, run_font_size_px).0 as f32;
+                if let Some(ruby) = run.ruby_text.as_deref() {
+                    let ruby_render_font_size =
+                        fonts.scaled_size_for_ruby_script(run.script, render_font_size * 0.5);
+                    let ruby_font_size_px =
+                        fonts.scaled_size_for_ruby_script(run.script, font_size_px * 0.4);
+                    let ruby_cells = if is_braille {
+                        renderer(
+                            fonts.get_ruby_for_script(run.script),
+                            ruby,
+                            ruby_render_font_size,
+                        )
+                        .1 as u32
+                    } else {
+                        terminal_width::text_width(ruby) as u32
+                    };
+                    let ruby_pixels = gui_renderer::measure_text(
+                        fonts.get_ruby_for_script(run.script),
+                        ruby,
+                        ruby_font_size_px,
+                    )
+                    .0 as f32;
+                    run_cells = run_cells.max(ruby_cells);
+                    run_pixels = run_pixels.max(ruby_pixels);
+                }
+                segment_cells += run_cells;
+                segment_pixels += run_pixels;
             }
+            if let Segment::Anno { annotation, .. } = segment {
+                let annotation_font_size =
+                    fonts.scaled_size_for_ruby_script(script, render_font_size * 0.4);
+                let annotation_cells = if is_braille {
+                    renderer(
+                        fonts.get_ruby_for_script(script),
+                        annotation,
+                        annotation_font_size,
+                    )
+                    .1 as u32
+                } else {
+                    terminal_width::text_width(annotation) as u32
+                };
+                let annotation_pixel_size =
+                    fonts.scaled_size_for_ruby_script(script, font_size_px * 0.3);
+                let annotation_pixels = gui_renderer::measure_text(
+                    fonts.get_ruby_for_script(script),
+                    annotation,
+                    annotation_pixel_size,
+                )
+                .0 as f32;
+                segment_cells = segment_cells.max(annotation_cells);
+                segment_pixels = segment_pixels.max(annotation_pixels);
+            }
+            total_cells += segment_cells;
+            total_pixels += segment_pixels;
         }
     }
 
@@ -389,45 +452,212 @@ fn upper_segments_cell_widths(
     renderer: TuiGlyphRenderer,
     render_font_size: f32,
     font_size_px: f32,
+    is_braille: bool,
 ) -> (Vec<usize>, u32, f32) {
+    let context = UpperWidthMeasureContext {
+        fonts,
+        renderer,
+        render_font_size,
+        font_size_px,
+        is_braille,
+    };
     let mut widths = Vec::new();
-    let mut total_cells = 0_u32;
-    let mut total_pixels = 0.0_f32;
+    let mut pixel_widths = Vec::new();
 
     for segment in segments {
         let font = fonts.get_for_script(segment.script);
         let segment_render_font_size =
             fonts.scaled_size_for_script(segment.script, render_font_size);
         let segment_font_size_px = fonts.scaled_size_for_script(segment.script, font_size_px);
-        let width = renderer(font, &segment.base_text, segment_render_font_size).1;
-        widths.push(width);
-        total_cells += width as u32;
-        total_pixels +=
+        let mut width = renderer(font, &segment.base_text, segment_render_font_size).1;
+        let mut pixel_width =
             gui_renderer::measure_text(font, &segment.base_text, segment_font_size_px).0 as f32;
+
+        if let Some(ruby) = &segment.ruby_text {
+            let ruby_render_font_size =
+                fonts.scaled_size_for_ruby_script(segment.script, render_font_size * 0.5);
+            let ruby_font_size_px =
+                fonts.scaled_size_for_ruby_script(segment.script, font_size_px * 0.4);
+            let ruby_width = if is_braille {
+                renderer(
+                    fonts.get_ruby_for_script(segment.script),
+                    ruby,
+                    ruby_render_font_size,
+                )
+                .1
+            } else {
+                terminal_width::text_width(ruby)
+            };
+            width = width.max(ruby_width);
+            pixel_width = pixel_width.max(
+                gui_renderer::measure_text(
+                    fonts.get_ruby_for_script(segment.script),
+                    ruby,
+                    ruby_font_size_px,
+                )
+                .0 as f32,
+            );
+        }
+
+        widths.push(width);
+        pixel_widths.push(pixel_width);
     }
+
+    adjust_upper_widths_for_annotations(segments, &context, &mut widths, &mut pixel_widths);
+
+    let total_cells = widths.iter().copied().sum::<usize>() as u32;
+    let total_pixels = pixel_widths.iter().copied().sum::<f32>();
 
     (widths, total_cells, total_pixels)
 }
 
-fn upper_segments_char_width(
+fn annotation_group_start(segment_index: usize, group_run_count: usize) -> usize {
+    segment_index + 1 - group_run_count.max(1).min(segment_index + 1)
+}
+
+fn adjust_upper_widths_for_annotations(
+    segments: &[UpperTypingSegment],
+    context: &UpperWidthMeasureContext<'_>,
+    widths: &mut [usize],
+    pixel_widths: &mut [f32],
+) {
+    for (index, segment) in segments.iter().enumerate() {
+        let Some(anno) = segment.anno_text.as_deref() else {
+            continue;
+        };
+        let group_start = annotation_group_start(index, segment.anno_group_run_count);
+        let group_width = widths[group_start..=index].iter().copied().sum::<usize>();
+        let anno_script = segment.anno_script.unwrap_or(segment.script);
+        let anno_render_font_size = context
+            .fonts
+            .scaled_size_for_ruby_script(anno_script, context.render_font_size * 0.4);
+        let anno_width = if context.is_braille {
+            (context.renderer)(
+                context.fonts.get_ruby_for_script(anno_script),
+                anno,
+                anno_render_font_size,
+            )
+            .1
+        } else {
+            terminal_width::text_width(anno)
+        };
+        if anno_width > group_width {
+            widths[index] += anno_width - group_width;
+        }
+
+        let group_pixel_width = pixel_widths[group_start..=index]
+            .iter()
+            .copied()
+            .sum::<f32>();
+        let anno_font_size_px = context
+            .fonts
+            .scaled_size_for_ruby_script(anno_script, context.font_size_px * 0.3);
+        let anno_pixel_width = gui_renderer::measure_text(
+            context.fonts.get_ruby_for_script(anno_script),
+            anno,
+            anno_font_size_px,
+        )
+        .0 as f32;
+        if anno_pixel_width > group_pixel_width {
+            pixel_widths[index] += anno_pixel_width - group_pixel_width;
+        }
+    }
+}
+
+fn upper_segment_terminal_width(segment: &UpperTypingSegment) -> u32 {
+    let base_width = terminal_width::text_width(&segment.base_text) as u32;
+    let ruby_width = segment
+        .ruby_text
+        .as_deref()
+        .map_or(0, |text| terminal_width::text_width(text) as u32);
+
+    base_width.max(ruby_width)
+}
+
+fn lower_completed_terminal_width(base_text: &str, ruby_text: &Option<String>) -> u32 {
+    let base_width = terminal_width::text_width(base_text) as u32;
+    let ruby_width = ruby_text
+        .as_deref()
+        .map_or(0, |text| terminal_width::text_width(text) as u32);
+
+    base_width.max(ruby_width)
+}
+
+fn segment_terminal_display_width(segment: &Segment) -> usize {
+    match segment {
+        Segment::Plain { text } => terminal_width::text_width(text),
+        Segment::Annotated { base, reading } => {
+            terminal_width::text_width(base).max(terminal_width::text_width(reading))
+        }
+        Segment::Anno { inner, annotation } => inner
+            .iter()
+            .map(segment_terminal_display_width)
+            .sum::<usize>()
+            .max(terminal_width::text_width(annotation)),
+    }
+}
+
+fn upper_segments_char_widths(
     segments: &[UpperTypingSegment],
     fonts: &Fonts,
     font_size: f32,
-) -> (u32, f32) {
-    let mut total_chars = 0_u32;
-    let mut total_pixels = 0.0_f32;
+) -> (Vec<u32>, u32, f32) {
+    let mut widths = Vec::new();
+    let mut pixel_widths = Vec::new();
 
     for segment in segments {
-        total_chars += terminal_width::text_width(&segment.base_text) as u32;
-        total_pixels += gui_renderer::measure_text(
+        let segment_chars = upper_segment_terminal_width(segment);
+        let mut segment_pixels = gui_renderer::measure_text(
             fonts.get_for_script(segment.script),
             &segment.base_text,
             fonts.scaled_size_for_script(segment.script, font_size),
         )
         .0 as f32;
+        if let Some(ruby) = &segment.ruby_text {
+            segment_pixels = segment_pixels.max(
+                gui_renderer::measure_text(
+                    fonts.get_ruby_for_script(segment.script),
+                    ruby,
+                    fonts.scaled_size_for_ruby_script(segment.script, font_size * 0.4),
+                )
+                .0 as f32,
+            );
+        }
+        widths.push(segment_chars);
+        pixel_widths.push(segment_pixels);
     }
 
-    (total_chars, total_pixels)
+    for (index, segment) in segments.iter().enumerate() {
+        let Some(anno) = segment.anno_text.as_deref() else {
+            continue;
+        };
+        let group_start = annotation_group_start(index, segment.anno_group_run_count);
+        let group_width = widths[group_start..=index].iter().copied().sum::<u32>();
+        let anno_script = segment.anno_script.unwrap_or(segment.script);
+        let anno_width = terminal_width::text_width(anno) as u32;
+        if anno_width > group_width {
+            widths[index] += anno_width - group_width;
+        }
+
+        let group_pixel_width = pixel_widths[group_start..=index]
+            .iter()
+            .copied()
+            .sum::<f32>();
+        let anno_pixel_width = gui_renderer::measure_text(
+            fonts.get_ruby_for_script(anno_script),
+            anno,
+            fonts.scaled_size_for_ruby_script(anno_script, font_size * 0.3),
+        )
+        .0 as f32;
+        if anno_pixel_width > group_pixel_width {
+            pixel_widths[index] += anno_pixel_width - group_pixel_width;
+        }
+    }
+
+    let total_chars = widths.iter().copied().sum::<u32>();
+    let total_pixels = pixel_widths.iter().copied().sum::<f32>();
+
+    (widths, total_chars, total_pixels)
 }
 
 /// TUIアプリケーションのメイン関数
@@ -701,6 +931,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 renderer,
                                 render_font_size,
                                 font_size_px,
+                                is_braille,
                             );
                         let (total_width_cells, visible_start_cells) = visible_to_full_cells(
                             visible_width_cells,
@@ -734,8 +965,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         );
                         pen_x += visible_start_cells;
                         let line_baseline_y = line_start_y + line_ascent as i32;
+                        let mut segment_x_positions = Vec::with_capacity(segment_cell_widths.len());
+                        let mut segment_x = pen_x;
+                        for width in &segment_cell_widths {
+                            segment_x_positions.push(segment_x);
+                            segment_x += *width as i32;
+                        }
 
-                        for (seg, art_width) in segments.iter().zip(segment_cell_widths) {
+                        for (segment_index, (seg, art_width)) in segments
+                            .iter()
+                            .zip(segment_cell_widths.iter().copied())
+                            .enumerate()
+                        {
                             let color = u32_to_crossterm_color(match seg.state {
                                 ui::UpperSegmentState::Correct => ui::CORRECT_COLOR,
                                 ui::UpperSegmentState::Incorrect => ui::INCORRECT_COLOR,
@@ -746,17 +987,23 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                             let base_font_size =
                                 fonts.scaled_size_for_script(seg.script, render_font_size);
-                            let (art_buffer, _, _, char_ascent) = renderer(
+                            let (art_buffer, base_art_width, _, char_ascent) = renderer(
                                 fonts.get_for_script(seg.script),
                                 &seg.base_text,
                                 base_font_size,
                             );
+                            let base_x =
+                                pen_x + (art_width as i32 - base_art_width as i32).div_euclid(2);
                             let blit_y = line_baseline_y - char_ascent as i32;
                             blit_art(
                                 &mut current_buffer,
                                 viewport,
                                 &art_buffer,
-                                ArtBlitPlacement::new(art_width, pen_x as isize, blit_y as isize),
+                                ArtBlitPlacement::new(
+                                    base_art_width,
+                                    base_x as isize,
+                                    blit_y as isize,
+                                ),
                                 color,
                             );
 
@@ -818,6 +1065,89 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     );
                                 }
                             }
+                            if let Some(anno) = &seg.anno_text {
+                                let anno_color = color;
+                                let anno_script = seg.anno_script.unwrap_or(seg.script);
+                                if is_braille {
+                                    let anno_font_size_px = fonts.scaled_size_for_ruby_script(
+                                        anno_script,
+                                        render_font_size * 0.4,
+                                    );
+                                    let (anno_art_buffer, anno_art_width, anno_art_height, _) =
+                                        tui_renderer::render_text_to_braille_art(
+                                            fonts.get_ruby_for_script(anno_script),
+                                            anno,
+                                            anno_font_size_px,
+                                        );
+                                    let group_start = annotation_group_start(
+                                        segment_index,
+                                        seg.anno_group_run_count,
+                                    );
+                                    let group_x = segment_x_positions[group_start];
+                                    let group_width = segment_cell_widths
+                                        [group_start..=segment_index]
+                                        .iter()
+                                        .copied()
+                                        .sum::<usize>();
+                                    let anno_anchor_pos = (
+                                        group_x + (group_width as i32 / 2),
+                                        line_start_y + line_total_height as i32,
+                                    );
+                                    let (anno_x, anno_y) = ui::calculate_aligned_position(
+                                        anno_anchor_pos,
+                                        anno_art_width as u32,
+                                        anno_art_height as u32,
+                                        Align {
+                                            horizontal: HorizontalAlign::Center,
+                                            vertical: VerticalAlign::Top,
+                                        },
+                                    );
+                                    blit_art(
+                                        &mut current_buffer,
+                                        viewport,
+                                        &anno_art_buffer,
+                                        ArtBlitPlacement::new(
+                                            anno_art_width,
+                                            anno_x as isize,
+                                            anno_y as isize,
+                                        ),
+                                        anno_color,
+                                    );
+                                } else {
+                                    let anno_width = terminal_width::text_width(anno) as u32;
+                                    let group_start = annotation_group_start(
+                                        segment_index,
+                                        seg.anno_group_run_count,
+                                    );
+                                    let group_x = segment_x_positions[group_start];
+                                    let group_width = segment_cell_widths
+                                        [group_start..=segment_index]
+                                        .iter()
+                                        .copied()
+                                        .sum::<usize>();
+                                    let anno_anchor_pos = (
+                                        group_x + (group_width as i32 / 2),
+                                        line_start_y + line_total_height as i32,
+                                    );
+                                    let (anno_x, anno_y) = ui::calculate_aligned_position(
+                                        anno_anchor_pos,
+                                        anno_width,
+                                        1,
+                                        Align {
+                                            horizontal: HorizontalAlign::Center,
+                                            vertical: VerticalAlign::Top,
+                                        },
+                                    );
+                                    draw_plain_text_at(
+                                        &mut current_buffer,
+                                        anno,
+                                        anno_x,
+                                        anno_y,
+                                        viewport,
+                                        anno_color,
+                                    );
+                                }
+                            }
                             pen_x += art_width as i32;
                         }
                     }
@@ -827,8 +1157,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             virtual_viewport.width,
                             virtual_viewport.height,
                         ) * display_settings.scale.multiplier();
-                        let (visible_chars, visible_pixels) =
-                            upper_segments_char_width(&segments, fonts, font_size_px);
+                        let (segment_char_widths, visible_chars, visible_pixels) =
+                            upper_segments_char_widths(&segments, fonts, font_size_px);
                         let (total_width, visible_start_chars) =
                             visible_to_full_cells(visible_chars, visible_pixels, line_alignment);
                         if total_width == 0 {
@@ -839,8 +1169,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         let (mut pen_x, pen_y) =
                             ui::calculate_aligned_position(anchor_pos, total_width, 1, align);
                         pen_x += visible_start_chars;
+                        let mut segment_x_positions = Vec::with_capacity(segment_char_widths.len());
+                        let mut segment_x = pen_x;
+                        for width in &segment_char_widths {
+                            segment_x_positions.push(segment_x);
+                            segment_x += *width as i32;
+                        }
 
-                        for seg in segments {
+                        for (segment_index, (seg, segment_width)) in segments
+                            .into_iter()
+                            .zip(segment_char_widths.iter().copied())
+                            .enumerate()
+                        {
                             let color = u32_to_crossterm_color(match seg.state {
                                 ui::UpperSegmentState::Correct => ui::CORRECT_COLOR,
                                 ui::UpperSegmentState::Incorrect => ui::INCORRECT_COLOR,
@@ -848,9 +1188,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 ui::UpperSegmentState::Pending => ui::PENDING_COLOR,
                                 ui::UpperSegmentState::Muted => 0xFF_444444,
                             });
+                            let base_width = terminal_width::text_width(&seg.base_text) as u32;
                             if let Some(ruby) = &seg.ruby_text {
                                 let ruby_x = pen_x
-                                    + (terminal_width::text_width(&seg.base_text) as i32
+                                    + (segment_width as i32
                                         - terminal_width::text_width(ruby) as i32)
                                         / 2;
                                 draw_plain_text_at(
@@ -862,15 +1203,37 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     color,
                                 );
                             }
+                            let base_x = pen_x + (segment_width as i32 - base_width as i32) / 2;
                             draw_plain_text_at(
                                 &mut current_buffer,
                                 &seg.base_text,
-                                pen_x,
+                                base_x,
                                 pen_y,
                                 viewport,
                                 color,
                             );
-                            pen_x += terminal_width::text_width(&seg.base_text) as i32;
+                            if let Some(anno) = &seg.anno_text {
+                                let group_start =
+                                    annotation_group_start(segment_index, seg.anno_group_run_count);
+                                let group_x = segment_x_positions[group_start];
+                                let group_width = segment_char_widths[group_start..=segment_index]
+                                    .iter()
+                                    .copied()
+                                    .sum::<u32>();
+                                let anno_x = group_x
+                                    + (group_width as i32
+                                        - terminal_width::text_width(anno) as i32)
+                                        / 2;
+                                draw_plain_text_at(
+                                    &mut current_buffer,
+                                    anno,
+                                    anno_x,
+                                    pen_y + 1,
+                                    viewport,
+                                    color,
+                                );
+                            }
+                            pen_x += segment_width as i32;
                         }
                     }
                 },
@@ -912,6 +1275,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 renderer,
                                 render_font_size,
                                 font_size_px,
+                                is_braille,
                             );
 
                             if total_width_cells == 0 {
@@ -950,6 +1314,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                         ruby_text,
                                         script,
                                         is_correct,
+                                        width,
                                         ..
                                     } => {
                                         let font = fonts.get_for_script(script);
@@ -960,40 +1325,66 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                         } else {
                                             ui::INCORRECT_COLOR
                                         });
-                                        let (art_buffer, art_width, _, char_ascent) =
+                                        let (art_buffer, base_art_width, _, char_ascent) =
                                             renderer(font, &base_text, base_font_size);
-                                        let blit_y = line_baseline_y - char_ascent as i32;
-                                        blit_art(
-                                            &mut current_buffer,
-                                            viewport,
-                                            &art_buffer,
-                                            ArtBlitPlacement::new(
-                                                art_width,
-                                                pen_x as isize,
-                                                blit_y as isize,
-                                            ),
-                                            color,
-                                        );
-
-                                        if let Some(ruby) = ruby_text {
+                                        let ruby_art = ruby_text.as_ref().map(|ruby| {
                                             if is_braille {
                                                 let ruby_font_size_px = fonts
                                                     .scaled_size_for_ruby_script(
                                                         script,
                                                         render_font_size * 0.5,
                                                     );
-                                                let (
-                                                    ruby_art_buffer,
-                                                    ruby_art_width,
-                                                    ruby_art_height,
-                                                    _,
-                                                ) = tui_renderer::render_text_to_braille_art(
-                                                    fonts.get_ruby_for_script(script),
-                                                    &ruby,
-                                                    ruby_font_size_px,
-                                                );
+                                                let (buffer, width, height, _) =
+                                                    tui_renderer::render_text_to_braille_art(
+                                                        fonts.get_ruby_for_script(script),
+                                                        ruby,
+                                                        ruby_font_size_px,
+                                                    );
+                                                (buffer, width, height)
+                                            } else {
+                                                let (width, height) = measure_plain_text(ruby);
+                                                (Vec::new(), width as usize, height as usize)
+                                            }
+                                        });
+                                        let segment_width = ruby_art
+                                            .as_ref()
+                                            .map_or(base_art_width, |(_, width, _)| {
+                                                base_art_width.max(*width)
+                                            });
+                                        let cached_width = if pixels_per_cell > 0.0 {
+                                            (width as f64 / pixels_per_cell).round() as usize
+                                        } else {
+                                            0
+                                        };
+                                        let segment_width = segment_width.max(cached_width);
+                                        let base_x = pen_x
+                                            + (segment_width as i32 - base_art_width as i32)
+                                                .div_euclid(2);
+                                        let blit_y = line_baseline_y - char_ascent as i32;
+                                        blit_art(
+                                            &mut current_buffer,
+                                            viewport,
+                                            &art_buffer,
+                                            ArtBlitPlacement::new(
+                                                base_art_width,
+                                                base_x as isize,
+                                                blit_y as isize,
+                                            ),
+                                            color,
+                                        );
+
+                                        if let (
+                                            Some(ruby),
+                                            Some((
+                                                ruby_art_buffer,
+                                                ruby_art_width,
+                                                ruby_art_height,
+                                            )),
+                                        ) = (ruby_text, ruby_art)
+                                        {
+                                            if is_braille {
                                                 let ruby_anchor_pos = (
-                                                    pen_x + (art_width as i32 / 2),
+                                                    pen_x + (segment_width as i32 / 2),
                                                     line_start_y - 1,
                                                 );
                                                 let (ruby_x, ruby_y) =
@@ -1018,14 +1409,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                                     color,
                                                 );
                                             } else {
-                                                let (ruby_width, _) = measure_plain_text(&ruby);
                                                 let ruby_anchor = (
-                                                    pen_x + (art_width as i32 / 2),
+                                                    pen_x + (segment_width as i32 / 2),
                                                     line_start_y - 1,
                                                 );
                                                 let (rx, ry) = ui::calculate_aligned_position(
                                                     ruby_anchor,
-                                                    ruby_width,
+                                                    ruby_art_width as u32,
                                                     1,
                                                     Align {
                                                         horizontal: HorizontalAlign::Center,
@@ -1042,7 +1432,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                                 );
                                             }
                                         }
-                                        pen_x += art_width as i32;
+                                        pen_x += segment_width as i32;
                                     }
                                     LowerTypingSegment::Active { elements, script } => {
                                         for el in elements {
@@ -1153,21 +1543,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             let total_width_chars = full_line_words
                                 .iter()
                                 .flat_map(|w| &w.segments)
-                                .map(|seg| {
-                                    let text = match seg {
-                                        Segment::Plain { text } => text.clone(),
-                                        Segment::Annotated { base, .. } => base.clone(),
-                                        Segment::Anno { inner, .. } => inner
-                                            .iter()
-                                            .map(|s| match s {
-                                                Segment::Plain { text } => text.as_str(),
-                                                Segment::Annotated { base, .. } => base.as_str(),
-                                                Segment::Anno { .. } => "",
-                                            })
-                                            .collect(),
-                                    };
-                                    terminal_width::text_width(&text)
-                                })
+                                .map(segment_terminal_display_width)
                                 .sum::<usize>();
 
                             // Calculate the starting position for the centered line
@@ -1195,6 +1571,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                         base_text,
                                         ruby_text,
                                         is_correct,
+                                        width,
                                         ..
                                     } => {
                                         let color = u32_to_crossterm_color(if is_correct {
@@ -1202,9 +1579,22 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                         } else {
                                             ui::INCORRECT_COLOR
                                         });
+                                        let segment_width =
+                                            lower_completed_terminal_width(&base_text, &ruby_text);
+                                        let cached_width = if line_alignment.full_line_width > 0 {
+                                            (width as f64 / line_alignment.full_line_width as f64
+                                                * total_width_chars as f64)
+                                                .round()
+                                                as u32
+                                        } else {
+                                            0
+                                        };
+                                        let segment_width = segment_width.max(cached_width);
+                                        let base_width =
+                                            terminal_width::text_width(&base_text) as i32;
                                         if let Some(ruby) = ruby_text {
                                             let ruby_x = pen_x
-                                                + (terminal_width::text_width(&base_text) as i32
+                                                + (segment_width as i32
                                                     - terminal_width::text_width(&ruby) as i32)
                                                     / 2;
                                             draw_plain_text_at(
@@ -1216,15 +1606,17 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                                 color,
                                             );
                                         }
+                                        let base_x =
+                                            pen_x + (segment_width as i32 - base_width) / 2;
                                         draw_plain_text_at(
                                             &mut current_buffer,
                                             &base_text,
-                                            pen_x,
+                                            base_x,
                                             pen_y,
                                             viewport,
                                             color,
                                         );
-                                        pen_x += terminal_width::text_width(&base_text) as i32;
+                                        pen_x += segment_width as i32;
                                     }
                                     LowerTypingSegment::Active { elements, .. } => {
                                         for el in elements {
