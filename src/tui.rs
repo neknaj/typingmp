@@ -310,9 +310,12 @@ fn tui_line_widths(
 
             for run in segment_script_runs(segment, script) {
                 let font = fonts.get_for_script(run.script);
-                total_cells += renderer(font, &run.base_text, render_font_size).1 as u32;
+                let run_render_font_size =
+                    fonts.scaled_size_for_script(run.script, render_font_size);
+                let run_font_size_px = fonts.scaled_size_for_script(run.script, font_size_px);
+                total_cells += renderer(font, &run.base_text, run_render_font_size).1 as u32;
                 total_pixels +=
-                    gui_renderer::measure_text(font, &run.base_text, font_size_px).0 as f32;
+                    gui_renderer::measure_text(font, &run.base_text, run_font_size_px).0 as f32;
             }
         }
     }
@@ -363,10 +366,14 @@ fn upper_segments_cell_widths(
 
     for segment in segments {
         let font = fonts.get_for_script(segment.script);
-        let width = renderer(font, &segment.base_text, render_font_size).1;
+        let segment_render_font_size =
+            fonts.scaled_size_for_script(segment.script, render_font_size);
+        let segment_font_size_px = fonts.scaled_size_for_script(segment.script, font_size_px);
+        let width = renderer(font, &segment.base_text, segment_render_font_size).1;
         widths.push(width);
         total_cells += width as u32;
-        total_pixels += gui_renderer::measure_text(font, &segment.base_text, font_size_px).0 as f32;
+        total_pixels +=
+            gui_renderer::measure_text(font, &segment.base_text, segment_font_size_px).0 as f32;
     }
 
     (widths, total_cells, total_pixels)
@@ -385,7 +392,7 @@ fn upper_segments_char_width(
         total_pixels += gui_renderer::measure_text(
             fonts.get_for_script(segment.script),
             &segment.base_text,
-            font_size,
+            fonts.scaled_size_for_script(segment.script, font_size),
         )
         .0 as f32;
     }
@@ -394,6 +401,75 @@ fn upper_segments_char_width(
 }
 
 /// TUIアプリケーションのメイン関数
+fn lower_art_line_metrics(
+    segments: &[LowerTypingSegment],
+    fonts: &Fonts,
+    renderer: TuiGlyphRenderer,
+    render_font_size: f32,
+) -> (usize, usize) {
+    let mut max_ascent = 0usize;
+    let mut max_descent = 0usize;
+
+    let mut measure = |font: &FontVec, text: &str, size: f32| {
+        let (_, _, height, ascent) = renderer(font, text, size);
+        max_ascent = max_ascent.max(ascent);
+        max_descent = max_descent.max(height.saturating_sub(ascent));
+    };
+
+    for segment in segments {
+        match segment {
+            LowerTypingSegment::Completed {
+                base_text, script, ..
+            } => {
+                measure(
+                    fonts.get_for_script(*script),
+                    base_text,
+                    fonts.scaled_size_for_script(*script, render_font_size),
+                );
+            }
+            LowerTypingSegment::Active { elements, script } => {
+                for element in elements {
+                    match element {
+                        ActiveLowerElement::Typed {
+                            character, script, ..
+                        }
+                        | ActiveLowerElement::LastIncorrectInput { character, script } => {
+                            let mut text = String::new();
+                            text.push(*character);
+                            measure(
+                                fonts.get_for_script(*script),
+                                &text,
+                                fonts.scaled_size_for_script(*script, render_font_size),
+                            );
+                        }
+                        ActiveLowerElement::Cursor => {
+                            measure(
+                                fonts.get_for_script(*script),
+                                "|",
+                                fonts.scaled_size_for_script(*script, render_font_size),
+                            );
+                        }
+                        ActiveLowerElement::UnconfirmedInput { text, script } => {
+                            measure(
+                                fonts.get_unconfirmed_for_script(*script),
+                                text,
+                                fonts.scaled_size_for_unconfirmed_script(*script, render_font_size),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if max_ascent == 0 && max_descent == 0 {
+        let (_, _, height, ascent) = renderer(fonts.primary(), "|", render_font_size);
+        (height, ascent)
+    } else {
+        (max_ascent + max_descent, max_ascent)
+    }
+}
+
 #[cfg(not(feature = "uefi"))]
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let asset_provider = DesktopAssetProvider::discover();
@@ -406,16 +482,25 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let japanese_ruby_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::YujiSyukuRegular)?)
             .map_err(|_| BackendError::asset("failed to parse Yuji Syuku font"))?;
+    let japanese_unconfirmed_font =
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::YujiSyukuRegular)?)
+            .map_err(|_| BackendError::asset("failed to parse Yuji Syuku font"))?;
     let simplified_chinese_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::LongCangRegular)?)
             .map_err(|_| BackendError::asset("failed to parse Long Cang font"))?;
     let simplified_chinese_ruby_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::AlegreyaRegular)?)
             .map_err(|_| BackendError::asset("failed to parse Alegreya font"))?;
+    let simplified_chinese_unconfirmed_font =
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::AlegreyaRegular)?)
+            .map_err(|_| BackendError::asset("failed to parse Alegreya font"))?;
     let traditional_chinese_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::LongCangRegular)?)
             .map_err(|_| BackendError::asset("failed to parse Long Cang font"))?;
     let traditional_chinese_ruby_font =
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::AlegreyaRegular)?)
+            .map_err(|_| BackendError::asset("failed to parse Alegreya font"))?;
+    let traditional_chinese_unconfirmed_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::AlegreyaRegular)?)
             .map_err(|_| BackendError::asset("failed to parse Alegreya font"))?;
     let english_font =
@@ -426,10 +511,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         ui: ui_font,
         japanese: japanese_font,
         japanese_ruby: japanese_ruby_font,
+        japanese_unconfirmed: japanese_unconfirmed_font,
         chinese_simplified: simplified_chinese_font,
         chinese_simplified_ruby: simplified_chinese_ruby_font,
+        chinese_simplified_unconfirmed: simplified_chinese_unconfirmed_font,
         traditional_chinese: traditional_chinese_font,
         traditional_chinese_ruby: traditional_chinese_ruby_font,
+        traditional_chinese_unconfirmed: traditional_chinese_unconfirmed_font,
         english: english_font,
     });
 
@@ -598,8 +686,14 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             .first()
                             .map(|segment| fonts.get_for_script(segment.script))
                             .unwrap_or(primary_font);
+                        let line_font_size = segments
+                            .first()
+                            .map(|segment| {
+                                fonts.scaled_size_for_script(segment.script, render_font_size)
+                            })
+                            .unwrap_or(render_font_size);
                         let (_, _, line_total_height, line_ascent) =
-                            renderer(line_font, "|", render_font_size);
+                            renderer(line_font, "|", line_font_size);
 
                         let anchor_pos = ui::calculate_anchor_position(
                             anchor,
@@ -625,10 +719,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 ui::UpperSegmentState::Muted => 0xFF_444444,
                             });
 
+                            let base_font_size =
+                                fonts.scaled_size_for_script(seg.script, render_font_size);
                             let (art_buffer, _, _, char_ascent) = renderer(
                                 fonts.get_for_script(seg.script),
                                 &seg.base_text,
-                                render_font_size,
+                                base_font_size,
                             );
                             let blit_y = line_baseline_y - char_ascent as i32;
                             blit_art(
@@ -642,7 +738,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             if let Some(ruby) = &seg.ruby_text {
                                 let ruby_color = color;
                                 if is_braille {
-                                    let ruby_font_size_px = render_font_size * 0.5;
+                                    let ruby_font_size_px = fonts.scaled_size_for_ruby_script(
+                                        seg.script,
+                                        render_font_size * 0.5,
+                                    );
                                     let (ruby_art_buffer, ruby_art_width, ruby_art_height, _) =
                                         tui_renderer::render_text_to_braille_art(
                                             fonts.get_ruby_for_script(seg.script),
@@ -806,8 +905,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     1.0
                                 };
 
-                            let (_, _, line_total_height, line_ascent) =
-                                renderer(primary_font, "|", render_font_size);
+                            let (line_total_height, line_ascent) = lower_art_line_metrics(
+                                &segments,
+                                fonts,
+                                renderer,
+                                render_font_size,
+                            );
 
                             let anchor_pos = ui::calculate_anchor_position(
                                 anchor,
@@ -835,13 +938,15 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                         ..
                                     } => {
                                         let font = fonts.get_for_script(script);
+                                        let base_font_size =
+                                            fonts.scaled_size_for_script(script, render_font_size);
                                         let color = u32_to_crossterm_color(if is_correct {
                                             ui::CORRECT_COLOR
                                         } else {
                                             ui::INCORRECT_COLOR
                                         });
                                         let (art_buffer, art_width, _, char_ascent) =
-                                            renderer(font, &base_text, render_font_size);
+                                            renderer(font, &base_text, base_font_size);
                                         let blit_y = line_baseline_y - char_ascent as i32;
                                         blit_art(
                                             &mut current_buffer,
@@ -857,7 +962,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                                         if let Some(ruby) = ruby_text {
                                             if is_braille {
-                                                let ruby_font_size_px = render_font_size * 0.5;
+                                                let ruby_font_size_px = fonts
+                                                    .scaled_size_for_ruby_script(
+                                                        script,
+                                                        render_font_size * 0.5,
+                                                    );
                                                 let (
                                                     ruby_art_buffer,
                                                     ruby_art_width,
@@ -922,19 +1031,20 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     }
                                     LowerTypingSegment::Active { elements, script } => {
                                         for el in elements {
-                                            let (text_to_render, color, element_script) = match el {
+                                            let (text_to_render, color, element_script) = match &el
+                                            {
                                                 ActiveLowerElement::Typed {
                                                     character,
                                                     is_correct,
                                                     script,
                                                 } => (
-                                                    character.to_string(),
-                                                    u32_to_crossterm_color(if is_correct {
+                                                    (*character).to_string(),
+                                                    u32_to_crossterm_color(if *is_correct {
                                                         ui::CORRECT_COLOR
                                                     } else {
                                                         ui::INCORRECT_COLOR
                                                     }),
-                                                    script,
+                                                    *script,
                                                 ),
                                                 ActiveLowerElement::Cursor => (
                                                     "|".to_string(),
@@ -947,18 +1057,34 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                                 } => (
                                                     text.clone(),
                                                     u32_to_crossterm_color(ui::UNCONFIRMED_COLOR),
-                                                    script,
+                                                    *script,
                                                 ),
                                                 ActiveLowerElement::LastIncorrectInput {
                                                     character,
                                                     script,
                                                 } => (
-                                                    character.to_string(),
+                                                    (*character).to_string(),
                                                     u32_to_crossterm_color(ui::WRONG_KEY_COLOR),
-                                                    script,
+                                                    *script,
                                                 ),
                                             };
-                                            let font = fonts.get_for_script(element_script);
+                                            let (font, element_font_size) = match &el {
+                                                ActiveLowerElement::UnconfirmedInput { .. } => (
+                                                    fonts
+                                                        .get_unconfirmed_for_script(element_script),
+                                                    fonts.scaled_size_for_unconfirmed_script(
+                                                        element_script,
+                                                        render_font_size,
+                                                    ),
+                                                ),
+                                                _ => (
+                                                    fonts.get_for_script(element_script),
+                                                    fonts.scaled_size_for_script(
+                                                        element_script,
+                                                        render_font_size,
+                                                    ),
+                                                ),
+                                            };
 
                                             if text_to_render == "|" {
                                                 let cursor_height = line_total_height;
@@ -981,7 +1107,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                                     renderer(
                                                         font,
                                                         &text_to_render,
-                                                        render_font_size,
+                                                        element_font_size,
                                                     );
                                                 let blit_y = line_baseline_y - char_ascent as i32;
                                                 blit_art(

@@ -73,6 +73,7 @@ pub(crate) struct ScrollCacheState {
     pub width: usize,
     pub height: usize,
     pub font_pixel_size: f32,
+    pub font_generation: u64,
     pub line_origin: f32,
     pub cursor_in_line: f32,
     pub cursor_world: f32,
@@ -179,32 +180,32 @@ fn build_reading_width_prefix(
                     .next()
                     .map(|run| run.script)
                     .unwrap_or(script);
-                total += gui_renderer::measure_text(
-                    fonts.get_for_script(run_script),
-                    ch,
-                    font_pixel_size,
-                )
-                .0 as f32;
+                let run_font_size = fonts.scaled_size_for_script(run_script, font_pixel_size);
+                total +=
+                    gui_renderer::measure_text(fonts.get_for_script(run_script), ch, run_font_size)
+                        .0 as f32;
                 prefix.push(total);
             }
         }
         Segment::Anno { .. } => {
             for run in segment_script_runs(segment, script) {
                 let font = fonts.get_for_script(run.script);
+                let run_font_size = fonts.scaled_size_for_script(run.script, font_pixel_size);
                 for character in run.reading_text.chars() {
                     let mut buf = [0u8; 4];
                     let ch = character.encode_utf8(&mut buf);
-                    total += gui_renderer::measure_text(font, ch, font_pixel_size).0 as f32;
+                    total += gui_renderer::measure_text(font, ch, run_font_size).0 as f32;
                     prefix.push(total);
                 }
             }
         }
         Segment::Annotated { .. } => {
             let font = fonts.get_for_script(script);
+            let run_font_size = fonts.scaled_size_for_script(script, font_pixel_size);
             for character in text.chars() {
                 let mut buf = [0u8; 4];
                 let ch = character.encode_utf8(&mut buf);
-                total += gui_renderer::measure_text(font, ch, font_pixel_size).0 as f32;
+                total += gui_renderer::measure_text(font, ch, run_font_size).0 as f32;
                 prefix.push(total);
             }
         }
@@ -265,10 +266,11 @@ pub(crate) fn build_scroll_line_cache(
             let base_width = display_runs
                 .iter()
                 .map(|run| {
+                    let run_font_size = fonts.scaled_size_for_script(run.script, font_pixel_size);
                     gui_renderer::measure_text(
                         fonts.get_for_script(run.script),
                         &run.base_text,
-                        font_pixel_size,
+                        run_font_size,
                     )
                     .0 as f32
                 })
@@ -323,10 +325,11 @@ fn line_total_width(line: &Line, fonts: &Fonts, font_pixel_size: f32) -> f32 {
                 .unwrap_or_else(|| script_for_segment(segment));
             segment_index += 1;
             for run in display_runs_for_segment(segment, &base_text, script) {
+                let run_font_size = fonts.scaled_size_for_script(run.script, font_pixel_size);
                 total += gui_renderer::measure_text(
                     fonts.get_for_script(run.script),
                     &run.base_text,
-                    font_pixel_size,
+                    run_font_size,
                 )
                 .0 as f32;
             }

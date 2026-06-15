@@ -231,16 +231,25 @@ fn bundled_fonts() -> Result<Fonts, BackendError> {
     let japanese_ruby_font =
         FontVec::try_from_vec(include_bytes!("../fonts/YujiSyuku-Regular.ttf").to_vec())
             .map_err(|_| BackendError::asset("failed to parse Yuji Syuku font"))?;
+    let japanese_unconfirmed_font =
+        FontVec::try_from_vec(include_bytes!("../fonts/YujiSyuku-Regular.ttf").to_vec())
+            .map_err(|_| BackendError::asset("failed to parse Yuji Syuku font"))?;
     let simplified_chinese_font =
         FontVec::try_from_vec(include_bytes!("../fonts/LongCang-Regular.ttf").to_vec())
             .map_err(|_| BackendError::asset("failed to parse Long Cang font"))?;
     let simplified_chinese_ruby_font =
         FontVec::try_from_vec(include_bytes!("../fonts/Alegreya-VariableFont_wght.ttf").to_vec())
             .map_err(|_| BackendError::asset("failed to parse Alegreya font"))?;
+    let simplified_chinese_unconfirmed_font =
+        FontVec::try_from_vec(include_bytes!("../fonts/Alegreya-VariableFont_wght.ttf").to_vec())
+            .map_err(|_| BackendError::asset("failed to parse Alegreya font"))?;
     let traditional_chinese_font =
         FontVec::try_from_vec(include_bytes!("../fonts/LongCang-Regular.ttf").to_vec())
             .map_err(|_| BackendError::asset("failed to parse Long Cang font"))?;
     let traditional_chinese_ruby_font =
+        FontVec::try_from_vec(include_bytes!("../fonts/Alegreya-VariableFont_wght.ttf").to_vec())
+            .map_err(|_| BackendError::asset("failed to parse Alegreya font"))?;
+    let traditional_chinese_unconfirmed_font =
         FontVec::try_from_vec(include_bytes!("../fonts/Alegreya-VariableFont_wght.ttf").to_vec())
             .map_err(|_| BackendError::asset("failed to parse Alegreya font"))?;
     let english_font = FontVec::try_from_vec(include_bytes!("../fonts/Kalam-Regular.ttf").to_vec())
@@ -250,10 +259,13 @@ fn bundled_fonts() -> Result<Fonts, BackendError> {
         ui: ui_font,
         japanese: japanese_font,
         japanese_ruby: japanese_ruby_font,
+        japanese_unconfirmed: japanese_unconfirmed_font,
         chinese_simplified: simplified_chinese_font,
         chinese_simplified_ruby: simplified_chinese_ruby_font,
+        chinese_simplified_unconfirmed: simplified_chinese_unconfirmed_font,
         traditional_chinese: traditional_chinese_font,
         traditional_chinese_ruby: traditional_chinese_ruby_font,
+        traditional_chinese_unconfirmed: traditional_chinese_unconfirmed_font,
         english: english_font,
     }))
 }

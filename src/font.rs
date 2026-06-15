@@ -15,6 +15,75 @@ pub const DEFAULT_UI_FONT_NAME: &str = "NotoSerifJP";
 pub const DEFAULT_JAPANESE_RUBY_FONT_NAME: &str = "YujiSyuku";
 pub const DEFAULT_CHINESE_SIMPLIFIED_RUBY_FONT_NAME: &str = "Alegreya";
 pub const DEFAULT_TRADITIONAL_CHINESE_RUBY_FONT_NAME: &str = "Alegreya";
+pub const DEFAULT_JAPANESE_UNCONFIRMED_FONT_NAME: &str = "YujiSyuku";
+pub const DEFAULT_CHINESE_SIMPLIFIED_UNCONFIRMED_FONT_NAME: &str = "Alegreya";
+pub const DEFAULT_TRADITIONAL_CHINESE_UNCONFIRMED_FONT_NAME: &str = "Alegreya";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FontScale {
+    Percent50,
+    Percent75,
+    Percent90,
+    Percent100,
+    Percent110,
+    Percent125,
+    Percent150,
+    Percent200,
+}
+
+impl FontScale {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Percent50 => "50%",
+            Self::Percent75 => "75%",
+            Self::Percent90 => "90%",
+            Self::Percent100 => "100%",
+            Self::Percent110 => "110%",
+            Self::Percent125 => "125%",
+            Self::Percent150 => "150%",
+            Self::Percent200 => "200%",
+        }
+    }
+
+    pub const fn multiplier(self) -> f32 {
+        match self {
+            Self::Percent50 => 0.5,
+            Self::Percent75 => 0.75,
+            Self::Percent90 => 0.9,
+            Self::Percent100 => 1.0,
+            Self::Percent110 => 1.1,
+            Self::Percent125 => 1.25,
+            Self::Percent150 => 1.5,
+            Self::Percent200 => 2.0,
+        }
+    }
+
+    pub const fn previous(self) -> Self {
+        match self {
+            Self::Percent50 => Self::Percent200,
+            Self::Percent75 => Self::Percent50,
+            Self::Percent90 => Self::Percent75,
+            Self::Percent100 => Self::Percent90,
+            Self::Percent110 => Self::Percent100,
+            Self::Percent125 => Self::Percent110,
+            Self::Percent150 => Self::Percent125,
+            Self::Percent200 => Self::Percent150,
+        }
+    }
+
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Percent50 => Self::Percent75,
+            Self::Percent75 => Self::Percent90,
+            Self::Percent90 => Self::Percent100,
+            Self::Percent100 => Self::Percent110,
+            Self::Percent110 => Self::Percent125,
+            Self::Percent125 => Self::Percent150,
+            Self::Percent150 => Self::Percent200,
+            Self::Percent200 => Self::Percent50,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FontScript {
@@ -49,6 +118,7 @@ pub enum FontTarget {
     Ui,
     Script(FontScript),
     Ruby(FontScript),
+    Unconfirmed(FontScript),
 }
 
 impl FontTarget {
@@ -60,6 +130,36 @@ impl FontTarget {
             Self::Ruby(FontScript::ChineseSimplified) => "Simplified Chinese Ruby Font",
             Self::Ruby(FontScript::TraditionalChinese) => "Traditional Chinese Ruby Font",
             Self::Ruby(FontScript::English) => "English Ruby Font",
+            Self::Unconfirmed(FontScript::Japanese) => "Japanese Unconfirmed Font",
+            Self::Unconfirmed(FontScript::ChineseSimplified) => {
+                "Simplified Chinese Unconfirmed Font"
+            }
+            Self::Unconfirmed(FontScript::TraditionalChinese) => {
+                "Traditional Chinese Unconfirmed Font"
+            }
+            Self::Unconfirmed(FontScript::English) => "English Unconfirmed Font",
+        }
+    }
+
+    pub const fn scale_settings_label(self) -> &'static str {
+        match self {
+            Self::Ui => "UI Font Scale",
+            Self::Script(FontScript::Japanese) => "Japanese Font Scale",
+            Self::Script(FontScript::ChineseSimplified) => "Simplified Chinese Font Scale",
+            Self::Script(FontScript::TraditionalChinese) => "Traditional Chinese Font Scale",
+            Self::Script(FontScript::English) => "English Font Scale",
+            Self::Ruby(FontScript::Japanese) => "Japanese Ruby Font Scale",
+            Self::Ruby(FontScript::ChineseSimplified) => "Simplified Chinese Ruby Font Scale",
+            Self::Ruby(FontScript::TraditionalChinese) => "Traditional Chinese Ruby Font Scale",
+            Self::Ruby(FontScript::English) => "English Ruby Font Scale",
+            Self::Unconfirmed(FontScript::Japanese) => "Japanese Unconfirmed Font Scale",
+            Self::Unconfirmed(FontScript::ChineseSimplified) => {
+                "Simplified Chinese Unconfirmed Font Scale"
+            }
+            Self::Unconfirmed(FontScript::TraditionalChinese) => {
+                "Traditional Chinese Unconfirmed Font Scale"
+            }
+            Self::Unconfirmed(FontScript::English) => "English Unconfirmed Font Scale",
         }
     }
 }
@@ -68,10 +168,13 @@ pub struct Fonts {
     ui: FontSlot,
     japanese: FontSlot,
     japanese_ruby: FontSlot,
+    japanese_unconfirmed: FontSlot,
     chinese_simplified: FontSlot,
     chinese_simplified_ruby: FontSlot,
+    chinese_simplified_unconfirmed: FontSlot,
     traditional_chinese: FontSlot,
     traditional_chinese_ruby: FontSlot,
+    traditional_chinese_unconfirmed: FontSlot,
     english: FontSlot,
     generation: u64,
 }
@@ -80,16 +183,20 @@ pub struct FontBundle {
     pub ui: FontVec,
     pub japanese: FontVec,
     pub japanese_ruby: FontVec,
+    pub japanese_unconfirmed: FontVec,
     pub chinese_simplified: FontVec,
     pub chinese_simplified_ruby: FontVec,
+    pub chinese_simplified_unconfirmed: FontVec,
     pub traditional_chinese: FontVec,
     pub traditional_chinese_ruby: FontVec,
+    pub traditional_chinese_unconfirmed: FontVec,
     pub english: FontVec,
 }
 
 struct FontSlot {
     font: FontVec,
     name: String,
+    scale: FontScale,
 }
 
 impl FontSlot {
@@ -97,6 +204,7 @@ impl FontSlot {
         Self {
             font,
             name: name.to_string(),
+            scale: FontScale::Percent100,
         }
     }
 }
@@ -107,10 +215,13 @@ impl Fonts {
             ui,
             japanese,
             japanese_ruby,
+            japanese_unconfirmed,
             chinese_simplified,
             chinese_simplified_ruby,
+            chinese_simplified_unconfirmed,
             traditional_chinese,
             traditional_chinese_ruby,
+            traditional_chinese_unconfirmed,
             english,
         } = bundle;
 
@@ -126,13 +237,25 @@ impl Fonts {
             ),
             japanese: FontSlot::new(japanese, DEFAULT_JAPANESE_FONT_NAME),
             japanese_ruby: FontSlot::new(japanese_ruby, DEFAULT_JAPANESE_RUBY_FONT_NAME),
+            japanese_unconfirmed: FontSlot::new(
+                japanese_unconfirmed,
+                DEFAULT_JAPANESE_UNCONFIRMED_FONT_NAME,
+            ),
             chinese_simplified: FontSlot::new(
                 chinese_simplified,
                 DEFAULT_CHINESE_SIMPLIFIED_FONT_NAME,
             ),
+            chinese_simplified_unconfirmed: FontSlot::new(
+                chinese_simplified_unconfirmed,
+                DEFAULT_CHINESE_SIMPLIFIED_UNCONFIRMED_FONT_NAME,
+            ),
             traditional_chinese: FontSlot::new(
                 traditional_chinese,
                 DEFAULT_TRADITIONAL_CHINESE_FONT_NAME,
+            ),
+            traditional_chinese_unconfirmed: FontSlot::new(
+                traditional_chinese_unconfirmed,
+                DEFAULT_TRADITIONAL_CHINESE_UNCONFIRMED_FONT_NAME,
             ),
             english: FontSlot::new(english, DEFAULT_ENGLISH_FONT_NAME),
             generation: 0,
@@ -151,12 +274,32 @@ impl Fonts {
         &self.slot_for_ruby_script(script).font
     }
 
+    pub fn get_unconfirmed_for_script(&self, script: FontScript) -> &FontVec {
+        &self.slot_for_unconfirmed_script(script).font
+    }
+
     pub fn name_for_script(&self, script: FontScript) -> &str {
         &self.slot_for_script(script).name
     }
 
     pub fn name_for_target(&self, target: FontTarget) -> &str {
         &self.slot_for_target(target).name
+    }
+
+    pub fn scale_for_target(&self, target: FontTarget) -> FontScale {
+        self.slot_for_target(target).scale
+    }
+
+    pub fn scaled_size_for_script(&self, script: FontScript, base_size: f32) -> f32 {
+        base_size * self.slot_for_script(script).scale.multiplier()
+    }
+
+    pub fn scaled_size_for_ruby_script(&self, script: FontScript, base_size: f32) -> f32 {
+        base_size * self.slot_for_ruby_script(script).scale.multiplier()
+    }
+
+    pub fn scaled_size_for_unconfirmed_script(&self, script: FontScript, base_size: f32) -> f32 {
+        base_size * self.slot_for_unconfirmed_script(script).scale.multiplier()
     }
 
     pub fn set_for_script(&mut self, script: FontScript, name: String, font: FontVec) {
@@ -173,8 +316,18 @@ impl Fonts {
         self.generation = self.generation.wrapping_add(1);
     }
 
+    pub fn set_scale_for_target(&mut self, target: FontTarget, scale: FontScale) {
+        let slot = self.slot_for_target_mut(target);
+        slot.scale = scale;
+        self.generation = self.generation.wrapping_add(1);
+    }
+
     pub fn ui(&self) -> &FontVec {
         &self.ui.font
+    }
+
+    pub fn scaled_size_for_ui(&self, base_size: f32) -> f32 {
+        base_size * self.ui.scale.multiplier()
     }
 
     pub fn primary(&self) -> &FontVec {
@@ -186,6 +339,7 @@ impl Fonts {
             FontTarget::Ui => &self.ui,
             FontTarget::Script(script) => self.slot_for_script(script),
             FontTarget::Ruby(script) => self.slot_for_ruby_script(script),
+            FontTarget::Unconfirmed(script) => self.slot_for_unconfirmed_script(script),
         }
     }
 
@@ -194,6 +348,7 @@ impl Fonts {
             FontTarget::Ui => &mut self.ui,
             FontTarget::Script(script) => self.slot_for_script_mut(script),
             FontTarget::Ruby(script) => self.slot_for_ruby_script_mut(script),
+            FontTarget::Unconfirmed(script) => self.slot_for_unconfirmed_script_mut(script),
         }
     }
 
@@ -229,6 +384,24 @@ impl Fonts {
             FontScript::Japanese => &mut self.japanese_ruby,
             FontScript::ChineseSimplified => &mut self.chinese_simplified_ruby,
             FontScript::TraditionalChinese => &mut self.traditional_chinese_ruby,
+            FontScript::English => &mut self.english,
+        }
+    }
+
+    fn slot_for_unconfirmed_script(&self, script: FontScript) -> &FontSlot {
+        match script {
+            FontScript::Japanese => &self.japanese_unconfirmed,
+            FontScript::ChineseSimplified => &self.chinese_simplified_unconfirmed,
+            FontScript::TraditionalChinese => &self.traditional_chinese_unconfirmed,
+            FontScript::English => &self.english,
+        }
+    }
+
+    fn slot_for_unconfirmed_script_mut(&mut self, script: FontScript) -> &mut FontSlot {
+        match script {
+            FontScript::Japanese => &mut self.japanese_unconfirmed,
+            FontScript::ChineseSimplified => &mut self.chinese_simplified_unconfirmed,
+            FontScript::TraditionalChinese => &mut self.traditional_chinese_unconfirmed,
             FontScript::English => &mut self.english,
         }
     }

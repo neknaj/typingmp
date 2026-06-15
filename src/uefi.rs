@@ -38,6 +38,7 @@ fn run_inner() -> core::result::Result<(), Status> {
     let yuji_font_data: &[u8] = include_bytes!("../fonts/YujiSyuku-Regular.ttf");
     let yuji_font = load_embedded_font(yuji_font_data)?;
     let yuji_ruby_font = load_embedded_font(yuji_font_data)?;
+    let yuji_unconfirmed_font = load_embedded_font(yuji_font_data)?;
     let ui_font_data: &[u8] = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
     let ui_font = load_embedded_font(ui_font_data)?;
 
@@ -45,9 +46,11 @@ fn run_inner() -> core::result::Result<(), Status> {
     let simplified_chinese_font = load_embedded_font(simplified_chinese_font_data)?;
     let chinese_ruby_font_data: &[u8] = include_bytes!("../fonts/Alegreya-VariableFont_wght.ttf");
     let simplified_chinese_ruby_font = load_embedded_font(chinese_ruby_font_data)?;
+    let simplified_chinese_unconfirmed_font = load_embedded_font(chinese_ruby_font_data)?;
     let traditional_chinese_font_data: &[u8] = include_bytes!("../fonts/LongCang-Regular.ttf");
     let traditional_chinese_font = load_embedded_font(traditional_chinese_font_data)?;
     let traditional_chinese_ruby_font = load_embedded_font(chinese_ruby_font_data)?;
+    let traditional_chinese_unconfirmed_font = load_embedded_font(chinese_ruby_font_data)?;
     let english_font_data: &[u8] = include_bytes!("../fonts/Kalam-Regular.ttf");
     let english_font = load_embedded_font(english_font_data)?;
 
@@ -56,10 +59,13 @@ fn run_inner() -> core::result::Result<(), Status> {
         ui: ui_font,
         japanese: yuji_font,
         japanese_ruby: yuji_ruby_font,
+        japanese_unconfirmed: yuji_unconfirmed_font,
         chinese_simplified: simplified_chinese_font,
         chinese_simplified_ruby: simplified_chinese_ruby_font,
+        chinese_simplified_unconfirmed: simplified_chinese_unconfirmed_font,
         traditional_chinese: traditional_chinese_font,
         traditional_chinese_ruby: traditional_chinese_ruby_font,
+        traditional_chinese_unconfirmed: traditional_chinese_unconfirmed_font,
         english: english_font,
     });
 

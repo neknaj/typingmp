@@ -11,7 +11,7 @@ use crate::app::scroll::{
     line_origin_from_start, typing_line_scroll_position, ScrollCacheState,
 };
 use crate::display::DisplaySettings;
-pub use crate::font::{FontBundle, FontScript as Script, FontTarget, Fonts};
+pub use crate::font::{FontBundle, FontScale, FontScript as Script, FontTarget, Fonts};
 use crate::io::{FontAssetId, FontEntry, ProblemRepository};
 use crate::model::{
     CharIndex, LineIndex, ResultModel, Scroll, SegmentIndex, TypingModel, TypingStatus, WordIndex,
@@ -103,76 +103,79 @@ impl MainMenuItem {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsItem {
-    UiFont,
-    Japanese,
-    JapaneseRuby,
-    ChineseSimplified,
-    ChineseSimplifiedRuby,
-    TraditionalChinese,
-    TraditionalChineseRuby,
-    English,
+    FontFamily(FontTarget),
+    FontScale(FontTarget),
     AspectRatio,
     DisplayScale,
+    ImeInput,
 }
 
+const SETTINGS_ITEMS: &[SettingsItem] = &[
+    SettingsItem::FontFamily(FontTarget::Ui),
+    SettingsItem::FontScale(FontTarget::Ui),
+    SettingsItem::FontFamily(FontTarget::Script(Script::Japanese)),
+    SettingsItem::FontScale(FontTarget::Script(Script::Japanese)),
+    SettingsItem::FontFamily(FontTarget::Ruby(Script::Japanese)),
+    SettingsItem::FontScale(FontTarget::Ruby(Script::Japanese)),
+    SettingsItem::FontFamily(FontTarget::Unconfirmed(Script::Japanese)),
+    SettingsItem::FontScale(FontTarget::Unconfirmed(Script::Japanese)),
+    SettingsItem::FontFamily(FontTarget::Script(Script::ChineseSimplified)),
+    SettingsItem::FontScale(FontTarget::Script(Script::ChineseSimplified)),
+    SettingsItem::FontFamily(FontTarget::Ruby(Script::ChineseSimplified)),
+    SettingsItem::FontScale(FontTarget::Ruby(Script::ChineseSimplified)),
+    SettingsItem::FontFamily(FontTarget::Unconfirmed(Script::ChineseSimplified)),
+    SettingsItem::FontScale(FontTarget::Unconfirmed(Script::ChineseSimplified)),
+    SettingsItem::FontFamily(FontTarget::Script(Script::TraditionalChinese)),
+    SettingsItem::FontScale(FontTarget::Script(Script::TraditionalChinese)),
+    SettingsItem::FontFamily(FontTarget::Ruby(Script::TraditionalChinese)),
+    SettingsItem::FontScale(FontTarget::Ruby(Script::TraditionalChinese)),
+    SettingsItem::FontFamily(FontTarget::Unconfirmed(Script::TraditionalChinese)),
+    SettingsItem::FontScale(FontTarget::Unconfirmed(Script::TraditionalChinese)),
+    SettingsItem::FontFamily(FontTarget::Script(Script::English)),
+    SettingsItem::FontScale(FontTarget::Script(Script::English)),
+    SettingsItem::AspectRatio,
+    SettingsItem::DisplayScale,
+    SettingsItem::ImeInput,
+];
+
 impl SettingsItem {
-    pub const fn index(self) -> usize {
-        match self {
-            Self::UiFont => 0,
-            Self::Japanese => 1,
-            Self::JapaneseRuby => 2,
-            Self::ChineseSimplified => 3,
-            Self::ChineseSimplifiedRuby => 4,
-            Self::TraditionalChinese => 5,
-            Self::TraditionalChineseRuby => 6,
-            Self::English => 7,
-            Self::AspectRatio => 8,
-            Self::DisplayScale => 9,
-        }
+    pub const fn all() -> &'static [Self] {
+        SETTINGS_ITEMS
+    }
+
+    pub fn index(self) -> usize {
+        SETTINGS_ITEMS
+            .iter()
+            .position(|item| *item == self)
+            .unwrap_or(0)
     }
 
     pub const fn font_target(self) -> Option<FontTarget> {
         match self {
-            Self::UiFont => Some(FontTarget::Ui),
-            Self::Japanese => Some(FontTarget::Script(Script::Japanese)),
-            Self::JapaneseRuby => Some(FontTarget::Ruby(Script::Japanese)),
-            Self::ChineseSimplified => Some(FontTarget::Script(Script::ChineseSimplified)),
-            Self::ChineseSimplifiedRuby => Some(FontTarget::Ruby(Script::ChineseSimplified)),
-            Self::TraditionalChinese => Some(FontTarget::Script(Script::TraditionalChinese)),
-            Self::TraditionalChineseRuby => Some(FontTarget::Ruby(Script::TraditionalChinese)),
-            Self::English => Some(FontTarget::Script(Script::English)),
-            Self::AspectRatio | Self::DisplayScale => None,
+            Self::FontFamily(target) => Some(target),
+            Self::FontScale(_) | Self::AspectRatio | Self::DisplayScale | Self::ImeInput => None,
+        }
+    }
+
+    pub const fn font_scale_target(self) -> Option<FontTarget> {
+        match self {
+            Self::FontScale(target) => Some(target),
+            Self::FontFamily(_) | Self::AspectRatio | Self::DisplayScale | Self::ImeInput => None,
         }
     }
 
     pub fn previous(self) -> Self {
-        match self {
-            Self::UiFont => Self::UiFont,
-            Self::Japanese => Self::UiFont,
-            Self::JapaneseRuby => Self::Japanese,
-            Self::ChineseSimplified => Self::JapaneseRuby,
-            Self::ChineseSimplifiedRuby => Self::ChineseSimplified,
-            Self::TraditionalChinese => Self::ChineseSimplifiedRuby,
-            Self::TraditionalChineseRuby => Self::TraditionalChinese,
-            Self::English => Self::TraditionalChineseRuby,
-            Self::AspectRatio => Self::English,
-            Self::DisplayScale => Self::AspectRatio,
+        let index = self.index();
+        if index == 0 {
+            self
+        } else {
+            SETTINGS_ITEMS[index - 1]
         }
     }
 
     pub fn next(self) -> Self {
-        match self {
-            Self::UiFont => Self::Japanese,
-            Self::Japanese => Self::JapaneseRuby,
-            Self::JapaneseRuby => Self::ChineseSimplified,
-            Self::ChineseSimplified => Self::ChineseSimplifiedRuby,
-            Self::ChineseSimplifiedRuby => Self::TraditionalChinese,
-            Self::TraditionalChinese => Self::TraditionalChineseRuby,
-            Self::TraditionalChineseRuby => Self::English,
-            Self::English => Self::AspectRatio,
-            Self::AspectRatio => Self::DisplayScale,
-            Self::DisplayScale => Self::DisplayScale,
-        }
+        let index = self.index();
+        SETTINGS_ITEMS.get(index + 1).copied().unwrap_or(self)
     }
 }
 
@@ -279,6 +282,7 @@ pub struct App {
     pub(crate) should_open_file_dialog: bool,
     pub(crate) fonts: Fonts,
     pub(crate) display_settings: DisplaySettings,
+    pub(crate) accept_ime_input: bool,
     /// フォントピッカーを開いているか
     pub(crate) settings_picking_font: bool,
     /// フォントピッカー内の選択インデックス
@@ -320,7 +324,7 @@ impl App {
             state: AppState::MainMenu,
             selected_main_menu_item: MainMenuItem::Start,
             selected_problem_item: 0,
-            selected_settings_item: SettingsItem::UiFont,
+            selected_settings_item: SettingsItem::FontFamily(FontTarget::Ui),
             problem_repository,
             typing_model: None,
             result_model: None,
@@ -331,6 +335,7 @@ impl App {
             should_open_file_dialog: false,
             fonts,
             display_settings: DisplaySettings::default(),
+            accept_ime_input: false,
             settings_picking_font: false,
             selected_font_item: 0,
             available_fonts: Vec::new(),
@@ -396,6 +401,10 @@ impl App {
         self.display_settings
     }
 
+    pub fn accepts_ime_input(&self) -> bool {
+        self.accept_ime_input
+    }
+
     pub(crate) fn scroll_cache(&self) -> Option<&ScrollCache> {
         self.scroll_cache.as_ref()
     }
@@ -412,14 +421,17 @@ impl App {
     ) -> Result<(), FontApplyError> {
         let font = FontVec::try_from_vec(bytes).map_err(|_| FontApplyError::InvalidFontData)?;
         self.fonts.set_for_target(target, font_name, font);
-        if matches!(target, FontTarget::Script(_)) {
-            self.scroll_cache = None;
-        }
+        self.scroll_cache = None;
         Ok(())
     }
 
     fn advance_selected_display_setting(&mut self) {
         match self.selected_settings_item {
+            SettingsItem::FontScale(target) => {
+                let scale = self.fonts.scale_for_target(target).next();
+                self.fonts.set_scale_for_target(target, scale);
+                self.scroll_cache = None;
+            }
             SettingsItem::AspectRatio => {
                 self.display_settings.aspect_ratio = self.display_settings.aspect_ratio.next();
                 self.scroll_cache = None;
@@ -428,14 +440,10 @@ impl App {
                 self.display_settings.scale = self.display_settings.scale.next();
                 self.scroll_cache = None;
             }
-            SettingsItem::UiFont
-            | SettingsItem::Japanese
-            | SettingsItem::JapaneseRuby
-            | SettingsItem::ChineseSimplified
-            | SettingsItem::ChineseSimplifiedRuby
-            | SettingsItem::TraditionalChinese
-            | SettingsItem::TraditionalChineseRuby
-            | SettingsItem::English => {}
+            SettingsItem::ImeInput => {
+                self.accept_ime_input = !self.accept_ime_input;
+            }
+            SettingsItem::FontFamily(_) => {}
         }
     }
 
@@ -447,6 +455,12 @@ impl App {
         }
 
         match self.selected_settings_item {
+            SettingsItem::FontScale(target) => {
+                let scale = self.fonts.scale_for_target(target);
+                let scale = if next { scale.next() } else { scale.previous() };
+                self.fonts.set_scale_for_target(target, scale);
+                self.scroll_cache = None;
+            }
             SettingsItem::AspectRatio => {
                 self.display_settings.aspect_ratio = if next {
                     self.display_settings.aspect_ratio.next()
@@ -463,14 +477,10 @@ impl App {
                 };
                 self.scroll_cache = None;
             }
-            SettingsItem::UiFont
-            | SettingsItem::Japanese
-            | SettingsItem::JapaneseRuby
-            | SettingsItem::ChineseSimplified
-            | SettingsItem::ChineseSimplifiedRuby
-            | SettingsItem::TraditionalChinese
-            | SettingsItem::TraditionalChineseRuby
-            | SettingsItem::English => return false,
+            SettingsItem::ImeInput => {
+                self.accept_ime_input = !self.accept_ime_input;
+            }
+            SettingsItem::FontFamily(_) => return false,
         }
 
         true
@@ -553,11 +563,13 @@ impl App {
             let line_idx = model.status.line.get();
             if let Some(current_line_content) = model.content.lines.get(line_idx) {
                 let status = &model.status;
+                let font_generation = self.fonts.generation();
 
                 let rebuild_cache = self.scroll_cache.as_ref().is_none_or(|cache| match cache {
                     ScrollCache::Ready(ready) => {
                         ready.width != width
                             || ready.height != height
+                            || ready.font_generation != font_generation
                             || (ready.font_pixel_size - base_pixel_font_size).abs() > f32::EPSILON
                             || ready.current.line != status.line
                     }
@@ -584,8 +596,9 @@ impl App {
 
                 let line_origin = match &self.scroll_cache {
                     Some(ScrollCache::Ready(previous_cache))
-                        if (previous_cache.font_pixel_size - base_pixel_font_size).abs()
-                            <= f32::EPSILON =>
+                        if previous_cache.font_generation == font_generation
+                            && (previous_cache.font_pixel_size - base_pixel_font_size).abs()
+                                <= f32::EPSILON =>
                     {
                         line_origin_from_previous(
                             previous_cache,
@@ -650,6 +663,7 @@ impl App {
                     width,
                     height,
                     font_pixel_size: base_pixel_font_size,
+                    font_generation,
                     line_origin,
                     cursor_in_line,
                     cursor_world,
@@ -734,7 +748,7 @@ impl App {
             }
             AppState::Settings => {
                 self.status_text =
-                    "Assign fonts. Problem readings choose the script automatically.".to_string();
+                    "Assign fonts, font scales, and keyboard input handling.".to_string();
                 if !self.settings_picking_font {
                     // 設定項目選択モード: Up/Down で項目を移動
                     match event {
@@ -990,10 +1004,13 @@ mod tests {
             ui: font(),
             japanese: font(),
             japanese_ruby: font(),
+            japanese_unconfirmed: font(),
             chinese_simplified: font(),
             chinese_simplified_ruby: font(),
+            chinese_simplified_unconfirmed: font(),
             traditional_chinese: font(),
             traditional_chinese_ruby: font(),
+            traditional_chinese_unconfirmed: font(),
             english: font(),
         })
     }
@@ -1058,6 +1075,24 @@ mod tests {
             parser::parse_problem(get_problem_content(index))
                 .unwrap_or_else(|diagnostics| panic!("{name} should parse: {diagnostics}"));
         }
+    }
+
+    #[test]
+    fn ime_input_setting_defaults_disabled_and_toggles() {
+        let mut app = App::new(test_fonts());
+        app.state = AppState::Settings;
+
+        assert!(!app.accepts_ime_input());
+
+        app.selected_settings_item = SettingsItem::ImeInput;
+        app.on_event(AppEvent::Enter);
+        assert!(app.accepts_ime_input());
+
+        app.on_event(AppEvent::Char {
+            c: 'a',
+            timestamp: 1.0,
+        });
+        assert!(!app.accepts_ime_input());
     }
 
     #[test]

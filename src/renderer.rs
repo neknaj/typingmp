@@ -350,6 +350,7 @@ fn render_argb(
                 color,
             } => draw_aligned_text(
                 &mut frame,
+                fonts,
                 fonts.ui(),
                 text,
                 TextPlacement {
@@ -587,6 +588,7 @@ fn draw_text_if_visible<F: Font>(
 
 fn draw_aligned_text<F: Font>(
     frame: &mut PixelFrame<'_>,
+    fonts: &Fonts,
     font: &F,
     text: &str,
     placement: TextPlacement,
@@ -596,6 +598,7 @@ fn draw_aligned_text<F: Font>(
     let pixel_font_size =
         calculate_pixel_font_size(placement.font_size, frame.width(), frame.height())
             * frame.scale();
+    let pixel_font_size = fonts.scaled_size_for_ui(pixel_font_size);
     let metrics = cache.measure_text(font, text, pixel_font_size);
     let anchor_pos = ui::calculate_anchor_position(
         placement.anchor,
@@ -626,19 +629,15 @@ fn draw_typing_upper(
     let pixel_font_size =
         calculate_pixel_font_size(placement.text.font_size, frame.width(), frame.height())
             * frame.scale();
-    let ruby_pixel_font_size = pixel_font_size * 0.4;
     let segment_widths: Vec<u32> = segments
         .iter()
         .map(|segment| {
             let font = fonts.get_for_script(segment.script);
-            cache
-                .measure_text(font, &segment.base_text, pixel_font_size)
-                .width
+            let size = fonts.scaled_size_for_script(segment.script, pixel_font_size);
+            cache.measure_text(font, &segment.base_text, size).width
         })
         .collect();
-    let total_height = cache
-        .measure_text(fonts.primary(), " ", pixel_font_size)
-        .height;
+    let total_height = upper_typing_total_height(fonts, segments, pixel_font_size, cache);
     let anchor_pos = ui::calculate_anchor_position(
         placement.text.anchor,
         placement.text.shift,
@@ -656,6 +655,7 @@ fn draw_typing_upper(
     for (segment, segment_width) in segments.iter().zip(segment_widths.iter().copied()) {
         let color = upper_segment_color(segment.state);
         let font = fonts.get_for_script(segment.script);
+        let base_size = fonts.scaled_size_for_script(segment.script, pixel_font_size);
         let base_metrics = TextMetrics {
             width: segment_width,
             height: total_height,
@@ -665,13 +665,15 @@ fn draw_typing_upper(
             font,
             &segment.base_text,
             (pen_x as f32, y as f32),
-            pixel_font_size,
+            base_size,
             color,
             base_metrics,
         );
 
         if let Some(ruby) = &segment.ruby_text {
             let ruby_font = fonts.get_ruby_for_script(segment.script);
+            let ruby_pixel_font_size =
+                fonts.scaled_size_for_ruby_script(segment.script, pixel_font_size * 0.4);
             let ruby_metrics = cache.measure_text(ruby_font, ruby, ruby_pixel_font_size);
             let ruby_width = ruby_metrics.width;
             let ruby_x = pen_x as f32 + (segment_width as f32 - ruby_width as f32) / 2.0;
@@ -691,6 +693,39 @@ fn draw_typing_upper(
     }
 }
 
+fn upper_typing_total_height(
+    fonts: &Fonts,
+    segments: &[ui::UpperTypingSegment],
+    pixel_font_size: f32,
+    cache: &mut RenderCache,
+) -> u32 {
+    let fallback = cache
+        .measure_text(fonts.primary(), " ", pixel_font_size)
+        .height;
+    segments
+        .iter()
+        .map(|segment| {
+            let base_size = fonts.scaled_size_for_script(segment.script, pixel_font_size);
+            let ruby_size =
+                fonts.scaled_size_for_ruby_script(segment.script, pixel_font_size * 0.4);
+            let base_height = cache
+                .measure_text(fonts.get_for_script(segment.script), " ", base_size)
+                .height as f32;
+            let ruby_text = segment.ruby_text.as_deref().unwrap_or(" ");
+            let ruby_height = cache
+                .measure_text(
+                    fonts.get_ruby_for_script(segment.script),
+                    ruby_text,
+                    ruby_size,
+                )
+                .height as f32;
+            let ruby_y = -ruby_size * 0.5;
+            (-ruby_y + base_height.max(ruby_y + ruby_height)).ceil() as u32
+        })
+        .max()
+        .unwrap_or(fallback)
+}
+
 fn draw_typing_lower(
     frame: &mut PixelFrame<'_>,
     fonts: &Fonts,
@@ -701,10 +736,7 @@ fn draw_typing_lower(
     let pixel_font_size =
         calculate_pixel_font_size(placement.text.font_size, frame.width(), frame.height())
             * frame.scale();
-    let ruby_pixel_font_size = pixel_font_size * 0.3;
-    let total_height = cache
-        .measure_text(fonts.primary(), " ", pixel_font_size)
-        .height;
+    let total_height = lower_typing_total_height(fonts, segments, pixel_font_size, cache);
     let anchor_pos = ui::calculate_anchor_position(
         placement.text.anchor,
         placement.text.shift,
@@ -729,6 +761,7 @@ fn draw_typing_lower(
                 width: segment_width,
             } => {
                 let font = fonts.get_for_script(*script);
+                let base_size = fonts.scaled_size_for_script(*script, pixel_font_size);
                 let color = if *is_correct {
                     ui::CORRECT_COLOR
                 } else {
@@ -745,13 +778,15 @@ fn draw_typing_lower(
                         font,
                         base_text,
                         (pen_x as f32, y as f32),
-                        pixel_font_size,
+                        base_size,
                         color,
                         base_metrics,
                     );
 
                     if let Some(ruby) = ruby_text {
                         let ruby_font = fonts.get_ruby_for_script(*script);
+                        let ruby_pixel_font_size =
+                            fonts.scaled_size_for_ruby_script(*script, pixel_font_size * 0.3);
                         let ruby_metrics =
                             cache.measure_text(ruby_font, ruby, ruby_pixel_font_size);
                         if ruby_metrics.width > 0 {
@@ -776,8 +811,20 @@ fn draw_typing_lower(
                 for element in elements {
                     let (text, color, element_script) =
                         active_lower_text_and_color(element, *script);
-                    let font = fonts.get_for_script(element_script);
-                    let text_metrics = cache.measure_text(font, &text, pixel_font_size);
+                    let (font, size) = match element {
+                        ActiveLowerElement::UnconfirmedInput { .. } => (
+                            fonts.get_unconfirmed_for_script(element_script),
+                            fonts.scaled_size_for_unconfirmed_script(
+                                element_script,
+                                pixel_font_size,
+                            ),
+                        ),
+                        _ => (
+                            fonts.get_for_script(element_script),
+                            fonts.scaled_size_for_script(element_script, pixel_font_size),
+                        ),
+                    };
+                    let text_metrics = cache.measure_text(font, &text, size);
                     let text_width = text_metrics.width as i32;
                     if text_width > 0 {
                         draw_text_if_visible(
@@ -785,7 +832,7 @@ fn draw_typing_lower(
                             font,
                             &text,
                             (pen_x as f32, y as f32),
-                            pixel_font_size,
+                            size,
                             color,
                             text_metrics,
                         );
@@ -795,6 +842,55 @@ fn draw_typing_lower(
             }
         }
     }
+}
+
+fn lower_typing_total_height(
+    fonts: &Fonts,
+    segments: &[LowerTypingSegment],
+    pixel_font_size: f32,
+    cache: &mut RenderCache,
+) -> u32 {
+    let fallback = cache
+        .measure_text(fonts.primary(), " ", pixel_font_size)
+        .height;
+    segments
+        .iter()
+        .map(|segment| {
+            let script = match segment {
+                LowerTypingSegment::Completed { script, .. } => *script,
+                LowerTypingSegment::Active { script, .. } => *script,
+            };
+            let base_size = fonts.scaled_size_for_script(script, pixel_font_size);
+            let ruby_size = fonts.scaled_size_for_ruby_script(script, pixel_font_size * 0.3);
+            let mut base_height = cache
+                .measure_text(fonts.get_for_script(script), " ", base_size)
+                .height as f32;
+            let ruby_text = match segment {
+                LowerTypingSegment::Completed { ruby_text, .. } => {
+                    ruby_text.as_deref().unwrap_or(" ")
+                }
+                LowerTypingSegment::Active { .. } => " ",
+            };
+            let ruby_height = cache
+                .measure_text(fonts.get_ruby_for_script(script), ruby_text, ruby_size)
+                .height as f32;
+            if let LowerTypingSegment::Active { elements, .. } = segment {
+                for element in elements {
+                    if let ActiveLowerElement::UnconfirmedInput { text, script } = element {
+                        let size =
+                            fonts.scaled_size_for_unconfirmed_script(*script, pixel_font_size);
+                        let height = cache
+                            .measure_text(fonts.get_unconfirmed_for_script(*script), text, size)
+                            .height as f32;
+                        base_height = base_height.max(height);
+                    }
+                }
+            }
+            let ruby_y = -ruby_size * 0.5;
+            (-ruby_y + base_height.max(ruby_y + ruby_height)).ceil() as u32
+        })
+        .max()
+        .unwrap_or(fallback)
 }
 
 fn draw_progress_bar(
@@ -1314,10 +1410,13 @@ mod tests {
             ui: test_font(),
             japanese: test_font(),
             japanese_ruby: test_font(),
+            japanese_unconfirmed: test_font(),
             chinese_simplified: test_font(),
             chinese_simplified_ruby: test_font(),
+            chinese_simplified_unconfirmed: test_font(),
             traditional_chinese: test_font(),
             traditional_chinese_ruby: test_font(),
+            traditional_chinese_unconfirmed: test_font(),
             english: test_font(),
         })
     }

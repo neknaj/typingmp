@@ -201,6 +201,17 @@ pub fn has_wrong_input() -> bool {
     })
 }
 
+/// Returns whether the app should accept OS IME input events.
+#[wasm_bindgen]
+pub fn accepts_ime_input() -> bool {
+    APP_INSTANCE.with(|instance| {
+        instance
+            .borrow()
+            .as_ref()
+            .is_some_and(|app_rc| app_rc.borrow().accepts_ime_input())
+    })
+}
+
 /// ファイルダイアログ要求フラグを取り出す。
 /// JS 側がユーザージェスチャのコールスタック内でこれを呼び、
 /// true なら file input を click() する。
@@ -423,7 +434,7 @@ async fn start_async() -> Result<(), JsValue> {
         .dyn_into::<HtmlInputElement>()?;
     input_element.set_type("text");
     {
-        input_element.set_attribute("inputmode", "text")?;
+        input_element.set_attribute("inputmode", "none")?;
         input_element.set_attribute("autocapitalize", "off")?;
         input_element.set_attribute("autocorrect", "off")?;
         input_element.set_attribute("autocomplete", "off")?;
@@ -465,16 +476,25 @@ async fn start_async() -> Result<(), JsValue> {
     let japanese_ruby_font =
         FontVec::try_from_vec(fetch_font_bytes("./fonts/YujiSyuku-Regular.ttf").await?)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let japanese_unconfirmed_font =
+        FontVec::try_from_vec(fetch_font_bytes("./fonts/YujiSyuku-Regular.ttf").await?)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let simplified_chinese_font =
         FontVec::try_from_vec(fetch_font_bytes("./fonts/LongCang-Regular.ttf").await?)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let simplified_chinese_ruby_font =
         FontVec::try_from_vec(fetch_font_bytes("./fonts/Alegreya-VariableFont_wght.ttf").await?)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let simplified_chinese_unconfirmed_font =
+        FontVec::try_from_vec(fetch_font_bytes("./fonts/Alegreya-VariableFont_wght.ttf").await?)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let traditional_chinese_font =
         FontVec::try_from_vec(fetch_font_bytes("./fonts/LongCang-Regular.ttf").await?)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let traditional_chinese_ruby_font =
+        FontVec::try_from_vec(fetch_font_bytes("./fonts/Alegreya-VariableFont_wght.ttf").await?)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let traditional_chinese_unconfirmed_font =
         FontVec::try_from_vec(fetch_font_bytes("./fonts/Alegreya-VariableFont_wght.ttf").await?)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let english_font = FontVec::try_from_vec(fetch_font_bytes("./fonts/Kalam-Regular.ttf").await?)
@@ -484,10 +504,13 @@ async fn start_async() -> Result<(), JsValue> {
         ui: ui_font,
         japanese: japanese_font,
         japanese_ruby: japanese_ruby_font,
+        japanese_unconfirmed: japanese_unconfirmed_font,
         chinese_simplified: simplified_chinese_font,
         chinese_simplified_ruby: simplified_chinese_ruby_font,
+        chinese_simplified_unconfirmed: simplified_chinese_unconfirmed_font,
         traditional_chinese: traditional_chinese_font,
         traditional_chinese_ruby: traditional_chinese_ruby_font,
+        traditional_chinese_unconfirmed: traditional_chinese_unconfirmed_font,
         english: english_font,
     });
 
@@ -576,9 +599,12 @@ async fn start_async() -> Result<(), JsValue> {
 
     // canvasクリックでinput要素にフォーカスを当てるリスナー
     {
+        let app_clone = app.clone();
         let input_clone = input_element.clone();
         let closure = Closure::<dyn FnMut()>::new(move || {
-            let _ = input_clone.focus();
+            if app_clone.borrow().accepts_ime_input() {
+                let _ = input_clone.focus();
+            }
         });
         canvas.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref())?;
         closure.forget();
@@ -592,10 +618,13 @@ async fn start_async() -> Result<(), JsValue> {
         // pointerdown: 起点座標を保存し input にフォーカス
         {
             let touch_start_clone = touch_start.clone();
+            let app_clone = app.clone();
             let input_clone = input_element.clone();
             let closure = Closure::<dyn FnMut(_)>::new(move |e: PointerEvent| {
                 *touch_start_clone.borrow_mut() = Some((e.client_x() as f64, e.client_y() as f64));
-                let _ = input_clone.focus();
+                if app_clone.borrow().accepts_ime_input() {
+                    let _ = input_clone.focus();
+                }
             });
             canvas.add_event_listener_with_callback(
                 "pointerdown",
@@ -711,6 +740,40 @@ async fn start_async() -> Result<(), JsValue> {
                 if command == UiCommand::Enter && app_clone.borrow_mut().take_file_open_request() {
                     file_input_clone.click();
                 }
+                return;
+            }
+
+            if event.is_composing() || event.ctrl_key() || event.alt_key() || event.meta_key() {
+                return;
+            }
+
+            let key = event.key();
+            let mut chars = key.chars();
+            let Some(c) = chars.next() else {
+                return;
+            };
+            if chars.next().is_some() {
+                return;
+            }
+
+            let mut app = app_clone.borrow_mut();
+            if !app.accepts_ime_input() {
+                event.prevent_default();
+                app.on_event(AppEvent::Char {
+                    c,
+                    timestamp: crate::timestamp::now(),
+                });
+                if app.take_custom_problem_save_request() {
+                    if let Err(err) =
+                        WebCustomProblemStore.save_custom_problems(app.custom_problems())
+                    {
+                        report_provider_error(
+                            &mut app,
+                            "failed to save custom problems to localStorage",
+                            err,
+                        );
+                    }
+                }
             }
         });
         document.add_event_listener_with_callback("keydown", closure.as_ref().unchecked_ref())?;
@@ -732,6 +795,11 @@ async fn start_async() -> Result<(), JsValue> {
             ));
 
             event.prevent_default();
+
+            if !app_clone.borrow().accepts_ime_input() {
+                input_clone.set_value("");
+                return;
+            }
 
             // input要素の全内容(value)ではなく、イベントで追加された文字(data)のみを処理する
             if let Some(data) = event.data() {
@@ -883,7 +951,9 @@ async fn start_async() -> Result<(), JsValue> {
         let mut app_borrow_mut = app.borrow_mut();
         if app_borrow_mut.take_ime_reset_request() {
             let _ = ime_input_element.blur();
-            let _ = ime_input_element.focus();
+            if app_borrow_mut.accepts_ime_input() {
+                let _ = ime_input_element.focus();
+            }
         }
 
         schedule_next_frame(&f);

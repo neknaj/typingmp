@@ -15,12 +15,13 @@ use std::vec::Vec;
 use alloc::{
     format,
     string::{String, ToString},
-    vec,
 };
 #[cfg(not(feature = "uefi"))]
 use std::string::{String, ToString};
 
-use crate::app::{typing_line_scroll_offset, App, AppSnapshot, AppState, FontTarget, ScrollCache};
+use crate::app::{
+    typing_line_scroll_offset, App, AppSnapshot, AppState, FontTarget, ScrollCache, SettingsItem,
+};
 use crate::font::{
     plain_text_script_runs, script_for_segment, scripts_for_line, segment_script_runs, FontScript,
     Fonts,
@@ -103,6 +104,12 @@ pub struct UpperTypingSegment {
     pub anno_text: Option<String>,
     pub script: FontScript,
     pub state: UpperSegmentState,
+}
+
+#[derive(Clone, Copy)]
+enum UpperRubyDisplay {
+    InputKeys,
+    Presentation,
 }
 
 pub enum ActiveLowerElement {
@@ -262,7 +269,8 @@ const TYPING_CONTEXT_FONT_SIZE_RATIO: f32 = 0.06;
 const TYPING_CORE_CENTER_RATIO: f32 = 0.51;
 const TYPING_CORE_MIN_GAP_RATIO: f32 = 0.012;
 const TYPING_FLOAT_TOP_MARGIN_RATIO: f32 = 0.035;
-const TYPING_FLOAT_MIN_GAP_RATIO: f32 = 0.008;
+const TYPING_FLOAT_MIN_GAP_RATIO: f32 = 0.012;
+const TYPING_PREVIOUS_CONTEXT_ROUNDING_GUARD_PX: f32 = 12.0;
 const TYPING_NEXT_CONTEXT_BOTTOM_LIMIT_RATIO: f32 = 0.9;
 
 pub const CORRECT_COLOR: u32 = 0xFF_9097FF;
@@ -327,20 +335,27 @@ fn upper_typing_vertical_metrics(
     fonts: &Fonts,
     pixel_font_size: f32,
 ) -> TypingLineVerticalMetrics {
-    let ruby_pixel_font_size = pixel_font_size * 0.4;
-    let base_height = gui_renderer::measure_text(fonts.primary(), " ", pixel_font_size).1 as f32;
+    let fallback_base_height =
+        gui_renderer::measure_text(fonts.primary(), " ", pixel_font_size).1 as f32;
+    let mut base_height = fallback_base_height;
     let mut top_extra = 0.0_f32;
     let mut bottom_extra = 0.0_f32;
 
     for segment in segments {
-        if let Some(ruby) = &segment.ruby_text {
-            let ruby_font = fonts.get_ruby_for_script(segment.script);
-            let ruby_height =
-                gui_renderer::measure_text(ruby_font, ruby, ruby_pixel_font_size).1 as f32;
-            let ruby_y = -ruby_pixel_font_size * 0.5;
-            top_extra = top_extra.max(-ruby_y);
-            bottom_extra = bottom_extra.max((ruby_y + ruby_height - base_height).max(0.0));
-        }
+        let base_size = fonts.scaled_size_for_script(segment.script, pixel_font_size);
+        let ruby_pixel_font_size =
+            fonts.scaled_size_for_ruby_script(segment.script, pixel_font_size * 0.4);
+        let base_font = fonts.get_for_script(segment.script);
+        let ruby_font = fonts.get_ruby_for_script(segment.script);
+        let segment_base_height = gui_renderer::measure_text(base_font, " ", base_size).1 as f32;
+        let ruby_measure_text = segment.ruby_text.as_deref().unwrap_or(" ");
+        let ruby_height =
+            gui_renderer::measure_text(ruby_font, ruby_measure_text, ruby_pixel_font_size).1 as f32;
+        let ruby_y = -ruby_pixel_font_size * 0.5;
+
+        base_height = base_height.max(segment_base_height);
+        top_extra = top_extra.max(-ruby_y);
+        bottom_extra = bottom_extra.max((ruby_y + ruby_height - segment_base_height).max(0.0));
     }
 
     TypingLineVerticalMetrics {
@@ -355,24 +370,43 @@ fn lower_typing_vertical_metrics(
     fonts: &Fonts,
     pixel_font_size: f32,
 ) -> TypingLineVerticalMetrics {
-    let ruby_pixel_font_size = pixel_font_size * 0.3;
-    let base_height = gui_renderer::measure_text(fonts.primary(), " ", pixel_font_size).1 as f32;
+    let fallback_base_height =
+        gui_renderer::measure_text(fonts.primary(), " ", pixel_font_size).1 as f32;
+    let mut base_height = fallback_base_height;
     let mut top_extra = 0.0_f32;
     let mut bottom_extra = 0.0_f32;
 
     for segment in segments {
-        if let LowerTypingSegment::Completed {
-            ruby_text: Some(ruby),
-            script,
-            ..
-        } = segment
-        {
-            let ruby_font = fonts.get_ruby_for_script(*script);
-            let ruby_height =
-                gui_renderer::measure_text(ruby_font, ruby, ruby_pixel_font_size).1 as f32;
-            let ruby_y = -ruby_pixel_font_size * 0.5;
-            top_extra = top_extra.max(-ruby_y);
-            bottom_extra = bottom_extra.max((ruby_y + ruby_height - base_height).max(0.0));
+        let script = match segment {
+            LowerTypingSegment::Completed { script, .. } => *script,
+            LowerTypingSegment::Active { script, .. } => *script,
+        };
+        let base_size = fonts.scaled_size_for_script(script, pixel_font_size);
+        let ruby_pixel_font_size = fonts.scaled_size_for_ruby_script(script, pixel_font_size * 0.3);
+        let base_font = fonts.get_for_script(script);
+        let ruby_font = fonts.get_ruby_for_script(script);
+        let segment_base_height = gui_renderer::measure_text(base_font, " ", base_size).1 as f32;
+        let ruby_measure_text = match segment {
+            LowerTypingSegment::Completed { ruby_text, .. } => ruby_text.as_deref().unwrap_or(" "),
+            LowerTypingSegment::Active { .. } => " ",
+        };
+        let ruby_height =
+            gui_renderer::measure_text(ruby_font, ruby_measure_text, ruby_pixel_font_size).1 as f32;
+        let ruby_y = -ruby_pixel_font_size * 0.5;
+
+        base_height = base_height.max(segment_base_height);
+        top_extra = top_extra.max(-ruby_y);
+        bottom_extra = bottom_extra.max((ruby_y + ruby_height - segment_base_height).max(0.0));
+
+        if let LowerTypingSegment::Active { elements, .. } = segment {
+            for element in elements {
+                if let ActiveLowerElement::UnconfirmedInput { text, script } = element {
+                    let size = fonts.scaled_size_for_unconfirmed_script(*script, pixel_font_size);
+                    let font = fonts.get_unconfirmed_for_script(*script);
+                    let height = gui_renderer::measure_text(font, text, size).1 as f32;
+                    base_height = base_height.max(height);
+                }
+            }
         }
     }
 
@@ -439,7 +473,15 @@ pub fn build_ui(app: &App, fonts: &Fonts, width: usize, height: usize) -> Vec<Re
             build_problem_source_ui(app, snapshot, &mut render_list, menu_gradient)
         }
         AppState::Result => build_result_ui(app, &mut render_list, result_gradient),
-        AppState::Settings => build_settings_ui(app, snapshot, &mut render_list, settings_gradient),
+        AppState::Settings => build_settings_ui(
+            app,
+            snapshot,
+            &mut render_list,
+            settings_gradient,
+            fonts,
+            width,
+            height,
+        ),
         AppState::HowToUse => build_how_to_use_ui(snapshot, &mut render_list, menu_gradient),
     }
 
@@ -561,6 +603,9 @@ fn build_settings_ui(
     snapshot: AppSnapshot<'_>,
     render_list: &mut Vec<Renderable>,
     gradient: Gradient,
+    fonts: &Fonts,
+    width: usize,
+    height: usize,
 ) {
     render_list.push(Renderable::Background { gradient });
     render_list.push(Renderable::BigText {
@@ -590,6 +635,17 @@ fn build_settings_ui(
     let row_step = (0.062 * scale).clamp(0.058, 0.14);
     let list_y_start = 0.29;
     let list_y_end = 0.84;
+    let cell_font_size = FontSize::WindowHeight(0.042);
+    let cell_pixel_font_size = fonts.scaled_size_for_ui(
+        calculate_pixel_font_size(cell_font_size, width, height)
+            * snapshot.display_settings.scale.multiplier(),
+    );
+    let label_x = settings_cell_left_x(width, -0.35);
+    let value_x = settings_cell_left_x(width, 0.05);
+    let action_x = settings_cell_left_x(width, 0.36);
+    let label_max_width = (value_x - label_x - 8.0).max(24.0);
+    let value_max_width = (action_x - value_x - 8.0).max(24.0);
+    let action_max_width = (width as f32 * 0.98 - action_x).max(24.0);
     let list_capacity = (((list_y_end - list_y_start) / row_step).floor() as usize)
         .max(1)
         .min(total_rows);
@@ -634,9 +690,27 @@ fn build_settings_ui(
         let marker = if is_selected { ">" } else { " " };
 
         render_settings_cell(render_list, marker.to_string(), -0.43, y, color);
-        render_settings_cell(render_list, row.label.clone(), -0.35, y, color);
-        render_settings_cell(render_list, fit_table_text(&row.value, 25), -0.03, y, color);
-        render_settings_cell(render_list, row.action.to_string(), 0.34, y, action_color);
+        render_settings_cell(
+            render_list,
+            fit_table_text_to_width(&row.label, label_max_width, fonts, cell_pixel_font_size),
+            -0.35,
+            y,
+            color,
+        );
+        render_settings_cell(
+            render_list,
+            fit_table_text_to_width(&row.value, value_max_width, fonts, cell_pixel_font_size),
+            0.05,
+            y,
+            color,
+        );
+        render_settings_cell(
+            render_list,
+            fit_table_text_to_width(row.action, action_max_width, fonts, cell_pixel_font_size),
+            0.36,
+            y,
+            action_color,
+        );
     }
 
     if end_index < total_rows {
@@ -664,42 +738,48 @@ struct SettingsTableRow {
 }
 
 fn settings_table_rows(app: &App, snapshot: AppSnapshot<'_>) -> Vec<SettingsTableRow> {
-    vec![
-        font_setting_row(app.fonts(), FontTarget::Ui),
-        font_setting_row(app.fonts(), FontTarget::Script(FontScript::Japanese)),
-        font_setting_row(app.fonts(), FontTarget::Ruby(FontScript::Japanese)),
-        font_setting_row(
-            app.fonts(),
-            FontTarget::Script(FontScript::ChineseSimplified),
-        ),
-        font_setting_row(app.fonts(), FontTarget::Ruby(FontScript::ChineseSimplified)),
-        font_setting_row(
-            app.fonts(),
-            FontTarget::Script(FontScript::TraditionalChinese),
-        ),
-        font_setting_row(
-            app.fonts(),
-            FontTarget::Ruby(FontScript::TraditionalChinese),
-        ),
-        font_setting_row(app.fonts(), FontTarget::Script(FontScript::English)),
-        SettingsTableRow {
+    SettingsItem::all()
+        .iter()
+        .map(|item| settings_table_row(app, snapshot, *item))
+        .collect()
+}
+
+fn settings_table_row(
+    app: &App,
+    snapshot: AppSnapshot<'_>,
+    item: SettingsItem,
+) -> SettingsTableRow {
+    match item {
+        SettingsItem::FontFamily(target) => SettingsTableRow {
+            label: target.settings_label().to_string(),
+            value: app.fonts().name_for_target(target).to_string(),
+            action: "assign",
+        },
+        SettingsItem::FontScale(target) => SettingsTableRow {
+            label: target.scale_settings_label().to_string(),
+            value: app.fonts().scale_for_target(target).label().to_string(),
+            action: "cycle",
+        },
+        SettingsItem::AspectRatio => SettingsTableRow {
             label: "Aspect Ratio".to_string(),
             value: snapshot.display_settings.aspect_ratio.label().to_string(),
             action: "cycle",
         },
-        SettingsTableRow {
+        SettingsItem::DisplayScale => SettingsTableRow {
             label: "Display Scale".to_string(),
             value: snapshot.display_settings.scale.label().to_string(),
             action: "cycle",
         },
-    ]
-}
-
-fn font_setting_row(fonts: &Fonts, target: FontTarget) -> SettingsTableRow {
-    SettingsTableRow {
-        label: target.settings_label().to_string(),
-        value: fonts.name_for_target(target).to_string(),
-        action: "assign",
+        SettingsItem::ImeInput => SettingsTableRow {
+            label: "IME Input".to_string(),
+            value: if app.accepts_ime_input() {
+                "Enabled"
+            } else {
+                "Disabled"
+            }
+            .to_string(),
+            action: "cycle",
+        },
     }
 }
 
@@ -723,16 +803,38 @@ fn render_settings_cell(
     });
 }
 
-fn fit_table_text(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
+fn settings_cell_left_x(width: usize, shift_x: f32) -> f32 {
+    width as f32 * (0.5 + shift_x)
+}
+
+fn fit_table_text_to_width(
+    text: &str,
+    max_width: f32,
+    fonts: &Fonts,
+    pixel_font_size: f32,
+) -> String {
+    if gui_renderer::measure_text(fonts.ui(), text, pixel_font_size).0 as f32 <= max_width {
         return text.to_string();
     }
 
-    let mut result = text
-        .chars()
-        .take(max_chars.saturating_sub(3))
-        .collect::<String>();
-    result.push_str("...");
+    let ellipsis = "...";
+    let ellipsis_width = gui_renderer::measure_text(fonts.ui(), ellipsis, pixel_font_size).0 as f32;
+    if ellipsis_width > max_width {
+        return String::new();
+    }
+
+    let mut result = String::new();
+    for character in text.chars() {
+        let mut candidate = result.clone();
+        candidate.push(character);
+        candidate.push_str(ellipsis);
+        if gui_renderer::measure_text(fonts.ui(), &candidate, pixel_font_size).0 as f32 > max_width
+        {
+            break;
+        }
+        result.push(character);
+    }
+    result.push_str(ellipsis);
     result
 }
 
@@ -895,6 +997,7 @@ fn build_problem_selection_ui(
                 } else {
                     UpperSegmentState::Pending
                 },
+                UpperRubyDisplay::Presentation,
             );
             if !title_segments.is_empty() {
                 render_list.push(Renderable::TypingUpper {
@@ -1287,20 +1390,50 @@ fn segment_display_runs(
     }])
 }
 
-fn push_upper_typing_segment(
-    segments: &mut Vec<UpperTypingSegment>,
-    source_segment: &Segment,
+fn presentation_ruby_text(ruby_text: Option<String>, script: FontScript) -> Option<String> {
+    let ruby_text = ruby_text?;
+    if matches!(
+        script,
+        FontScript::ChineseSimplified | FontScript::TraditionalChinese
+    ) {
+        return pinyin::numbered_pinyin_to_tone_marks(&ruby_text).or(Some(ruby_text));
+    }
+    Some(ruby_text)
+}
+
+struct UpperTypingSegmentInput<'a> {
+    source_segment: &'a Segment,
     base_text: String,
     ruby_text: Option<String>,
     anno_text: Option<String>,
     script: FontScript,
     state: UpperSegmentState,
+    ruby_display: UpperRubyDisplay,
+}
+
+fn push_upper_typing_segment(
+    segments: &mut Vec<UpperTypingSegment>,
+    input: UpperTypingSegmentInput<'_>,
 ) {
+    let UpperTypingSegmentInput {
+        source_segment,
+        base_text,
+        ruby_text,
+        anno_text,
+        script,
+        state,
+        ruby_display,
+    } = input;
+
     if matches!(source_segment, Segment::Plain { .. } | Segment::Anno { .. }) {
         for run in segment_display_runs(source_segment, &base_text, ruby_text, script) {
+            let ruby_text = match ruby_display {
+                UpperRubyDisplay::InputKeys => run.ruby_text,
+                UpperRubyDisplay::Presentation => presentation_ruby_text(run.ruby_text, run.script),
+            };
             segments.push(UpperTypingSegment {
                 base_text: run.base_text,
-                ruby_text: run.ruby_text,
+                ruby_text,
                 anno_text: None,
                 script: run.script,
                 state,
@@ -1309,6 +1442,10 @@ fn push_upper_typing_segment(
         return;
     }
 
+    let ruby_text = match ruby_display {
+        UpperRubyDisplay::InputKeys => ruby_text,
+        UpperRubyDisplay::Presentation => presentation_ruby_text(ruby_text, script),
+    };
     segments.push(UpperTypingSegment {
         base_text,
         ruby_text,
@@ -1321,6 +1458,7 @@ fn push_upper_typing_segment(
 fn upper_segments_for_line(
     line: &crate::model::Line,
     state: UpperSegmentState,
+    ruby_display: UpperRubyDisplay,
 ) -> Vec<UpperTypingSegment> {
     let line_scripts = scripts_for_line(line);
     let mut segments = Vec::new();
@@ -1336,12 +1474,15 @@ fn upper_segments_for_line(
             let (base_text, ruby_text, anno_text) = segment_display_parts(segment);
             push_upper_typing_segment(
                 &mut segments,
-                segment,
-                base_text,
-                ruby_text,
-                anno_text,
-                segment_script,
-                state,
+                UpperTypingSegmentInput {
+                    source_segment: segment,
+                    base_text,
+                    ruby_text,
+                    anno_text,
+                    script: segment_script,
+                    state,
+                    ruby_display,
+                },
             );
         }
     }
@@ -1360,10 +1501,11 @@ fn push_lower_completed_segments(
     let (base_text, ruby_text, script) = display;
     if matches!(source_segment, Segment::Plain { .. } | Segment::Anno { .. }) {
         for run in segment_display_runs(source_segment, &base_text, ruby_text, script) {
+            let run_font_size = fonts.scaled_size_for_script(run.script, font_size);
             let width = gui_renderer::measure_text(
                 fonts.get_for_script(run.script),
                 &run.base_text,
-                font_size,
+                run_font_size,
             )
             .0;
             segments.push(LowerTypingSegment::Completed {
@@ -1377,7 +1519,12 @@ fn push_lower_completed_segments(
         return;
     }
 
-    let width = gui_renderer::measure_text(fonts.get_for_script(script), &base_text, font_size).0;
+    let width = gui_renderer::measure_text(
+        fonts.get_for_script(script),
+        &base_text,
+        fonts.scaled_size_for_script(script, font_size),
+    )
+    .0;
     segments.push(LowerTypingSegment::Completed {
         base_text,
         ruby_text: lower_completed_ruby_text(ruby_text, script),
@@ -1404,6 +1551,15 @@ fn push_unconfirmed_input_elements(
     text: String,
     context: FontScript,
 ) {
+    let text = if matches!(
+        context,
+        FontScript::ChineseSimplified | FontScript::TraditionalChinese
+    ) {
+        pinyin::numbered_pinyin_to_tone_marks(&text).unwrap_or(text)
+    } else {
+        text
+    };
+
     if matches!(source_segment, Segment::Plain { .. }) && context == FontScript::English {
         for run in plain_base_runs(&text, context) {
             elements.push(ActiveLowerElement::UnconfirmedInput {
@@ -1443,10 +1599,11 @@ fn measure_line_base_width(line: &crate::model::Line, fonts: &Fonts, font_size: 
                 .unwrap_or_else(|| script_for_segment(segment));
             segment_index += 1;
             for run in segment_display_runs(segment, &text, None, script) {
+                let run_font_size = fonts.scaled_size_for_script(run.script, font_size);
                 total += gui_renderer::measure_text(
                     fonts.get_for_script(run.script),
                     &run.base_text,
-                    font_size,
+                    run_font_size,
                 )
                 .0;
             }
@@ -1570,8 +1727,11 @@ fn build_typing_ui(
         let title_font_size = FontSize::WindowHeight(TYPING_TITLE_FONT_SIZE_RATIO);
         let title_pixel_font_size = calculate_pixel_font_size(title_font_size, width, height)
             * app.display_settings().scale.multiplier();
-        let title_segments =
-            upper_segments_for_line(&model.content.title, UpperSegmentState::Active);
+        let title_segments = upper_segments_for_line(
+            &model.content.title,
+            UpperSegmentState::Active,
+            UpperRubyDisplay::Presentation,
+        );
         let title_line_width =
             measure_line_base_width(&model.content.title, fonts, title_pixel_font_size);
         let title_vertical_metrics =
@@ -1734,12 +1894,15 @@ fn build_typing_ui(
                 }
                 push_upper_typing_segment(
                     &mut upper_segments,
-                    seg,
-                    base_text,
-                    ruby_text,
-                    anno_text,
-                    segment_script,
-                    state,
+                    UpperTypingSegmentInput {
+                        source_segment: seg,
+                        base_text,
+                        ruby_text,
+                        anno_text,
+                        script: segment_script,
+                        state,
+                        ruby_display: UpperRubyDisplay::InputKeys,
+                    },
                 );
             }
         }
@@ -1816,10 +1979,12 @@ fn build_typing_ui(
                         });
                     } else {
                         for run in &cache_seg.display_runs {
+                            let run_font_size =
+                                fonts.scaled_size_for_script(run.script, base_pixel_font_size);
                             let width = gui_renderer::measure_text(
                                 fonts.get_for_script(run.script),
                                 &run.base_text,
-                                base_pixel_font_size,
+                                run_font_size,
                             )
                             .0;
                             lower_segments.push(LowerTypingSegment::Completed {
@@ -2034,10 +2199,17 @@ fn build_typing_ui(
         if previous_line_to_display >= 0 {
             let line_idx_context = previous_line_to_display as usize;
             if let Some(context_line) = model.content.lines.get(line_idx_context) {
-                let segments = upper_segments_for_line(context_line, UpperSegmentState::Muted);
+                let segments = upper_segments_for_line(
+                    context_line,
+                    UpperSegmentState::Muted,
+                    UpperRubyDisplay::Presentation,
+                );
                 let metrics =
                     upper_typing_vertical_metrics(&segments, fonts, context_pixel_font_size);
-                let top = core_layout.top - float_gap - metrics.total_height();
+                let top = core_layout.top
+                    - float_gap
+                    - metrics.total_height()
+                    - TYPING_PREVIOUS_CONTEXT_ROUNDING_GUARD_PX;
                 if top >= top_margin {
                     previous_context_top = Some(top);
                     previous_context_renderable = Some(Renderable::TypingUpper {
@@ -2063,9 +2235,10 @@ fn build_typing_ui(
         }
 
         if !title_segments.is_empty() {
-            let title_top = top_margin;
             let title_limit = previous_context_top.unwrap_or(core_layout.top);
-            if title_top + title_vertical_metrics.total_height() + float_gap <= title_limit {
+            let title_height = title_vertical_metrics.total_height();
+            let title_top = top_margin.min(title_limit - title_height - 4.0).max(0.0);
+            if title_top + title_height + 4.0 <= title_limit {
                 render_list.push(Renderable::TypingUpper {
                     segments: title_segments,
                     anchor: Anchor::TopCenter,
@@ -2123,7 +2296,11 @@ fn build_typing_ui(
 
         let next_line_to_display = model.status.line.get() + 1;
         if let Some(context_line) = model.content.lines.get(next_line_to_display) {
-            let segments = upper_segments_for_line(context_line, UpperSegmentState::Muted);
+            let segments = upper_segments_for_line(
+                context_line,
+                UpperSegmentState::Muted,
+                UpperRubyDisplay::Presentation,
+            );
             let metrics = upper_typing_vertical_metrics(&segments, fonts, context_pixel_font_size);
             let top = core_layout.bottom + float_gap;
             if top + metrics.total_height()
@@ -2295,7 +2472,7 @@ pub fn calculate_aligned_position(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{App, AppEvent, FontBundle, Fonts, SettingsItem};
+    use crate::app::{App, AppEvent, FontBundle, FontTarget, Fonts, SettingsItem};
     use crate::display::DisplayScale;
     use crate::font::FontScript;
     use crate::io::{FontAssetId, FontEntry, FontSource};
@@ -2311,10 +2488,13 @@ mod tests {
             ui: font(),
             japanese: font(),
             japanese_ruby: font(),
+            japanese_unconfirmed: font(),
             chinese_simplified: font(),
             chinese_simplified_ruby: font(),
+            chinese_simplified_unconfirmed: font(),
             traditional_chinese: font(),
             traditional_chinese_ruby: font(),
+            traditional_chinese_unconfirmed: font(),
             english: font(),
         })
     }
@@ -2411,6 +2591,10 @@ mod tests {
             .collect()
     }
 
+    fn texts_have_prefix(texts: &[&str], prefix: &str) -> bool {
+        texts.iter().any(|text| text.starts_with(prefix))
+    }
+
     fn title_segments(render_list: &[Renderable]) -> &[UpperTypingSegment] {
         render_list
             .iter()
@@ -2489,8 +2673,8 @@ mod tests {
         };
 
         let pixel_font_size = calculate_pixel_font_size(*font_size, width, height) * display_scale;
-        let ruby_pixel_font_size = pixel_font_size * 0.4;
-        let total_height = gui_renderer::measure_text(fonts.primary(), " ", pixel_font_size).1;
+        let metrics = upper_typing_vertical_metrics(segments, fonts, pixel_font_size);
+        let total_height = metrics.total_height().ceil() as u32;
         let anchor_pos = calculate_anchor_position(*anchor, *shift, width, height);
         let (_, y) = calculate_aligned_position(
             anchor_pos,
@@ -2498,19 +2682,9 @@ mod tests {
             total_height,
             *align,
         );
-        let mut top = y as f32;
-        let mut bottom = y as f32 + total_height as f32;
-
-        for segment in segments {
-            if let Some(ruby) = &segment.ruby_text {
-                let ruby_font = fonts.get_ruby_for_script(segment.script);
-                let ruby_height =
-                    gui_renderer::measure_text(ruby_font, ruby, ruby_pixel_font_size).1 as f32;
-                let ruby_y = y as f32 - ruby_pixel_font_size * 0.5;
-                top = top.min(ruby_y);
-                bottom = bottom.max(ruby_y + ruby_height);
-            }
-        }
+        let base_y = y as f32;
+        let top = base_y - metrics.top_extra;
+        let bottom = base_y + metrics.base_height + metrics.bottom_extra;
 
         Some(VerticalTextBox { name, top, bottom })
     }
@@ -2536,8 +2710,8 @@ mod tests {
         };
 
         let pixel_font_size = calculate_pixel_font_size(*font_size, width, height) * display_scale;
-        let ruby_pixel_font_size = pixel_font_size * 0.3;
-        let total_height = gui_renderer::measure_text(fonts.primary(), " ", pixel_font_size).1;
+        let metrics = lower_typing_vertical_metrics(segments, fonts, pixel_font_size);
+        let total_height = metrics.total_height().ceil() as u32;
         let anchor_pos = calculate_anchor_position(*anchor, *shift, width, height);
         let (_, y) = calculate_aligned_position(
             anchor_pos,
@@ -2545,24 +2719,9 @@ mod tests {
             total_height,
             *align,
         );
-        let mut top = y as f32;
-        let mut bottom = y as f32 + total_height as f32;
-
-        for segment in segments {
-            if let LowerTypingSegment::Completed {
-                ruby_text: Some(ruby),
-                script,
-                ..
-            } = segment
-            {
-                let ruby_font = fonts.get_ruby_for_script(*script);
-                let ruby_height =
-                    gui_renderer::measure_text(ruby_font, ruby, ruby_pixel_font_size).1 as f32;
-                let ruby_y = y as f32 - ruby_pixel_font_size * 0.5;
-                top = top.min(ruby_y);
-                bottom = bottom.max(ruby_y + ruby_height);
-            }
-        }
+        let base_y = y as f32;
+        let top = base_y - metrics.top_extra;
+        let bottom = base_y + metrics.base_height + metrics.bottom_extra;
 
         Some(VerticalTextBox { name, top, bottom })
     }
@@ -2792,14 +2951,53 @@ mod tests {
 
     #[test]
     fn typing_title_preserves_ruby_base_and_script() {
-        let app = typing_app("#title [春晓/chun1xiao3]\n[春眠/chun1mian2]");
+        let app = typing_app("#title [\u{6625}\u{6653}/chun1xiao3]\n[\u{6625}\u{7720}/chun1mian2]");
 
         let render_list = build_ui(&app, app.fonts(), 800, 500);
         let title = title_segments(&render_list);
 
-        assert_eq!(title[0].base_text, "春晓");
-        assert_eq!(title[0].ruby_text.as_deref(), Some("chun1xiao3"));
+        assert_eq!(title[0].base_text, "\u{6625}\u{6653}");
+        assert_eq!(
+            title[0].ruby_text.as_deref(),
+            Some("ch\u{016b}nxi\u{01ce}o")
+        );
         assert_eq!(title[0].script, FontScript::ChineseSimplified);
+    }
+
+    #[test]
+    fn active_chinese_upper_keeps_numbered_pinyin_keys() {
+        let app = typing_app("#title Test\n[\u{6709}/you3]");
+
+        let render_list = build_ui(&app, app.fonts(), 800, 500);
+        let (upper_segments, _) = typing_rows(&render_list);
+
+        assert_eq!(upper_segments[0].base_text, "\u{6709}");
+        assert_eq!(upper_segments[0].ruby_text.as_deref(), Some("you3"));
+        assert_eq!(upper_segments[0].script, FontScript::ChineseSimplified);
+    }
+
+    #[test]
+    fn unconfirmed_chinese_pinyin_feedback_uses_tone_marks() {
+        let segment = Segment::Annotated {
+            base: "\u{6709}".to_string(),
+            reading: "you3".to_string(),
+        };
+        let mut elements = Vec::new();
+
+        push_unconfirmed_input_elements(
+            &mut elements,
+            &segment,
+            "you3".to_string(),
+            FontScript::ChineseSimplified,
+        );
+
+        match elements.as_slice() {
+            [ActiveLowerElement::UnconfirmedInput { text, script }] => {
+                assert_eq!(text, "y\u{01d2}u");
+                assert_eq!(*script, FontScript::ChineseSimplified);
+            }
+            _ => panic!("Chinese unconfirmed feedback should be a tone-marked Chinese run"),
+        }
     }
 
     #[test]
@@ -2890,7 +3088,10 @@ mod tests {
             .expect("problem menu title should render through TypingUpper");
 
         assert_eq!(menu_title[0].base_text, "\u{6625}\u{6653}");
-        assert_eq!(menu_title[0].ruby_text.as_deref(), Some("chun1xiao3"));
+        assert_eq!(
+            menu_title[0].ruby_text.as_deref(),
+            Some("ch\u{016b}nxi\u{01ce}o")
+        );
         assert_eq!(menu_title[0].script, FontScript::ChineseSimplified);
         assert!(!render_texts(&render_list)
             .iter()
@@ -3050,12 +3251,32 @@ mod tests {
         let render_list = build_ui(&app, app.fonts(), 320, 240);
         let texts = render_texts(&render_list);
         assert!(texts.contains(&"UI Font"));
-        assert!(texts.contains(&"Simplified Chinese Font"));
-        assert!(texts.contains(&"Simplified Chinese Ruby Font"));
-        assert!(texts.contains(&"Traditional Chinese Font"));
-        assert!(texts.contains(&"Traditional Chinese Ruby Font"));
         assert!(texts.contains(&"Japanese Ruby Font"));
+        assert!(texts_have_prefix(&texts, "Japanese Unconfirmed"));
+        assert!(texts.contains(&"UI Font Scale"));
         assert!(!texts.contains(&"Chinese Simplified Font"));
+
+        app.selected_settings_item =
+            SettingsItem::FontFamily(FontTarget::Unconfirmed(FontScript::ChineseSimplified));
+        let render_list = build_ui(&app, app.fonts(), 320, 240);
+        let texts = render_texts(&render_list);
+        assert!(texts.contains(&"Simplified Chinese Font"));
+        assert!(texts_have_prefix(&texts, "Simplified Chinese Ruby"));
+        assert!(texts_have_prefix(&texts, "Simplified Chinese Unco"));
+
+        app.selected_settings_item =
+            SettingsItem::FontFamily(FontTarget::Unconfirmed(FontScript::TraditionalChinese));
+        let render_list = build_ui(&app, app.fonts(), 320, 240);
+        let texts = render_texts(&render_list);
+        assert!(texts.contains(&"Traditional Chinese Font"));
+        assert!(texts_have_prefix(&texts, "Traditional Chinese Ru"));
+        assert!(texts_have_prefix(&texts, "Traditional Chinese Un"));
+
+        app.selected_settings_item = SettingsItem::ImeInput;
+        let render_list = build_ui(&app, app.fonts(), 320, 240);
+        let texts = render_texts(&render_list);
+        assert!(texts.contains(&"IME Input"));
+        assert!(texts.contains(&"Disabled"));
 
         app.selected_settings_item = SettingsItem::DisplayScale;
         app.display_settings.scale = DisplayScale::Percent200;

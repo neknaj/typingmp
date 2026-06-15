@@ -300,6 +300,7 @@
             send_char,
             is_typing_active,
             has_wrong_input,
+            accepts_ime_input,
             screen_keyboard_layout,
             screen_keyboard_resolve,
             screen_keyboard_next_layout,
@@ -329,6 +330,7 @@
         let hiddenInput = null;
         let lastScreenKeyboardText = null;
         let lastScreenKeyboardAccepted = false;
+        let lastAcceptImeInput = null;
 
         const resetScreenKeyboardState = () => {
             lastScreenKeyboardText = null;
@@ -359,9 +361,14 @@
         };
 
         const updateKeyboardSourceButtons = () => {
+            const allowDeviceKeyboard = accepts_ime_input();
+            if (!allowDeviceKeyboard) {
+                useAppKeyboard = true;
+            }
+
             if (hiddenInput) {
                 const isTouch = navigator.maxTouchPoints > 0;
-                if (useAppKeyboard && isTouch) {
+                if (!allowDeviceKeyboard || (useAppKeyboard && isTouch)) {
                     hiddenInput.setAttribute('inputmode', 'none');
                     hiddenInput.blur();
                 } else {
@@ -373,20 +380,37 @@
             if (btnCtrl) {
                 btnCtrl.textContent = useAppKeyboard ? '⌨アプリ' : '⌨OS';
                 btnCtrl.style.borderColor = useAppKeyboard ? '#44aa66' : '#446';
+                btnCtrl.disabled = !allowDeviceKeyboard;
+                btnCtrl.style.opacity = allowDeviceKeyboard ? '1' : '0.55';
             }
 
             const btnScreen = document.getElementById('screen-keyboard-source-toggle');
             if (btnScreen) {
                 btnScreen.textContent = useAppKeyboard ? '⌨OS' : '⌨アプリ';
                 btnScreen.classList.toggle('source-app', useAppKeyboard);
+                btnScreen.disabled = !allowDeviceKeyboard;
+                btnScreen.style.opacity = allowDeviceKeyboard ? '1' : '0.55';
             }
 
             writeStorageItem(LS_KB_KEY, useAppKeyboard ? 'app' : 'device');
         };
 
         const toggleKeyboardSource = () => {
+            if (!accepts_ime_input()) {
+                useAppKeyboard = true;
+                updateKeyboardSourceButtons();
+                return;
+            }
             useAppKeyboard = !useAppKeyboard;
             updateKeyboardSourceButtons();
+        };
+
+        const syncKeyboardInputPolicy = () => {
+            const acceptImeInput = accepts_ime_input();
+            if (acceptImeInput !== lastAcceptImeInput) {
+                lastAcceptImeInput = acceptImeInput;
+                updateKeyboardSourceButtons();
+            }
         };
 
         const createPreview = (direction, value) => {
@@ -535,7 +559,7 @@
             hiddenInput = document.querySelector('input[type="text"]');
             if (hiddenInput) {
                 hiddenInput.addEventListener('focus', () => {
-                    if (useAppKeyboard && navigator.maxTouchPoints > 0) {
+                    if (!accepts_ime_input() || (useAppKeyboard && navigator.maxTouchPoints > 0)) {
                         setTimeout(() => hiddenInput && hiddenInput.blur(), 0);
                     }
                 });
@@ -582,6 +606,7 @@
             const isTouchDevice = navigator.maxTouchPoints > 0;
 
             const updateKeyboardVisibility = () => {
+                syncKeyboardInputPolicy();
                 if (isTouchDevice) {
                     const typing = is_typing_active();
                     const showScreenKeyboard = typing && useAppKeyboard;
