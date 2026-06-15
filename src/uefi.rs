@@ -148,8 +148,9 @@ fn run_inner() -> core::result::Result<(), Status> {
 
         let fonts = app.fonts();
         let render_list = ui::build_ui(&app, fonts, viewport.width, viewport.height);
+        let mut frame_changed = false;
         if let Some(mut surface) = ArgbSurface::new(width, height, &mut argb_buffer) {
-            let frame_changed = surface
+            frame_changed = surface
                 .render(fonts, display_settings, &render_list, &mut render_cache)
                 .changed();
             if frame_changed {
@@ -162,12 +163,14 @@ fn run_inner() -> core::result::Result<(), Status> {
                 }
             }
         }
-        firmware(gop.blt(BltOp::BufferToVideo {
-            buffer: &pixel_buffer,
-            src: BltRegion::Full,
-            dest: (0, 0),
-            dims: (width, height),
-        }))?;
+        if frame_changed {
+            firmware(gop.blt(BltOp::BufferToVideo {
+                buffer: &pixel_buffer,
+                src: BltRegion::Full,
+                dest: (0, 0),
+                dims: (width, height),
+            }))?;
+        }
 
         firmware(uefi::boot::set_timer(
             &events[0],

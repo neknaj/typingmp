@@ -556,6 +556,9 @@ fn rasterize_text_alpha<F: Font>(
     if len == 0 {
         return None;
     }
+    if len > RenderCache::TEXT_BITMAP_MAX_SINGLE_BYTES {
+        return None;
+    }
     let mut alpha = vec![0_u8; len];
 
     pen_x = frac_x;
@@ -1435,12 +1438,20 @@ fn draw_text_if_visible<F: Font>(
         x + metrics.width as f32,
         y + metrics.height as f32 + size * 0.2,
     ) {
-        if let Some(bitmap) = cache.rasterized_text(font, text, size, pos) {
-            frame.draw_text_bitmap(bitmap, pos, color);
-        } else {
-            frame.draw_text_clipped(font, text, pos, size, color);
+        if should_cache_rasterized_text(metrics) {
+            if let Some(bitmap) = cache.rasterized_text(font, text, size, pos) {
+                frame.draw_text_bitmap(bitmap, pos, color);
+                return;
+            }
         }
+        frame.draw_text_clipped(font, text, pos, size, color);
     }
+}
+
+fn should_cache_rasterized_text(metrics: TextMetrics) -> bool {
+    (metrics.width as usize)
+        .checked_mul(metrics.height as usize)
+        .is_some_and(|bytes| bytes <= RenderCache::TEXT_BITMAP_MAX_SINGLE_BYTES)
 }
 
 fn draw_aligned_text<F: Font>(
@@ -2022,6 +2033,16 @@ pub mod gui_renderer {
             if let Some(last) = last_glyph {
                 pen_x += scaled_font.kern(last, glyph_id);
             }
+            let advance = scaled_font.h_advance(glyph_id);
+            let horizontal_guard = options.font_size;
+            if pen_x + advance + horizontal_guard < options.clip.left as f32 {
+                pen_x += advance;
+                last_glyph = Some(glyph_id);
+                continue;
+            }
+            if pen_x - horizontal_guard > options.clip.right as f32 {
+                break;
+            }
             let glyph = glyph_id.with_scale_and_position(scale, point(pen_x, pen_y));
             if let Some(outlined) = font.outline_glyph(glyph) {
                 let bounds = outlined.px_bounds();
@@ -2040,7 +2061,7 @@ pub mod gui_renderer {
                     );
                 }
             }
-            pen_x += scaled_font.h_advance(glyph_id);
+            pen_x += advance;
             last_glyph = Some(glyph_id);
         }
     }
@@ -2520,5 +2541,39 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn oversized_text_uses_clipped_rendering_without_bitmap_cache() {
+        let fonts = test_fonts();
+        let long_text = "W".repeat(4096);
+        let render_list = vec![
+            Renderable::Background {
+                gradient: crate::ui::Gradient {
+                    start_color: 0xFF_000000,
+                    end_color: 0xFF_000000,
+                },
+            },
+            Renderable::Text {
+                text: long_text,
+                anchor: crate::ui::Anchor::TopLeft,
+                shift: crate::ui::Shift { x: 0.0, y: 0.1 },
+                align: crate::ui::Align {
+                    horizontal: crate::ui::HorizontalAlign::Left,
+                    vertical: crate::ui::VerticalAlign::Top,
+                },
+                font_size: FontSize::WindowHeight(0.2),
+                color: 0xFF_FFFFFF,
+            },
+        ];
+        let mut cache = RenderCache::new();
+        let mut pixels = vec![0u32; 240 * 120];
+        let mut surface = ArgbSurface::new(240, 120, &mut pixels).expect("surface should be valid");
+
+        assert!(surface
+            .render(&fonts, DisplaySettings::default(), &render_list, &mut cache)
+            .changed());
+        assert_eq!(cache.text_bitmap_cache_len(), 0);
+        assert!(pixels.iter().any(|pixel| *pixel != 0xFF_000000));
     }
 }

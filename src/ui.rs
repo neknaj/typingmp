@@ -2741,6 +2741,68 @@ mod tests {
         );
     }
 
+    #[test]
+    #[ignore = "manual changing-frame probe"]
+    fn perf_typing_input_frame_profile() {
+        use crate::renderer::{ArgbSurface, RenderCache};
+        use std::time::Instant;
+
+        let input = "abcdefghijklmnopqrstuvwxyz".repeat(16);
+        let problem = format!("#title Perf\n[{input}/{input}]");
+        let mut app = typing_app(&problem);
+        let width = 1280;
+        let height = 720;
+        let mut render_cache = RenderCache::new();
+        let mut pixels = vec![0u32; width * height];
+        app.update(width, height, 16.0);
+
+        let frames = 180u32;
+        let input_chars = input.chars().collect::<Vec<_>>();
+        let mut update_time = std::time::Duration::ZERO;
+        let mut input_time = std::time::Duration::ZERO;
+        let mut build_time = std::time::Duration::ZERO;
+        let mut render_time = std::time::Duration::ZERO;
+        let start = Instant::now();
+        for frame in 0..frames {
+            let input_start = Instant::now();
+            app.on_event(AppEvent::Char {
+                c: input_chars[frame as usize % input_chars.len()],
+                timestamp: frame as f64 * 16.0,
+            });
+            input_time += input_start.elapsed();
+
+            let update_start = Instant::now();
+            app.update(width, height, 16.0);
+            update_time += update_start.elapsed();
+
+            let build_start = Instant::now();
+            let render_list = build_ui(&app, app.fonts(), width, height);
+            build_time += build_start.elapsed();
+
+            let render_start = Instant::now();
+            let mut surface =
+                ArgbSurface::new(width, height, &mut pixels).expect("surface should be valid");
+            surface.render(
+                app.fonts(),
+                app.display_settings(),
+                &render_list,
+                &mut render_cache,
+            );
+            render_time += render_start.elapsed();
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "typing input profile: {} frames in {:?}, {:.3} ms/frame; input {:.3}, update {:.3}, build {:.3}, render {:.3} ms/frame",
+            frames,
+            elapsed,
+            elapsed.as_secs_f64() * 1000.0 / f64::from(frames),
+            input_time.as_secs_f64() * 1000.0 / f64::from(frames),
+            update_time.as_secs_f64() * 1000.0 / f64::from(frames),
+            build_time.as_secs_f64() * 1000.0 / f64::from(frames),
+            render_time.as_secs_f64() * 1000.0 / f64::from(frames)
+        );
+    }
+
     fn typing_rows(render_list: &[Renderable]) -> (&[UpperTypingSegment], &[LowerTypingSegment]) {
         let upper_segments = render_list
             .iter()

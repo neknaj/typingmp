@@ -285,15 +285,16 @@ fn present_frame(
     if width * height > 0 && pixel_buffer.len() != width * height {
         return Ok(());
     }
-    if frame_changed {
-        let frame = pixels.frame_mut();
-        for (i, color) in pixel_buffer.iter().enumerate() {
-            let base = i * 4;
-            frame[base] = ((color >> 16) & 0xff) as u8;
-            frame[base + 1] = ((color >> 8) & 0xff) as u8;
-            frame[base + 2] = (color & 0xff) as u8;
-            frame[base + 3] = ((color >> 24) & 0xff) as u8;
-        }
+    if !frame_changed {
+        return Ok(());
+    }
+    let frame = pixels.frame_mut();
+    for (i, color) in pixel_buffer.iter().enumerate() {
+        let base = i * 4;
+        frame[base] = ((color >> 16) & 0xff) as u8;
+        frame[base + 1] = ((color >> 8) & 0xff) as u8;
+        frame[base + 2] = (color & 0xff) as u8;
+        frame[base + 3] = ((color >> 24) & 0xff) as u8;
     }
     pixels
         .render()
