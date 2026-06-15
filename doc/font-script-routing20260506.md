@@ -61,10 +61,10 @@ Settings 画面は font slot に加えて表示 viewport も扱う。ただし�
 
 | setting | type | 動作 |
 |---|---|---|
-| Aspect Ratio | `DisplayAspectRatio` enum | 物理画面内に選択比率の viewport を最大内接させる。余白は letterbox / pillarbox として黒で埋める。 |
+| Aspect Ratio | `DisplayAspectRatio` enum | 物理画面の横幅は切り詰めず、選択比率に必要な高さが物理高さを超える場合は仮想 viewport を縦方向へ拡張する。renderer は仮想 viewport を物理フレーム中央に合わせ、物理フレームと交差する範囲だけを描画する。 |
 | Display Scale | `DisplayScale` enum | viewport 座標系は維持し、文字系 UI の font size に倍率を掛ける。 |
 | IME Input | `bool` | 既定は disabled。disabled のとき WASM は hidden input/OS screen keyboard にフォーカスせず、printable key は `keydown` で処理する。enabled のときのみ IME 入力を受け付ける。 |
 
 aspect ratio は `Native`, `16:9`, `4:3`, `1:1`, `3:4`, `9:16` を持つ。display scale は `75%`, `100%`, `125%`, `150%`, `200%` の段階を持つ。どちらも raw number や free string では保持しない。
 
-renderer は app が持つ `DisplaySettings` から `DisplayViewport` を計算し、UI 構築、スクロール計測、描画に同じ viewport 幅・高さと scale を渡す。これにより aspect/scale 変更時にも typing 上段、下段、カーソル、スクロールの座標が同じ基準で揃う。
+renderer は app が持つ `DisplaySettings` から `DisplayViewport` を計算し、UI 構築、スクロール計測、描画に同じ viewport 幅・高さと scale を渡す。これにより aspect/scale 変更時にも typing 上段、下段、カーソル、スクロールの座標が同じ基準で揃う。Top/Bottom 系の float 表示は仮想 viewport 内で見えている物理フレーム範囲をアンカー基準にし、title/status が縦方向拡張で画面外へ逃げないようにする。

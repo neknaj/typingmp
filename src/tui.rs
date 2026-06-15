@@ -57,8 +57,8 @@ struct Cell {
 #[derive(Clone, Copy)]
 #[cfg(not(feature = "uefi"))]
 struct TuiViewport {
-    x: usize,
-    y: usize,
+    x: isize,
+    y: isize,
     width: usize,
     height: usize,
     frame_width: usize,
@@ -98,48 +98,78 @@ impl TuiViewport {
             return Self::new(frame_width, frame_height);
         }
 
-        let map_x = |value: usize| -> usize {
-            ((value as f64 / TUI_VIRTUAL_PIXEL_WIDTH.max(1) as f64) * frame_width as f64)
-                .round()
-                .clamp(0.0, frame_width as f64) as usize
+        let map_x = |value: i64| -> isize {
+            ((value as f64 / TUI_VIRTUAL_PIXEL_WIDTH.max(1) as f64) * frame_width as f64).round()
+                as isize
         };
-        let map_y = |value: usize| -> usize {
+        let map_y = |value: i64| -> isize {
             if virtual_height == 0 {
                 0
             } else {
-                ((value as f64 / virtual_height as f64) * frame_height as f64)
-                    .round()
-                    .clamp(0.0, frame_height as f64) as usize
+                ((value as f64 / virtual_height as f64) * frame_height as f64).round() as isize
             }
         };
 
-        let x = map_x(virtual_viewport.x);
-        let y = map_y(virtual_viewport.y);
-        let right = map_x(virtual_viewport.x.saturating_add(virtual_viewport.width));
-        let bottom = map_y(virtual_viewport.y.saturating_add(virtual_viewport.height));
+        let x = map_x(virtual_viewport.x as i64);
+        let y = map_y(virtual_viewport.y as i64);
+        let right = map_x(virtual_viewport.x as i64 + virtual_viewport.width as i64);
+        let bottom = map_y(virtual_viewport.y as i64 + virtual_viewport.height as i64);
 
         Self {
             x,
             y,
-            width: right.saturating_sub(x).max(1).min(frame_width - x),
-            height: bottom.saturating_sub(y).max(1).min(frame_height - y),
+            width: right.saturating_sub(x).max(1) as usize,
+            height: bottom.saturating_sub(y).max(1) as usize,
             frame_width,
             frame_height,
         }
     }
 
+    fn visible_local_rect(self) -> (isize, isize, isize, isize) {
+        (
+            (0isize - self.x).clamp(0, self.width as isize),
+            (0isize - self.y).clamp(0, self.height as isize),
+            (self.frame_width as isize - self.x).clamp(0, self.width as isize),
+            (self.frame_height as isize - self.y).clamp(0, self.height as isize),
+        )
+    }
+
+    fn anchor_position(self, anchor: ui::Anchor, shift: ui::Shift) -> (i32, i32) {
+        let (visible_left, visible_top, visible_right, visible_bottom) = self.visible_local_rect();
+        let visible_width = visible_right.saturating_sub(visible_left);
+        let virtual_width = self.width as isize;
+        let virtual_height = self.height as isize;
+        let base_pos = match anchor {
+            ui::Anchor::TopLeft => (visible_left, visible_top),
+            ui::Anchor::TopCenter => (visible_left + visible_width / 2, visible_top),
+            ui::Anchor::TopRight => (visible_right, visible_top),
+            ui::Anchor::CenterLeft => (visible_left, virtual_height / 2),
+            ui::Anchor::Center => (virtual_width / 2, virtual_height / 2),
+            ui::Anchor::CenterRight => (visible_right, virtual_height / 2),
+            ui::Anchor::BottomLeft => (visible_left, visible_bottom),
+            ui::Anchor::BottomCenter => (visible_left + visible_width / 2, visible_bottom),
+            ui::Anchor::BottomRight => (visible_right, visible_bottom),
+        };
+        (
+            (base_pos.0 + (shift.x * self.width as f32) as isize) as i32,
+            (base_pos.1 + (shift.y * self.height as f32) as isize) as i32,
+        )
+    }
+
     fn contains(self, x: isize, y: isize) -> bool {
-        x >= self.x as isize
-            && y >= self.y as isize
-            && x < self.x.saturating_add(self.width) as isize
-            && y < self.y.saturating_add(self.height) as isize
+        x >= 0
+            && y >= 0
+            && x >= self.x
+            && y >= self.y
+            && x < self.x.saturating_add(self.width as isize)
+            && y < self.y.saturating_add(self.height as isize)
             && x < self.frame_width as isize
             && y < self.frame_height as isize
     }
 
     fn local_to_frame(self, x: i32, y: i32) -> Option<(usize, usize)> {
-        let frame_x = self.x as isize + x as isize;
-        let frame_y = self.y as isize + y as isize;
+        let frame_x = self.x + x as isize;
+        let frame_y = self.y + y as isize;
         if self.contains(frame_x, frame_y) {
             Some((frame_x as usize, frame_y as usize))
         } else {
@@ -695,12 +725,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         let (_, _, line_total_height, line_ascent) =
                             renderer(line_font, "|", line_font_size);
 
-                        let anchor_pos = ui::calculate_anchor_position(
-                            anchor,
-                            shift,
-                            viewport.width,
-                            viewport.height,
-                        );
+                        let anchor_pos = viewport.anchor_position(anchor, shift);
                         let (mut pen_x, line_start_y) = ui::calculate_aligned_position(
                             anchor_pos,
                             total_width_cells,
@@ -810,12 +835,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             continue;
                         }
 
-                        let anchor_pos = ui::calculate_anchor_position(
-                            anchor,
-                            shift,
-                            viewport.width,
-                            viewport.height,
-                        );
+                        let anchor_pos = viewport.anchor_position(anchor, shift);
                         let (mut pen_x, pen_y) =
                             ui::calculate_aligned_position(anchor_pos, total_width, 1, align);
                         pen_x += visible_start_chars;
@@ -912,12 +932,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 render_font_size,
                             );
 
-                            let anchor_pos = ui::calculate_anchor_position(
-                                anchor,
-                                shift,
-                                viewport.width,
-                                viewport.height,
-                            );
+                            let anchor_pos = viewport.anchor_position(anchor, shift);
                             let (mut pen_x, line_start_y) = ui::calculate_aligned_position(
                                 anchor_pos,
                                 total_width_cells,
@@ -1156,12 +1171,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 .sum::<usize>();
 
                             // Calculate the starting position for the centered line
-                            let anchor_pos = ui::calculate_anchor_position(
-                                anchor,
-                                shift,
-                                viewport.width,
-                                viewport.height,
-                            );
+                            let anchor_pos = viewport.anchor_position(anchor, shift);
                             let (mut pen_x, pen_y) = ui::calculate_aligned_position(
                                 anchor_pos,
                                 total_width_chars as u32,
@@ -1278,12 +1288,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                     // TUIでは高さは常に1セル
                     let bar_width_chars = (viewport.width as f32 * width_ratio) as usize;
 
-                    let anchor_pos = ui::calculate_anchor_position(
-                        anchor,
-                        shift,
-                        viewport.width,
-                        viewport.height,
-                    );
+                    let anchor_pos = viewport.anchor_position(anchor, shift);
                     // anchor_posが左下を指すので、Y座標は1引く
                     let start_x = anchor_pos.0;
                     let start_y = (anchor_pos.1 - 1).max(0);
@@ -1381,12 +1386,7 @@ fn draw_plain_text(
     color: Color,
 ) {
     let (text_width, text_height) = measure_plain_text(text);
-    let anchor_pos = ui::calculate_anchor_position(
-        placement.anchor,
-        placement.shift,
-        viewport.width,
-        viewport.height,
-    );
+    let anchor_pos = viewport.anchor_position(placement.anchor, placement.shift);
     let (start_x, start_y) =
         ui::calculate_aligned_position(anchor_pos, text_width, text_height, placement.align);
     draw_plain_text_at(buffer, text, start_x, start_y, viewport, color);
@@ -1480,12 +1480,7 @@ fn draw_art_text(
         return;
     }
 
-    let anchor_pos = ui::calculate_anchor_position(
-        placement.anchor,
-        placement.shift,
-        viewport.width,
-        viewport.height,
-    );
+    let anchor_pos = viewport.anchor_position(placement.anchor, placement.shift);
     let (start_x, start_y) = ui::calculate_aligned_position(
         anchor_pos,
         art_width as u32,
@@ -1533,10 +1528,10 @@ mod tests {
 
         let viewport = TuiViewport::from_display_settings(settings, 80, 40, 500);
 
-        assert_eq!(viewport.x, 20);
-        assert_eq!(viewport.y, 0);
-        assert_eq!(viewport.width, 40);
-        assert_eq!(viewport.height, 40);
+        assert_eq!(viewport.x, 0);
+        assert_eq!(viewport.y, -20);
+        assert_eq!(viewport.width, 80);
+        assert_eq!(viewport.height, 80);
         assert_eq!(viewport.frame_width, 80);
         assert_eq!(viewport.frame_height, 40);
     }

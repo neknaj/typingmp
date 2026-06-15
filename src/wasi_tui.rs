@@ -43,8 +43,8 @@ impl Default for Cell {
 
 #[derive(Clone, Copy)]
 struct CellViewport {
-    x: usize,
-    y: usize,
+    x: isize,
+    y: isize,
     columns: usize,
     rows: usize,
     frame_columns: usize,
@@ -72,31 +72,28 @@ impl CellViewport {
             return frame;
         }
 
-        let map_x = |value: usize| -> usize {
+        let map_x = |value: i64| -> isize {
             ((value as f64 / VIRTUAL_PIXEL_WIDTH.max(1) as f64) * frame.frame_columns as f64)
-                .round()
-                .clamp(0.0, frame.frame_columns as f64) as usize
+                .round() as isize
         };
-        let map_y = |value: usize| -> usize {
+        let map_y = |value: i64| -> isize {
             if virtual_height == 0 {
                 0
             } else {
-                ((value as f64 / virtual_height as f64) * frame.frame_rows as f64)
-                    .round()
-                    .clamp(0.0, frame.frame_rows as f64) as usize
+                ((value as f64 / virtual_height as f64) * frame.frame_rows as f64).round() as isize
             }
         };
 
-        let x = map_x(virtual_viewport.x);
-        let y = map_y(virtual_viewport.y);
-        let right = map_x(virtual_viewport.x.saturating_add(virtual_viewport.width));
-        let bottom = map_y(virtual_viewport.y.saturating_add(virtual_viewport.height));
+        let x = map_x(virtual_viewport.x as i64);
+        let y = map_y(virtual_viewport.y as i64);
+        let right = map_x(virtual_viewport.x as i64 + virtual_viewport.width as i64);
+        let bottom = map_y(virtual_viewport.y as i64 + virtual_viewport.height as i64);
 
         Self {
             x,
             y,
-            columns: right.saturating_sub(x).max(1).min(frame.frame_columns - x),
-            rows: bottom.saturating_sub(y).max(1).min(frame.frame_rows - y),
+            columns: right.saturating_sub(x).max(1) as usize,
+            rows: bottom.saturating_sub(y).max(1) as usize,
             frame_columns: frame.frame_columns,
             frame_rows: frame.frame_rows,
         }
@@ -106,18 +103,51 @@ impl CellViewport {
         self.frame_columns * self.frame_rows
     }
 
+    fn visible_local_rect(self) -> (isize, isize, isize, isize) {
+        (
+            (0isize - self.x).clamp(0, self.columns as isize),
+            (0isize - self.y).clamp(0, self.rows as isize),
+            (self.frame_columns as isize - self.x).clamp(0, self.columns as isize),
+            (self.frame_rows as isize - self.y).clamp(0, self.rows as isize),
+        )
+    }
+
+    fn anchor_position(self, anchor: ui::Anchor, shift: ui::Shift) -> (i32, i32) {
+        let (visible_left, visible_top, visible_right, visible_bottom) = self.visible_local_rect();
+        let visible_width = visible_right.saturating_sub(visible_left);
+        let virtual_width = self.columns as isize;
+        let virtual_height = self.rows as isize;
+        let base_pos = match anchor {
+            ui::Anchor::TopLeft => (visible_left, visible_top),
+            ui::Anchor::TopCenter => (visible_left + visible_width / 2, visible_top),
+            ui::Anchor::TopRight => (visible_right, visible_top),
+            ui::Anchor::CenterLeft => (visible_left, virtual_height / 2),
+            ui::Anchor::Center => (virtual_width / 2, virtual_height / 2),
+            ui::Anchor::CenterRight => (visible_right, virtual_height / 2),
+            ui::Anchor::BottomLeft => (visible_left, visible_bottom),
+            ui::Anchor::BottomCenter => (visible_left + visible_width / 2, visible_bottom),
+            ui::Anchor::BottomRight => (visible_right, visible_bottom),
+        };
+        (
+            (base_pos.0 + (shift.x * self.columns as f32) as isize) as i32,
+            (base_pos.1 + (shift.y * self.rows as f32) as isize) as i32,
+        )
+    }
+
     fn contains(self, x: isize, y: isize) -> bool {
-        x >= self.x as isize
-            && y >= self.y as isize
-            && x < self.x.saturating_add(self.columns) as isize
-            && y < self.y.saturating_add(self.rows) as isize
+        x >= 0
+            && y >= 0
+            && x >= self.x
+            && y >= self.y
+            && x < self.x.saturating_add(self.columns as isize)
+            && y < self.y.saturating_add(self.rows as isize)
             && x < self.frame_columns as isize
             && y < self.frame_rows as isize
     }
 
     fn local_to_frame(self, x: i32, y: i32) -> Option<(usize, usize)> {
-        let frame_x = self.x as isize + x as isize;
-        let frame_y = self.y as isize + y as isize;
+        let frame_x = self.x + x as isize;
+        let frame_y = self.y + y as isize;
         if self.contains(frame_x, frame_y) {
             Some((frame_x as usize, frame_y as usize))
         } else {
@@ -346,8 +376,7 @@ fn render_frame(
                 } else {
                     visible_width_chars.max(1)
                 };
-                let anchor_pos =
-                    ui::calculate_anchor_position(anchor, shift, viewport.columns, viewport.rows);
+                let anchor_pos = viewport.anchor_position(anchor, shift);
                 let (mut pen_x, pen_y) =
                     ui::calculate_aligned_position(anchor_pos, total_width_chars as u32, 1, align);
                 pen_x += visible_start_chars(line_alignment, total_width_chars);
@@ -387,8 +416,7 @@ fn render_frame(
                 ..
             } => {
                 let total_width_chars = current_line_base_char_count(app).max(1);
-                let anchor_pos =
-                    ui::calculate_anchor_position(anchor, shift, viewport.columns, viewport.rows);
+                let anchor_pos = viewport.anchor_position(anchor, shift);
                 let (mut pen_x, pen_y) =
                     ui::calculate_aligned_position(anchor_pos, total_width_chars as u32, 1, align);
                 pen_x += visible_start_chars(line_alignment, total_width_chars);
@@ -517,12 +545,7 @@ fn draw_plain_text(
     color: AnsiColor,
 ) {
     let text_width = terminal_width::text_width(text) as u32;
-    let anchor_pos = ui::calculate_anchor_position(
-        placement.anchor,
-        placement.shift,
-        viewport.columns,
-        viewport.rows,
-    );
+    let anchor_pos = viewport.anchor_position(placement.anchor, placement.shift);
     let (x, y) = ui::calculate_aligned_position(anchor_pos, text_width, 1, placement.align);
     draw_plain_text_at(buffer, text, x, y, viewport, color);
 }
@@ -590,12 +613,7 @@ fn draw_progress_bar(
         return;
     }
 
-    let anchor_pos = ui::calculate_anchor_position(
-        placement.anchor,
-        placement.shift,
-        viewport.columns,
-        viewport.rows,
-    );
+    let anchor_pos = viewport.anchor_position(placement.anchor, placement.shift);
     let start_x = anchor_pos.0;
     let y = (anchor_pos.1 - 1).max(0);
     if y < 0 || y >= viewport.rows as i32 {
@@ -747,10 +765,10 @@ mod tests {
 
         let viewport = CellViewport::from_virtual_viewport(frame, virtual_height, virtual_viewport);
 
-        assert_eq!(viewport.x, 20);
-        assert_eq!(viewport.y, 0);
-        assert_eq!(viewport.columns, 40);
-        assert_eq!(viewport.rows, 40);
+        assert_eq!(viewport.x, 0);
+        assert_eq!(viewport.y, -20);
+        assert_eq!(viewport.columns, 80);
+        assert_eq!(viewport.rows, 80);
         assert_eq!(viewport.frame_columns, 80);
         assert_eq!(viewport.frame_rows, 40);
     }

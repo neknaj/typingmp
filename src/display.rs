@@ -134,23 +134,19 @@ impl DisplaySettings {
         }
 
         let frame_width_u64 = frame_width as u64;
-        let frame_height_u64 = frame_height as u64;
         let ratio_w_u64 = u64::from(ratio_w);
         let ratio_h_u64 = u64::from(ratio_h);
 
-        let (width, height) = if frame_width_u64 * ratio_h_u64 <= frame_height_u64 * ratio_w_u64 {
-            let width = frame_width;
-            let height = ((frame_width_u64 * ratio_h_u64) / ratio_w_u64) as usize;
-            (width, height.max(1))
-        } else {
-            let height = frame_height;
-            let width = ((frame_height_u64 * ratio_w_u64) / ratio_h_u64) as usize;
-            (width.max(1), height)
-        };
+        let aspect_height = frame_width_u64
+            .saturating_mul(ratio_h_u64)
+            .div_ceil(ratio_w_u64) as usize;
+        let width = frame_width;
+        let height = frame_height.max(aspect_height.max(1));
+        let y = ((frame_height as i64 - height as i64) / 2) as i32;
 
         DisplayViewport {
-            x: (frame_width - width) / 2,
-            y: (frame_height - height) / 2,
+            x: 0,
+            y,
             width,
             height,
             scale: self.scale.multiplier(),
@@ -169,8 +165,8 @@ impl Default for DisplaySettings {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DisplayViewport {
-    pub x: usize,
-    pub y: usize,
+    pub x: i32,
+    pub y: i32,
     pub width: usize,
     pub height: usize,
     pub scale: f32,
@@ -196,7 +192,7 @@ mod tests {
     }
 
     #[test]
-    fn viewport_letterboxes_portrait_ratio_inside_landscape_frame() {
+    fn viewport_extends_height_for_portrait_ratio_without_horizontal_trim() {
         let settings = DisplaySettings {
             aspect_ratio: DisplayAspectRatio::Ratio9x16,
             scale: DisplayScale::Percent125,
@@ -205,17 +201,17 @@ mod tests {
         assert_eq!(
             settings.viewport(1920, 1080),
             DisplayViewport {
-                x: 656,
-                y: 0,
-                width: 607,
-                height: 1080,
+                x: 0,
+                y: -1167,
+                width: 1920,
+                height: 3414,
                 scale: 1.25
             }
         );
     }
 
     #[test]
-    fn viewport_pillarboxes_landscape_ratio_inside_portrait_frame() {
+    fn viewport_keeps_full_frame_when_ratio_would_shrink_height() {
         let settings = DisplaySettings {
             aspect_ratio: DisplayAspectRatio::Ratio16x9,
             scale: DisplayScale::Percent75,
@@ -225,9 +221,9 @@ mod tests {
             settings.viewport(1080, 1920),
             DisplayViewport {
                 x: 0,
-                y: 656,
+                y: 0,
                 width: 1080,
-                height: 607,
+                height: 1920,
                 scale: 0.75
             }
         );

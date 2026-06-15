@@ -151,20 +151,10 @@ struct TextMeasureCacheEntry {
     metrics: TextMetrics,
 }
 
-#[derive(Debug, Clone)]
-struct BackgroundCache {
-    start_color: u32,
-    end_color: u32,
-    width: usize,
-    height: usize,
-    pixels: Vec<u32>,
-}
-
 /// Shared render cache used by pixel backends.
 pub struct RenderCache {
     font_generation: u64,
     text_metrics: Vec<TextMeasureCacheEntry>,
-    background: Option<BackgroundCache>,
 }
 
 impl RenderCache {
@@ -174,7 +164,6 @@ impl RenderCache {
         Self {
             font_generation: u64::MAX,
             text_metrics: Vec::new(),
-            background: None,
         }
     }
 
@@ -207,44 +196,6 @@ impl RenderCache {
             metrics,
         });
         metrics
-    }
-
-    fn draw_gradient(
-        &mut self,
-        buffer: &mut [u32],
-        width: usize,
-        height: usize,
-        start_color: u32,
-        end_color: u32,
-    ) {
-        if let Some(cache) = &self.background {
-            if cache.start_color == start_color
-                && cache.end_color == end_color
-                && cache.width == width
-                && cache.height == height
-                && cache.pixels.len() == buffer.len()
-            {
-                buffer.copy_from_slice(&cache.pixels);
-                return;
-            }
-        }
-
-        draw_linear_gradient(
-            buffer,
-            width,
-            height,
-            start_color,
-            end_color,
-            (0.0, 0.0),
-            (width as f32, height as f32),
-        );
-        self.background = Some(BackgroundCache {
-            start_color,
-            end_color,
-            width,
-            height,
-            pixels: buffer.to_vec(),
-        });
     }
 
     #[cfg(test)]
@@ -459,12 +410,52 @@ impl PixelFrame<'_> {
         )
     }
 
+    fn viewport_right(&self) -> i64 {
+        self.viewport.x as i64 + self.viewport.width as i64
+    }
+
+    fn viewport_bottom(&self) -> i64 {
+        self.viewport.y as i64 + self.viewport.height as i64
+    }
+
     fn frame_clip(&self) -> PixelClip {
-        let left = self.viewport.x.min(self.stride) as i32;
-        let top = self.viewport.y.min(self.frame_height) as i32;
-        let right = (self.viewport.x + self.viewport.width).min(self.stride) as i32;
-        let bottom = (self.viewport.y + self.viewport.height).min(self.frame_height) as i32;
+        let left = (self.viewport.x as i64).clamp(0, self.stride as i64) as i32;
+        let top = (self.viewport.y as i64).clamp(0, self.frame_height as i64) as i32;
+        let right = self.viewport_right().clamp(0, self.stride as i64) as i32;
+        let bottom = self.viewport_bottom().clamp(0, self.frame_height as i64) as i32;
         PixelClip::new(left, top, right, bottom)
+    }
+
+    fn visible_local_rect(&self) -> (i32, i32, i32, i32) {
+        let clip = self.frame_clip();
+        (
+            clip.left - self.viewport.x,
+            clip.top - self.viewport.y,
+            clip.right - self.viewport.x,
+            clip.bottom - self.viewport.y,
+        )
+    }
+
+    fn anchor_position(&self, anchor: ui::Anchor, shift: ui::Shift) -> (i32, i32) {
+        let (visible_left, visible_top, visible_right, visible_bottom) = self.visible_local_rect();
+        let visible_width = visible_right.saturating_sub(visible_left);
+        let virtual_width = self.viewport.width as i32;
+        let virtual_height = self.viewport.height as i32;
+        let base_pos = match anchor {
+            ui::Anchor::TopLeft => (visible_left, visible_top),
+            ui::Anchor::TopCenter => (visible_left + visible_width / 2, visible_top),
+            ui::Anchor::TopRight => (visible_right, visible_top),
+            ui::Anchor::CenterLeft => (visible_left, virtual_height / 2),
+            ui::Anchor::Center => (virtual_width / 2, virtual_height / 2),
+            ui::Anchor::CenterRight => (visible_right, virtual_height / 2),
+            ui::Anchor::BottomLeft => (visible_left, visible_bottom),
+            ui::Anchor::BottomCenter => (visible_left + visible_width / 2, visible_bottom),
+            ui::Anchor::BottomRight => (visible_right, visible_bottom),
+        };
+        (
+            base_pos.0 + (shift.x * self.viewport.width as f32) as i32,
+            base_pos.1 + (shift.y * self.viewport.height as f32) as i32,
+        )
     }
 
     fn local_rect_intersects_viewport(&self, left: f32, top: f32, right: f32, bottom: f32) -> bool {
@@ -491,38 +482,83 @@ impl PixelFrame<'_> {
     }
 
     fn fill_viewport(&mut self, color: u32) {
-        for y in self.viewport.y..(self.viewport.y + self.viewport.height).min(self.frame_height) {
+        let clip = self.frame_clip();
+        if clip.is_empty() {
+            return;
+        }
+
+        for y in clip.top as usize..clip.bottom as usize {
             let row_start = y * self.stride;
-            let start = row_start + self.viewport.x.min(self.stride);
-            let end = row_start + (self.viewport.x + self.viewport.width).min(self.stride);
+            let start = row_start + clip.left as usize;
+            let end = row_start + clip.right as usize;
             self.pixels[start..end].fill(color);
         }
     }
 
-    fn draw_gradient(&mut self, cache: &mut RenderCache, start_color: u32, end_color: u32) {
+    fn fill_frame_rect(&mut self, rect: PixelClip, color: u32) {
+        let frame_clip = self.frame_clip();
+        let left = rect.left.max(frame_clip.left);
+        let top = rect.top.max(frame_clip.top);
+        let right = rect.right.min(frame_clip.right);
+        let bottom = rect.bottom.min(frame_clip.bottom);
+        if left >= right || top >= bottom {
+            return;
+        }
+
+        gui_renderer::draw_rect(
+            self.pixels,
+            self.stride,
+            left as usize,
+            top as usize,
+            (right - left) as usize,
+            (bottom - top) as usize,
+            color,
+        );
+    }
+
+    fn fill_local_rect(&mut self, x: i32, y: i32, width: usize, height: usize, color: u32) {
+        let left = self.viewport.x.saturating_add(x);
+        let top = self.viewport.y.saturating_add(y);
+        let right = (left as i64 + width as i64).clamp(i32::MIN as i64, i32::MAX as i64) as i32;
+        let bottom = (top as i64 + height as i64).clamp(i32::MIN as i64, i32::MAX as i64) as i32;
+        self.fill_frame_rect(PixelClip::new(left, top, right, bottom), color);
+    }
+
+    fn draw_gradient(&mut self, _cache: &mut RenderCache, start_color: u32, end_color: u32) {
         if self.viewport.width == 0 || self.viewport.height == 0 {
             return;
         }
 
-        let mut viewport_pixels = vec![0; self.viewport.width * self.viewport.height];
-        cache.draw_gradient(
-            &mut viewport_pixels,
-            self.viewport.width,
-            self.viewport.height,
+        let clip = self.frame_clip();
+        if clip.is_empty() {
+            return;
+        }
+
+        let visible_width = (clip.right - clip.left) as usize;
+        let visible_height = (clip.bottom - clip.top) as usize;
+        let local_left = clip.left - self.viewport.x;
+        let local_top = clip.top - self.viewport.y;
+        let mut visible_pixels = vec![0; visible_width * visible_height];
+        draw_linear_gradient(
+            &mut visible_pixels,
+            visible_width,
+            visible_height,
             start_color,
             end_color,
+            (-(local_left as f32), -(local_top as f32)),
+            (
+                self.viewport.width as f32 - local_left as f32,
+                self.viewport.height as f32 - local_top as f32,
+            ),
         );
 
-        for row in 0..self.viewport.height {
-            let dest_y = self.viewport.y + row;
-            if dest_y >= self.frame_height {
-                break;
-            }
-            let dest_start = dest_y * self.stride + self.viewport.x;
-            let dest_end = dest_start + self.viewport.width.min(self.stride - self.viewport.x);
-            let src_start = row * self.viewport.width;
-            let src_end = src_start + (dest_end - dest_start);
-            self.pixels[dest_start..dest_end].copy_from_slice(&viewport_pixels[src_start..src_end]);
+        for row in 0..visible_height {
+            let dest_y = clip.top as usize + row;
+            let dest_start = dest_y * self.stride + clip.left as usize;
+            let dest_end = dest_start + visible_width;
+            let src_start = row * visible_width;
+            let src_end = src_start + visible_width;
+            self.pixels[dest_start..dest_end].copy_from_slice(&visible_pixels[src_start..src_end]);
         }
     }
 }
@@ -600,12 +636,7 @@ fn draw_aligned_text<F: Font>(
             * frame.scale();
     let pixel_font_size = fonts.scaled_size_for_ui(pixel_font_size);
     let metrics = cache.measure_text(font, text, pixel_font_size);
-    let anchor_pos = ui::calculate_anchor_position(
-        placement.anchor,
-        placement.shift,
-        frame.width(),
-        frame.height(),
-    );
+    let anchor_pos = frame.anchor_position(placement.anchor, placement.shift);
     let (x, y) =
         ui::calculate_aligned_position(anchor_pos, metrics.width, metrics.height, placement.align);
     draw_text_if_visible(
@@ -638,12 +669,7 @@ fn draw_typing_upper(
         })
         .collect();
     let total_height = upper_typing_total_height(fonts, segments, pixel_font_size, cache);
-    let anchor_pos = ui::calculate_anchor_position(
-        placement.text.anchor,
-        placement.text.shift,
-        frame.width(),
-        frame.height(),
-    );
+    let anchor_pos = frame.anchor_position(placement.text.anchor, placement.text.shift);
     let (mut pen_x, y) = ui::calculate_aligned_position(
         anchor_pos,
         placement.line_alignment.full_line_width,
@@ -737,12 +763,7 @@ fn draw_typing_lower(
         calculate_pixel_font_size(placement.text.font_size, frame.width(), frame.height())
             * frame.scale();
     let total_height = lower_typing_total_height(fonts, segments, pixel_font_size, cache);
-    let anchor_pos = ui::calculate_anchor_position(
-        placement.text.anchor,
-        placement.text.shift,
-        frame.width(),
-        frame.height(),
-    );
+    let anchor_pos = frame.anchor_position(placement.text.anchor, placement.text.shift);
     let (mut pen_x, y) = ui::calculate_aligned_position(
         anchor_pos,
         placement.line_alignment.full_line_width,
@@ -921,18 +942,10 @@ fn draw_progress_bar(
 ) {
     let bar_width = (frame.width() as f32 * placement.width_ratio) as u32;
     let bar_height = (frame.height() as f32 * placement.height_ratio) as u32;
-    let anchor_pos = ui::calculate_anchor_position(
-        placement.anchor,
-        placement.shift,
-        frame.width(),
-        frame.height(),
-    );
-    let start_x = frame.viewport.x + anchor_pos.0.max(0) as usize;
-    let start_y = frame.viewport.y + (anchor_pos.1 - bar_height as i32).max(0) as usize;
-
-    gui_renderer::draw_rect(
-        frame.pixels,
-        frame.stride,
+    let anchor_pos = frame.anchor_position(placement.anchor, placement.shift);
+    let start_x = anchor_pos.0.max(0);
+    let start_y = (anchor_pos.1 - bar_height as i32).max(0);
+    frame.fill_local_rect(
         start_x,
         start_y,
         bar_width as usize,
@@ -942,9 +955,7 @@ fn draw_progress_bar(
 
     let fg_width = (bar_width as f32 * placement.progress.clamp(0.0, 1.0)) as usize;
     if fg_width > 0 {
-        gui_renderer::draw_rect(
-            frame.pixels,
-            frame.stride,
+        frame.fill_local_rect(
             start_x,
             start_y,
             fg_width,
@@ -1485,27 +1496,14 @@ mod tests {
     }
 
     #[test]
-    fn argb_surface_clips_text_to_display_viewport() {
+    fn argb_surface_uses_full_frame_width_when_aspect_extends_vertically() {
         let fonts = test_fonts();
-        let render_list = vec![
-            Renderable::Background {
-                gradient: crate::ui::Gradient {
-                    start_color: 0xFF_222222,
-                    end_color: 0xFF_222222,
-                },
+        let render_list = vec![Renderable::Background {
+            gradient: crate::ui::Gradient {
+                start_color: 0xFF_222222,
+                end_color: 0xFF_222222,
             },
-            Renderable::Text {
-                text: "WWWW".to_string(),
-                anchor: Anchor::TopLeft,
-                shift: Shift { x: -0.45, y: 0.25 },
-                align: Align {
-                    horizontal: HorizontalAlign::Left,
-                    vertical: VerticalAlign::Top,
-                },
-                font_size: FontSize::WindowHeight(0.3),
-                color: 0xFF_FFFFFF,
-            },
-        ];
+        }];
         let settings = DisplaySettings {
             aspect_ratio: DisplayAspectRatio::Square1x1,
             scale: crate::display::DisplayScale::Percent100,
@@ -1520,11 +1518,11 @@ mod tests {
         }
 
         for y in 0..100 {
-            for x in 0..50 {
+            for x in 0..200 {
                 assert_eq!(
                     pixels[y * 200 + x],
-                    BG_COLOR,
-                    "left letterbox pixel ({x},{y}) should stay clipped"
+                    0xFF_222222,
+                    "aspect-expanded background should cover frame pixel ({x},{y})"
                 );
             }
         }
