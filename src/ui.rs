@@ -285,9 +285,15 @@ pub fn build_ui(app: &App, fonts: &Fonts, width: usize, height: usize) -> Vec<Re
         AppState::Typing => {
             build_typing_ui(app, &mut render_list, typing_gradient, fonts, width, height)
         }
-        AppState::ProblemSelection => {
-            build_problem_selection_ui(app, snapshot, &mut render_list, menu_gradient)
-        }
+        AppState::ProblemSelection => build_problem_selection_ui(
+            app,
+            snapshot,
+            &mut render_list,
+            menu_gradient,
+            fonts,
+            width,
+            height,
+        ),
         AppState::ProblemSource => {
             build_problem_source_ui(app, snapshot, &mut render_list, menu_gradient)
         }
@@ -520,13 +526,19 @@ fn settings_table_rows(app: &App, snapshot: AppSnapshot<'_>) -> Vec<SettingsTabl
     vec![
         font_setting_row(app.fonts(), FontTarget::Ui),
         font_setting_row(app.fonts(), FontTarget::Script(FontScript::Japanese)),
+        font_setting_row(app.fonts(), FontTarget::Ruby(FontScript::Japanese)),
         font_setting_row(
             app.fonts(),
             FontTarget::Script(FontScript::ChineseSimplified),
         ),
+        font_setting_row(app.fonts(), FontTarget::Ruby(FontScript::ChineseSimplified)),
         font_setting_row(
             app.fonts(),
             FontTarget::Script(FontScript::TraditionalChinese),
+        ),
+        font_setting_row(
+            app.fonts(),
+            FontTarget::Ruby(FontScript::TraditionalChinese),
         ),
         font_setting_row(app.fonts(), FontTarget::Script(FontScript::English)),
         SettingsTableRow {
@@ -657,11 +669,24 @@ fn build_font_picker_ui(app: &App, render_list: &mut Vec<Renderable>) {
     }
 }
 
+fn problem_menu_title_line(app: &App, index: usize) -> Option<crate::model::Line> {
+    let first_line = app.get_problem_source(index)?.lines().next()?;
+    if !first_line.starts_with("#title") {
+        return None;
+    }
+
+    let content = crate::parser::parse_problem(&format!("{first_line}\n_")).ok()?;
+    (!content.title.words.is_empty()).then_some(content.title)
+}
+
 fn build_problem_selection_ui(
     app: &App,
     snapshot: AppSnapshot<'_>,
     render_list: &mut Vec<Renderable>,
     gradient: Gradient,
+    fonts: &Fonts,
+    width: usize,
+    height: usize,
 ) {
     render_list.push(Renderable::Background { gradient });
     render_list.push(Renderable::BigText {
@@ -676,10 +701,13 @@ fn build_problem_selection_ui(
         color: 0xFF_FFFFFF,
     });
 
-    let item_height: f32 = 0.06;
-    let list_y_start: f32 = 0.4;
-    let list_height: f32 = 0.6;
+    let item_height: f32 = 0.07;
+    let list_y_start: f32 = 0.38;
+    let list_height: f32 = 0.52;
     let items_per_screen = (list_height / item_height).floor() as usize;
+    let title_font_size = FontSize::WindowHeight(0.044);
+    let title_pixel_font_size = calculate_pixel_font_size(title_font_size, width, height)
+        * app.display_settings().scale.multiplier();
 
     let mut start_index = 0;
     if snapshot.selected_problem_item >= items_per_screen {
@@ -696,24 +724,66 @@ fn build_problem_selection_ui(
             app.problem_source_label(i).to_string()
         };
         let selected = i == snapshot.selected_problem_item;
-        let (text, color) = if selected {
-            (format!(">[{}] {}", badge, item), 0xFF_FFFF00u32)
+        let color = if selected {
+            0xFF_FFFF00u32
         } else if is_open_file {
-            (format!(" [{}] {}", badge, item), 0xFF_888888u32)
+            0xFF_888888u32
         } else {
-            (format!(" [{}] {}", badge, item), 0xFF_FFFFFF)
+            0xFF_FFFFFF
         };
         let y_pos = list_y_start + ((i - start_index) as f32 * item_height);
+        let marker = if selected { ">" } else { " " };
 
         render_list.push(Renderable::Text {
-            text,
+            text: format!("{marker}[{badge}]"),
             anchor: Anchor::TopCenter,
-            shift: Shift { x: -0.2, y: y_pos },
+            shift: Shift { x: -0.34, y: y_pos },
             align: Align {
                 horizontal: HorizontalAlign::Left,
                 vertical: VerticalAlign::Top,
             },
-            font_size: FontSize::WindowHeight(0.045),
+            font_size: FontSize::WindowHeight(0.042),
+            color,
+        });
+
+        if let Some(title_line) = problem_menu_title_line(app, i) {
+            let title_segments = upper_segments_for_line(
+                &title_line,
+                if selected {
+                    UpperSegmentState::Active
+                } else {
+                    UpperSegmentState::Pending
+                },
+            );
+            if !title_segments.is_empty() {
+                render_list.push(Renderable::TypingUpper {
+                    segments: title_segments,
+                    anchor: Anchor::TopCenter,
+                    shift: Shift { x: -0.22, y: y_pos },
+                    align: Align {
+                        horizontal: HorizontalAlign::Left,
+                        vertical: VerticalAlign::Top,
+                    },
+                    font_size: title_font_size,
+                    line_alignment: TypingLineAlignment::full_line(measure_line_base_width(
+                        &title_line,
+                        fonts,
+                        title_pixel_font_size,
+                    )),
+                });
+                continue;
+            }
+        }
+
+        render_list.push(Renderable::Text {
+            text: item.to_string(),
+            anchor: Anchor::TopCenter,
+            shift: Shift { x: -0.22, y: y_pos },
+            align: Align {
+                horizontal: HorizontalAlign::Left,
+                vertical: VerticalAlign::Top,
+            },
+            font_size: FontSize::WindowHeight(0.042),
             color,
         });
     }
@@ -1026,6 +1096,22 @@ fn script_for_active_character(
     }
 }
 
+fn script_for_input_feedback_character(
+    segment: &Segment,
+    context: FontScript,
+    char_index: usize,
+    character: char,
+) -> FontScript {
+    if matches!(segment, Segment::Plain { .. })
+        && context != FontScript::English
+        && (character.is_ascii_alphanumeric() || character.is_ascii_punctuation())
+    {
+        return context;
+    }
+
+    script_for_active_character(segment, context, char_index, character)
+}
+
 fn plain_base_runs(text: &str, context: FontScript) -> Vec<crate::font::TextScriptRun> {
     plain_text_script_runs(text, Some(context))
 }
@@ -1166,7 +1252,7 @@ fn push_unconfirmed_input_elements(
     text: String,
     context: FontScript,
 ) {
-    if matches!(source_segment, Segment::Plain { .. }) {
+    if matches!(source_segment, Segment::Plain { .. }) && context == FontScript::English {
         for run in plain_base_runs(&text, context) {
             elements.push(ActiveLowerElement::UnconfirmedInput {
                 text: run.text,
@@ -1662,7 +1748,7 @@ fn build_typing_ui(
                         if let Some(wrong_char) = status.last_wrong_keydown {
                             active_elements.push(ActiveLowerElement::LastIncorrectInput {
                                 character: wrong_char,
-                                script: script_for_active_character(
+                                script: script_for_input_feedback_character(
                                     active_seg_content,
                                     active_script,
                                     status.char_.get(),
@@ -1772,7 +1858,7 @@ fn build_typing_ui(
                     if let Some(wrong_char) = status.last_wrong_keydown {
                         active_elements.push(ActiveLowerElement::LastIncorrectInput {
                             character: wrong_char,
-                            script: script_for_active_character(
+                            script: script_for_input_feedback_character(
                                 active_seg_content,
                                 active_script,
                                 status.char_.get(),
@@ -1993,7 +2079,7 @@ pub fn calculate_aligned_position(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{App, AppEvent, Fonts, SettingsItem};
+    use crate::app::{App, AppEvent, FontBundle, Fonts, SettingsItem};
     use crate::display::DisplayScale;
     use crate::font::FontScript;
     use crate::io::{FontAssetId, FontEntry, FontSource};
@@ -2005,7 +2091,16 @@ mod tests {
                 .expect("test font should parse")
         }
 
-        Fonts::new(font(), font(), font(), font(), font())
+        Fonts::new(FontBundle {
+            ui: font(),
+            japanese: font(),
+            japanese_ruby: font(),
+            chinese_simplified: font(),
+            chinese_simplified_ruby: font(),
+            traditional_chinese: font(),
+            traditional_chinese_ruby: font(),
+            english: font(),
+        })
     }
 
     fn typing_app(problem: &str) -> App {
@@ -2217,6 +2312,51 @@ mod tests {
     }
 
     #[test]
+    fn unconfirmed_latin_feedback_uses_problem_language_context() {
+        let japanese_segment = Segment::Plain {
+            text: "\u{65e5}\u{672c}\u{8a9e}".to_string(),
+        };
+        let english_segment = Segment::Plain {
+            text: "English Letter".to_string(),
+        };
+
+        let mut elements = Vec::new();
+        push_unconfirmed_input_elements(
+            &mut elements,
+            &japanese_segment,
+            "mikakuteimojiretu".to_string(),
+            FontScript::Japanese,
+        );
+        match elements.as_slice() {
+            [ActiveLowerElement::UnconfirmedInput { text, script }] => {
+                assert_eq!(text, "mikakuteimojiretu");
+                assert_eq!(*script, FontScript::Japanese);
+            }
+            _ => panic!("Japanese unconfirmed feedback should be a single Japanese-font run"),
+        }
+
+        elements.clear();
+        push_unconfirmed_input_elements(
+            &mut elements,
+            &english_segment,
+            "English".to_string(),
+            FontScript::English,
+        );
+        match elements.as_slice() {
+            [ActiveLowerElement::UnconfirmedInput { text, script }] => {
+                assert_eq!(text, "English");
+                assert_eq!(*script, FontScript::English);
+            }
+            _ => panic!("English unconfirmed feedback should remain English-font text"),
+        }
+
+        assert_eq!(
+            script_for_input_feedback_character(&japanese_segment, FontScript::Japanese, 0, 'm'),
+            FontScript::Japanese
+        );
+    }
+
+    #[test]
     fn typing_title_preserves_ruby_base_and_script() {
         let app = typing_app("#title [春晓/chun1xiao3]\n[春眠/chun1mian2]");
 
@@ -2226,6 +2366,38 @@ mod tests {
         assert_eq!(title[0].base_text, "春晓");
         assert_eq!(title[0].ruby_text.as_deref(), Some("chun1xiao3"));
         assert_eq!(title[0].script, FontScript::ChineseSimplified);
+    }
+
+    #[test]
+    fn problem_selection_title_uses_typing_font_renderable() {
+        let mut app = App::new(test_fonts());
+        app.add_custom_problem(
+            "plain".to_string(),
+            "#title [\u{6625}\u{6653}/chun1xiao3]\n[\u{6625}\u{7720}/chun1mian2]".to_string(),
+            0,
+        );
+
+        let render_list = build_ui(&app, app.fonts(), 800, 500);
+        let menu_title = render_list
+            .iter()
+            .find_map(|item| match item {
+                Renderable::TypingUpper { segments, .. }
+                    if segments
+                        .iter()
+                        .any(|segment| segment.base_text == "\u{6625}\u{6653}") =>
+                {
+                    Some(segments.as_slice())
+                }
+                _ => None,
+            })
+            .expect("problem menu title should render through TypingUpper");
+
+        assert_eq!(menu_title[0].base_text, "\u{6625}\u{6653}");
+        assert_eq!(menu_title[0].ruby_text.as_deref(), Some("chun1xiao3"));
+        assert_eq!(menu_title[0].script, FontScript::ChineseSimplified);
+        assert!(!render_texts(&render_list)
+            .iter()
+            .any(|text| text.contains("\u{6625}\u{6653}")));
     }
 
     #[test]
@@ -2300,7 +2472,10 @@ mod tests {
         let texts = render_texts(&render_list);
         assert!(texts.contains(&"UI Font"));
         assert!(texts.contains(&"Simplified Chinese Font"));
+        assert!(texts.contains(&"Simplified Chinese Ruby Font"));
         assert!(texts.contains(&"Traditional Chinese Font"));
+        assert!(texts.contains(&"Traditional Chinese Ruby Font"));
+        assert!(texts.contains(&"Japanese Ruby Font"));
         assert!(!texts.contains(&"Chinese Simplified Font"));
 
         app.selected_settings_item = SettingsItem::DisplayScale;

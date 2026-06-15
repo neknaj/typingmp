@@ -1,7 +1,7 @@
 // src/tui.rs
 
 #[cfg(not(feature = "uefi"))]
-use crate::app::{App, AppEvent, Fonts, TuiDisplayMode};
+use crate::app::{App, AppEvent, FontBundle, Fonts, TuiDisplayMode};
 #[cfg(not(feature = "uefi"))]
 use crate::backend::BackendError;
 #[cfg(not(feature = "uefi"))]
@@ -316,23 +316,35 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let japanese_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::YujiSyukuRegular)?)
             .map_err(|_| BackendError::asset("failed to parse Yuji Syuku font"))?;
+    let japanese_ruby_font =
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::YujiSyukuRegular)?)
+            .map_err(|_| BackendError::asset("failed to parse Yuji Syuku font"))?;
     let simplified_chinese_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::MaShanZhengRegular)?)
             .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
+    let simplified_chinese_ruby_font =
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::MaShanZhengRegular)?)
+            .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
     let traditional_chinese_font =
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::MaShanZhengRegular)?)
+            .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
+    let traditional_chinese_ruby_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::MaShanZhengRegular)?)
             .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
     let english_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::KalamRegular)?)
             .map_err(|_| BackendError::asset("failed to parse Kalam font"))?;
 
-    let fonts = Fonts::new(
-        ui_font,
-        japanese_font,
-        simplified_chinese_font,
-        traditional_chinese_font,
-        english_font,
-    );
+    let fonts = Fonts::new(FontBundle {
+        ui: ui_font,
+        japanese: japanese_font,
+        japanese_ruby: japanese_ruby_font,
+        chinese_simplified: simplified_chinese_font,
+        chinese_simplified_ruby: simplified_chinese_ruby_font,
+        traditional_chinese: traditional_chinese_font,
+        traditional_chinese_ruby: traditional_chinese_ruby_font,
+        english: english_font,
+    });
 
     let mut stdout = stdout();
     let _terminal_guard = TerminalGuard::enter(&mut stdout)?;
@@ -540,7 +552,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                     let ruby_font_size_px = render_font_size * 0.5;
                                     let (ruby_art_buffer, ruby_art_width, ruby_art_height, _) =
                                         tui_renderer::render_text_to_braille_art(
-                                            fonts.get_for_script(seg.script),
+                                            fonts.get_ruby_for_script(seg.script),
                                             ruby,
                                             ruby_font_size_px,
                                         );
@@ -750,7 +762,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                                     ruby_art_height,
                                                     _,
                                                 ) = tui_renderer::render_text_to_braille_art(
-                                                    font,
+                                                    fonts.get_ruby_for_script(script),
                                                     &ruby,
                                                     ruby_font_size_px,
                                                 );

@@ -12,6 +12,9 @@ pub const DEFAULT_CHINESE_SIMPLIFIED_FONT_NAME: &str = "MaShanZheng";
 pub const DEFAULT_TRADITIONAL_CHINESE_FONT_NAME: &str = "MaShanZheng";
 pub const DEFAULT_ENGLISH_FONT_NAME: &str = "Kalam";
 pub const DEFAULT_UI_FONT_NAME: &str = "NotoSerifJP";
+pub const DEFAULT_JAPANESE_RUBY_FONT_NAME: &str = "YujiSyuku";
+pub const DEFAULT_CHINESE_SIMPLIFIED_RUBY_FONT_NAME: &str = "MaShanZheng";
+pub const DEFAULT_TRADITIONAL_CHINESE_RUBY_FONT_NAME: &str = "MaShanZheng";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FontScript {
@@ -45,6 +48,7 @@ impl FontScript {
 pub enum FontTarget {
     Ui,
     Script(FontScript),
+    Ruby(FontScript),
 }
 
 impl FontTarget {
@@ -52,6 +56,10 @@ impl FontTarget {
         match self {
             Self::Ui => "UI Font",
             Self::Script(script) => script.settings_label(),
+            Self::Ruby(FontScript::Japanese) => "Japanese Ruby Font",
+            Self::Ruby(FontScript::ChineseSimplified) => "Simplified Chinese Ruby Font",
+            Self::Ruby(FontScript::TraditionalChinese) => "Traditional Chinese Ruby Font",
+            Self::Ruby(FontScript::English) => "English Ruby Font",
         }
     }
 }
@@ -59,10 +67,24 @@ impl FontTarget {
 pub struct Fonts {
     ui: FontSlot,
     japanese: FontSlot,
+    japanese_ruby: FontSlot,
     chinese_simplified: FontSlot,
+    chinese_simplified_ruby: FontSlot,
     traditional_chinese: FontSlot,
+    traditional_chinese_ruby: FontSlot,
     english: FontSlot,
     generation: u64,
+}
+
+pub struct FontBundle {
+    pub ui: FontVec,
+    pub japanese: FontVec,
+    pub japanese_ruby: FontVec,
+    pub chinese_simplified: FontVec,
+    pub chinese_simplified_ruby: FontVec,
+    pub traditional_chinese: FontVec,
+    pub traditional_chinese_ruby: FontVec,
+    pub english: FontVec,
 }
 
 struct FontSlot {
@@ -80,16 +102,30 @@ impl FontSlot {
 }
 
 impl Fonts {
-    pub fn new(
-        ui: FontVec,
-        japanese: FontVec,
-        chinese_simplified: FontVec,
-        traditional_chinese: FontVec,
-        english: FontVec,
-    ) -> Self {
+    pub fn new(bundle: FontBundle) -> Self {
+        let FontBundle {
+            ui,
+            japanese,
+            japanese_ruby,
+            chinese_simplified,
+            chinese_simplified_ruby,
+            traditional_chinese,
+            traditional_chinese_ruby,
+            english,
+        } = bundle;
+
         Self {
             ui: FontSlot::new(ui, DEFAULT_UI_FONT_NAME),
+            chinese_simplified_ruby: FontSlot::new(
+                chinese_simplified_ruby,
+                DEFAULT_CHINESE_SIMPLIFIED_RUBY_FONT_NAME,
+            ),
+            traditional_chinese_ruby: FontSlot::new(
+                traditional_chinese_ruby,
+                DEFAULT_TRADITIONAL_CHINESE_RUBY_FONT_NAME,
+            ),
             japanese: FontSlot::new(japanese, DEFAULT_JAPANESE_FONT_NAME),
+            japanese_ruby: FontSlot::new(japanese_ruby, DEFAULT_JAPANESE_RUBY_FONT_NAME),
             chinese_simplified: FontSlot::new(
                 chinese_simplified,
                 DEFAULT_CHINESE_SIMPLIFIED_FONT_NAME,
@@ -109,6 +145,10 @@ impl Fonts {
 
     pub fn get_for_script(&self, script: FontScript) -> &FontVec {
         &self.slot_for_script(script).font
+    }
+
+    pub fn get_ruby_for_script(&self, script: FontScript) -> &FontVec {
+        &self.slot_for_ruby_script(script).font
     }
 
     pub fn name_for_script(&self, script: FontScript) -> &str {
@@ -145,6 +185,7 @@ impl Fonts {
         match target {
             FontTarget::Ui => &self.ui,
             FontTarget::Script(script) => self.slot_for_script(script),
+            FontTarget::Ruby(script) => self.slot_for_ruby_script(script),
         }
     }
 
@@ -152,6 +193,7 @@ impl Fonts {
         match target {
             FontTarget::Ui => &mut self.ui,
             FontTarget::Script(script) => self.slot_for_script_mut(script),
+            FontTarget::Ruby(script) => self.slot_for_ruby_script_mut(script),
         }
     }
 
@@ -169,6 +211,24 @@ impl Fonts {
             FontScript::Japanese => &mut self.japanese,
             FontScript::ChineseSimplified => &mut self.chinese_simplified,
             FontScript::TraditionalChinese => &mut self.traditional_chinese,
+            FontScript::English => &mut self.english,
+        }
+    }
+
+    fn slot_for_ruby_script(&self, script: FontScript) -> &FontSlot {
+        match script {
+            FontScript::Japanese => &self.japanese_ruby,
+            FontScript::ChineseSimplified => &self.chinese_simplified_ruby,
+            FontScript::TraditionalChinese => &self.traditional_chinese_ruby,
+            FontScript::English => &self.english,
+        }
+    }
+
+    fn slot_for_ruby_script_mut(&mut self, script: FontScript) -> &mut FontSlot {
+        match script {
+            FontScript::Japanese => &mut self.japanese_ruby,
+            FontScript::ChineseSimplified => &mut self.chinese_simplified_ruby,
+            FontScript::TraditionalChinese => &mut self.traditional_chinese_ruby,
             FontScript::English => &mut self.english,
         }
     }

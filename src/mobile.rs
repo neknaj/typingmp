@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Instant;
 
-use crate::app::{App, AppEvent, Fonts, UiCommand};
+use crate::app::{App, AppEvent, FontBundle, Fonts, UiCommand};
 use crate::backend::BackendError;
 use crate::io::{AssetProvider, BundledFont, DesktopAssetProvider};
 use crate::renderer::{ArgbSurface, RenderCache};
@@ -180,23 +180,35 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let japanese_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::YujiSyukuRegular)?)
             .map_err(|_| BackendError::asset("failed to parse Yuji Syuku font"))?;
+    let japanese_ruby_font =
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::YujiSyukuRegular)?)
+            .map_err(|_| BackendError::asset("failed to parse Yuji Syuku font"))?;
     let simplified_chinese_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::MaShanZhengRegular)?)
             .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
+    let simplified_chinese_ruby_font =
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::MaShanZhengRegular)?)
+            .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
     let traditional_chinese_font =
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::MaShanZhengRegular)?)
+            .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
+    let traditional_chinese_ruby_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::MaShanZhengRegular)?)
             .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
     let english_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::KalamRegular)?)
             .map_err(|_| BackendError::asset("failed to parse Kalam font"))?;
 
-    let fonts = Fonts::new(
-        ui_font,
-        japanese_font,
-        simplified_chinese_font,
-        traditional_chinese_font,
-        english_font,
-    );
+    let fonts = Fonts::new(FontBundle {
+        ui: ui_font,
+        japanese: japanese_font,
+        japanese_ruby: japanese_ruby_font,
+        chinese_simplified: simplified_chinese_font,
+        chinese_simplified_ruby: simplified_chinese_ruby_font,
+        traditional_chinese: traditional_chinese_font,
+        traditional_chinese_ruby: traditional_chinese_ruby_font,
+        english: english_font,
+    });
     let mut app = App::new(fonts);
     app.set_available_fonts(asset_provider.list_fonts());
     let app_state = Rc::new(RefCell::new(app));

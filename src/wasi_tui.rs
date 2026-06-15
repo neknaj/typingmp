@@ -1,4 +1,4 @@
-use crate::app::{App, AppEvent, Fonts};
+use crate::app::{App, AppEvent, FontBundle, Fonts};
 use crate::backend::BackendError;
 use crate::io::{bundled_font_data, bundled_font_entries};
 use crate::model::Segment;
@@ -157,22 +157,34 @@ fn bundled_fonts() -> Result<Fonts, BackendError> {
     let japanese_font =
         FontVec::try_from_vec(include_bytes!("../fonts/YujiSyuku-Regular.ttf").to_vec())
             .map_err(|_| BackendError::asset("failed to parse Yuji Syuku font"))?;
+    let japanese_ruby_font =
+        FontVec::try_from_vec(include_bytes!("../fonts/YujiSyuku-Regular.ttf").to_vec())
+            .map_err(|_| BackendError::asset("failed to parse Yuji Syuku font"))?;
     let simplified_chinese_font =
+        FontVec::try_from_vec(include_bytes!("../fonts/MaShanZheng-Regular.ttf").to_vec())
+            .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
+    let simplified_chinese_ruby_font =
         FontVec::try_from_vec(include_bytes!("../fonts/MaShanZheng-Regular.ttf").to_vec())
             .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
     let traditional_chinese_font =
         FontVec::try_from_vec(include_bytes!("../fonts/MaShanZheng-Regular.ttf").to_vec())
             .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
+    let traditional_chinese_ruby_font =
+        FontVec::try_from_vec(include_bytes!("../fonts/MaShanZheng-Regular.ttf").to_vec())
+            .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
     let english_font = FontVec::try_from_vec(include_bytes!("../fonts/Kalam-Regular.ttf").to_vec())
         .map_err(|_| BackendError::asset("failed to parse Kalam font"))?;
 
-    Ok(Fonts::new(
-        ui_font,
-        japanese_font,
-        simplified_chinese_font,
-        traditional_chinese_font,
-        english_font,
-    ))
+    Ok(Fonts::new(FontBundle {
+        ui: ui_font,
+        japanese: japanese_font,
+        japanese_ruby: japanese_ruby_font,
+        chinese_simplified: simplified_chinese_font,
+        chinese_simplified_ruby: simplified_chinese_ruby_font,
+        traditional_chinese: traditional_chinese_font,
+        traditional_chinese_ruby: traditional_chinese_ruby_font,
+        english: english_font,
+    }))
 }
 
 fn terminal_size() -> CellViewport {

@@ -1,6 +1,6 @@
 // src/wasm.rs
 
-use crate::app::{App, AppEvent, CustomProblem, Fonts, UiCommand};
+use crate::app::{App, AppEvent, CustomProblem, FontBundle, Fonts, UiCommand};
 use crate::backend::BackendError;
 use crate::io::{
     bundled_font_entries, bundled_font_file_name, PersistentStore, ProviderError, ProviderErrorKind,
@@ -462,22 +462,34 @@ async fn start_async() -> Result<(), JsValue> {
     let japanese_font =
         FontVec::try_from_vec(fetch_font_bytes("./fonts/YujiSyuku-Regular.ttf").await?)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let japanese_ruby_font =
+        FontVec::try_from_vec(fetch_font_bytes("./fonts/YujiSyuku-Regular.ttf").await?)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let simplified_chinese_font =
+        FontVec::try_from_vec(fetch_font_bytes("./fonts/MaShanZheng-Regular.ttf").await?)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let simplified_chinese_ruby_font =
         FontVec::try_from_vec(fetch_font_bytes("./fonts/MaShanZheng-Regular.ttf").await?)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let traditional_chinese_font =
         FontVec::try_from_vec(fetch_font_bytes("./fonts/MaShanZheng-Regular.ttf").await?)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let traditional_chinese_ruby_font =
+        FontVec::try_from_vec(fetch_font_bytes("./fonts/MaShanZheng-Regular.ttf").await?)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let english_font = FontVec::try_from_vec(fetch_font_bytes("./fonts/Kalam-Regular.ttf").await?)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
-    let fonts = Fonts::new(
-        ui_font,
-        japanese_font,
-        simplified_chinese_font,
-        traditional_chinese_font,
-        english_font,
-    );
+    let fonts = Fonts::new(FontBundle {
+        ui: ui_font,
+        japanese: japanese_font,
+        japanese_ruby: japanese_ruby_font,
+        chinese_simplified: simplified_chinese_font,
+        chinese_simplified_ruby: simplified_chinese_ruby_font,
+        traditional_chinese: traditional_chinese_font,
+        traditional_chinese_ruby: traditional_chinese_ruby_font,
+        english: english_font,
+    });
 
     let app = Rc::new(RefCell::new(App::new(fonts)));
     // localStorage からカスタム問題を復元

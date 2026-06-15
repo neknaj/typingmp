@@ -671,13 +671,14 @@ fn draw_typing_upper(
         );
 
         if let Some(ruby) = &segment.ruby_text {
-            let ruby_metrics = cache.measure_text(font, ruby, ruby_pixel_font_size);
+            let ruby_font = fonts.get_ruby_for_script(segment.script);
+            let ruby_metrics = cache.measure_text(ruby_font, ruby, ruby_pixel_font_size);
             let ruby_width = ruby_metrics.width;
             let ruby_x = pen_x as f32 + (segment_width as f32 - ruby_width as f32) / 2.0;
             let ruby_y = y as f32 - ruby_pixel_font_size * 0.5;
             draw_text_if_visible(
                 frame,
-                font,
+                ruby_font,
                 ruby,
                 (ruby_x, ruby_y),
                 ruby_pixel_font_size,
@@ -750,14 +751,16 @@ fn draw_typing_lower(
                     );
 
                     if let Some(ruby) = ruby_text {
-                        let ruby_metrics = cache.measure_text(font, ruby, ruby_pixel_font_size);
+                        let ruby_font = fonts.get_ruby_for_script(*script);
+                        let ruby_metrics =
+                            cache.measure_text(ruby_font, ruby, ruby_pixel_font_size);
                         if ruby_metrics.width > 0 {
                             let ruby_x = pen_x as f32
                                 + (*segment_width as f32 - ruby_metrics.width as f32) / 2.0;
                             let ruby_y = y as f32 - ruby_pixel_font_size * 0.5;
                             draw_text_if_visible(
                                 frame,
-                                font,
+                                ruby_font,
                                 ruby,
                                 (ruby_x, ruby_y),
                                 ruby_pixel_font_size,
@@ -1297,7 +1300,7 @@ pub mod tui_renderer {
 mod tests {
     use super::*;
     use crate::display::{DisplayAspectRatio, DisplaySettings};
-    use crate::font::Fonts;
+    use crate::font::{FontBundle, Fonts};
     use crate::ui::{Align, Anchor, FontSize, HorizontalAlign, Renderable, Shift, VerticalAlign};
     use ab_glyph::FontVec;
 
@@ -1307,13 +1310,16 @@ mod tests {
     }
 
     fn test_fonts() -> Fonts {
-        Fonts::new(
-            test_font(),
-            test_font(),
-            test_font(),
-            test_font(),
-            test_font(),
-        )
+        Fonts::new(FontBundle {
+            ui: test_font(),
+            japanese: test_font(),
+            japanese_ruby: test_font(),
+            chinese_simplified: test_font(),
+            chinese_simplified_ruby: test_font(),
+            traditional_chinese: test_font(),
+            traditional_chinese_ruby: test_font(),
+            english: test_font(),
+        })
     }
 
     #[test]
