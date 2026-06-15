@@ -46,29 +46,54 @@ pub fn draw_linear_gradient(
     let dy = y1 - y0;
     let len_sq = dx * dx + dy * dy;
 
+    let colors = GradientColors::new(start_color, end_color);
     for y in 0..height {
         for x in 0..width {
             let p_x = x as f32;
             let p_y = y as f32;
-
             let dot_product = (p_x - x0) * dx + (p_y - y0) * dy;
-            let ratio = if len_sq == 0.0 {
-                0.0
-            } else {
-                (dot_product / len_sq).clamp(0.0, 1.0)
-            };
-
-            let r = (((start_color >> 16) & 0xFF) as f32 * (1.0 - ratio)
-                + ((end_color >> 16) & 0xFF) as f32 * ratio) as u32;
-            let g = (((start_color >> 8) & 0xFF) as f32 * (1.0 - ratio)
-                + ((end_color >> 8) & 0xFF) as f32 * ratio) as u32;
-            let b = (((start_color) & 0xFF) as f32 * (1.0 - ratio)
-                + ((end_color) & 0xFF) as f32 * ratio) as u32;
-            let interpolated_color = (0xFF << 24) | (r << 16) | (g << 8) | b;
-
-            let index = y * width + x;
-            buffer[index] = interpolated_color;
+            let ratio = gradient_ratio(dot_product, len_sq);
+            buffer[y * width + x] = colors.interpolate(ratio);
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct GradientColors {
+    start_r: f32,
+    start_g: f32,
+    start_b: f32,
+    end_r: f32,
+    end_g: f32,
+    end_b: f32,
+}
+
+impl GradientColors {
+    fn new(start_color: u32, end_color: u32) -> Self {
+        Self {
+            start_r: ((start_color >> 16) & 0xFF) as f32,
+            start_g: ((start_color >> 8) & 0xFF) as f32,
+            start_b: (start_color & 0xFF) as f32,
+            end_r: ((end_color >> 16) & 0xFF) as f32,
+            end_g: ((end_color >> 8) & 0xFF) as f32,
+            end_b: (end_color & 0xFF) as f32,
+        }
+    }
+
+    fn interpolate(self, ratio: f32) -> u32 {
+        let inverse = 1.0 - ratio;
+        let r = (self.start_r * inverse + self.end_r * ratio) as u32;
+        let g = (self.start_g * inverse + self.end_g * ratio) as u32;
+        let b = (self.start_b * inverse + self.end_b * ratio) as u32;
+        (0xFF << 24) | (r << 16) | (g << 8) | b
+    }
+}
+
+fn gradient_ratio(dot_product: f32, len_sq: f32) -> f32 {
+    if len_sq == 0.0 {
+        0.0
+    } else {
+        (dot_product / len_sq).clamp(0.0, 1.0)
     }
 }
 
@@ -148,22 +173,37 @@ struct TextMeasureCacheEntry {
     font_key: usize,
     text: String,
     size_bits: u32,
+    hash: usize,
     metrics: TextMetrics,
+}
+
+struct GradientCache {
+    frame_width: usize,
+    frame_height: usize,
+    viewport: DisplayViewport,
+    start_color: u32,
+    end_color: u32,
+    pixels: Vec<u32>,
 }
 
 /// Shared render cache used by pixel backends.
 pub struct RenderCache {
     font_generation: u64,
-    text_metrics: Vec<TextMeasureCacheEntry>,
+    text_metrics: Vec<Option<TextMeasureCacheEntry>>,
+    text_metric_count: usize,
+    gradient: Option<GradientCache>,
 }
 
 impl RenderCache {
-    const TEXT_MEASURE_CACHE_LIMIT: usize = 512;
+    const TEXT_MEASURE_CACHE_LIMIT: usize = 2048;
+    const TEXT_MEASURE_CACHE_PROBE_LIMIT: usize = 4;
 
     pub const fn new() -> Self {
         Self {
             font_generation: u64::MAX,
             text_metrics: Vec::new(),
+            text_metric_count: 0,
+            gradient: None,
         }
     }
 
@@ -172,35 +212,169 @@ impl RenderCache {
         if self.font_generation != font_generation {
             self.font_generation = font_generation;
             self.text_metrics.clear();
+            self.text_metric_count = 0;
+        }
+    }
+
+    fn ensure_text_metric_slots(&mut self) {
+        if self.text_metrics.len() != Self::TEXT_MEASURE_CACHE_LIMIT {
+            self.text_metrics.clear();
+            self.text_metrics
+                .resize_with(Self::TEXT_MEASURE_CACHE_LIMIT, || None);
+            self.text_metric_count = 0;
         }
     }
 
     fn measure_text<F: Font>(&mut self, font: &F, text: &str, size: f32) -> TextMetrics {
         let font_key = core::ptr::from_ref(font).cast::<()>() as usize;
         let size_bits = size.to_bits();
-        if let Some(entry) = self.text_metrics.iter().find(|entry| {
-            entry.font_key == font_key && entry.size_bits == size_bits && entry.text == text
-        }) {
-            return entry.metrics;
+        let hash = text_metric_hash(font_key, size_bits, text);
+        self.ensure_text_metric_slots();
+        let primary_slot = hash % Self::TEXT_MEASURE_CACHE_LIMIT;
+        let mut insert_slot = primary_slot;
+        for offset in 0..Self::TEXT_MEASURE_CACHE_PROBE_LIMIT {
+            let slot = (primary_slot + offset) % Self::TEXT_MEASURE_CACHE_LIMIT;
+            match &self.text_metrics[slot] {
+                Some(entry)
+                    if entry.hash == hash
+                        && entry.font_key == font_key
+                        && entry.size_bits == size_bits
+                        && entry.text == text =>
+                {
+                    return entry.metrics;
+                }
+                None => {
+                    insert_slot = slot;
+                    break;
+                }
+                Some(_) => {}
+            }
         }
 
         let (width, height, _) = gui_renderer::measure_text(font, text, size);
         let metrics = TextMetrics { width, height };
-        if self.text_metrics.len() >= Self::TEXT_MEASURE_CACHE_LIMIT {
-            self.text_metrics.clear();
+        if self.text_metrics[insert_slot].is_none() {
+            self.text_metric_count += 1;
         }
-        self.text_metrics.push(TextMeasureCacheEntry {
+        self.text_metrics[insert_slot] = Some(TextMeasureCacheEntry {
             font_key,
             text: text.to_string(),
             size_bits,
+            hash,
             metrics,
         });
         metrics
     }
 
+    fn gradient_pixels(
+        &mut self,
+        frame_width: usize,
+        frame_height: usize,
+        viewport: DisplayViewport,
+        start_color: u32,
+        end_color: u32,
+    ) -> &[u32] {
+        let needs_rebuild = self.gradient.as_ref().is_none_or(|cache| {
+            cache.frame_width != frame_width
+                || cache.frame_height != frame_height
+                || cache.viewport != viewport
+                || cache.start_color != start_color
+                || cache.end_color != end_color
+        });
+        if needs_rebuild {
+            let mut pixels = vec![BG_COLOR; frame_width.saturating_mul(frame_height)];
+            draw_gradient_into_frame(
+                &mut pixels,
+                frame_width,
+                frame_height,
+                viewport,
+                start_color,
+                end_color,
+            );
+            self.gradient = Some(GradientCache {
+                frame_width,
+                frame_height,
+                viewport,
+                start_color,
+                end_color,
+                pixels,
+            });
+        }
+
+        self.gradient
+            .as_ref()
+            .map(|cache| cache.pixels.as_slice())
+            .unwrap_or(&[])
+    }
+
     #[cfg(test)]
     fn text_measure_cache_len(&self) -> usize {
-        self.text_metrics.len()
+        self.text_metric_count
+    }
+}
+
+fn text_metric_hash(font_key: usize, size_bits: u32, text: &str) -> usize {
+    let mut hash = 2_166_136_261usize;
+    for byte in font_key.to_ne_bytes() {
+        hash = hash.wrapping_mul(16_777_619) ^ usize::from(byte);
+    }
+    for byte in size_bits.to_ne_bytes() {
+        hash = hash.wrapping_mul(16_777_619) ^ usize::from(byte);
+    }
+    for byte in text.as_bytes() {
+        hash = hash.wrapping_mul(16_777_619) ^ usize::from(*byte);
+    }
+    hash
+}
+
+fn frame_clip_for_viewport(
+    frame_width: usize,
+    frame_height: usize,
+    viewport: DisplayViewport,
+) -> PixelClip {
+    let left = (viewport.x as i64).clamp(0, frame_width as i64) as i32;
+    let top = (viewport.y as i64).clamp(0, frame_height as i64) as i32;
+    let right = (viewport.x as i64 + viewport.width as i64).clamp(0, frame_width as i64) as i32;
+    let bottom = (viewport.y as i64 + viewport.height as i64).clamp(0, frame_height as i64) as i32;
+    PixelClip::new(left, top, right, bottom)
+}
+
+fn draw_gradient_into_frame(
+    pixels: &mut [u32],
+    frame_width: usize,
+    frame_height: usize,
+    viewport: DisplayViewport,
+    start_color: u32,
+    end_color: u32,
+) {
+    if frame_width == 0 || frame_height == 0 {
+        return;
+    }
+
+    let clip = frame_clip_for_viewport(frame_width, frame_height, viewport);
+    if clip.is_empty() {
+        return;
+    }
+
+    let dx = viewport.width as f32;
+    let dy = viewport.height as f32;
+    let len_sq = dx * dx + dy * dy;
+    let inv_len_sq = if len_sq == 0.0 { 0.0 } else { 1.0 / len_sq };
+    let colors = GradientColors::new(start_color, end_color);
+
+    for y in clip.top..clip.bottom {
+        let local_y = (y - viewport.y) as f32;
+        let mut dot = (clip.left - viewport.x) as f32 * dx + local_y * dy;
+        let row_start = y as usize * frame_width;
+        for x in clip.left..clip.right {
+            let ratio = if len_sq == 0.0 {
+                0.0
+            } else {
+                (dot * inv_len_sq).clamp(0.0, 1.0)
+            };
+            pixels[row_start + x as usize] = colors.interpolate(ratio);
+            dot += dx;
+        }
     }
 }
 
@@ -271,12 +445,11 @@ fn render_argb(
         frame_height: height,
         viewport,
     };
-    frame.pixels.fill(BG_COLOR);
     let has_background = render_list
         .iter()
         .any(|item| matches!(item, Renderable::Background { .. }));
     if !has_background {
-        frame.fill_viewport(BG_COLOR);
+        frame.pixels.fill(BG_COLOR);
     }
 
     for item in render_list {
@@ -410,20 +583,8 @@ impl PixelFrame<'_> {
         )
     }
 
-    fn viewport_right(&self) -> i64 {
-        self.viewport.x as i64 + self.viewport.width as i64
-    }
-
-    fn viewport_bottom(&self) -> i64 {
-        self.viewport.y as i64 + self.viewport.height as i64
-    }
-
     fn frame_clip(&self) -> PixelClip {
-        let left = (self.viewport.x as i64).clamp(0, self.stride as i64) as i32;
-        let top = (self.viewport.y as i64).clamp(0, self.frame_height as i64) as i32;
-        let right = self.viewport_right().clamp(0, self.stride as i64) as i32;
-        let bottom = self.viewport_bottom().clamp(0, self.frame_height as i64) as i32;
-        PixelClip::new(left, top, right, bottom)
+        frame_clip_for_viewport(self.stride, self.frame_height, self.viewport)
     }
 
     fn visible_local_rect(&self) -> (i32, i32, i32, i32) {
@@ -481,20 +642,6 @@ impl PixelFrame<'_> {
         );
     }
 
-    fn fill_viewport(&mut self, color: u32) {
-        let clip = self.frame_clip();
-        if clip.is_empty() {
-            return;
-        }
-
-        for y in clip.top as usize..clip.bottom as usize {
-            let row_start = y * self.stride;
-            let start = row_start + clip.left as usize;
-            let end = row_start + clip.right as usize;
-            self.pixels[start..end].fill(color);
-        }
-    }
-
     fn fill_frame_rect(&mut self, rect: PixelClip, color: u32) {
         let frame_clip = self.frame_clip();
         let left = rect.left.max(frame_clip.left);
@@ -524,7 +671,7 @@ impl PixelFrame<'_> {
         self.fill_frame_rect(PixelClip::new(left, top, right, bottom), color);
     }
 
-    fn draw_gradient(&mut self, _cache: &mut RenderCache, start_color: u32, end_color: u32) {
+    fn draw_gradient(&mut self, cache: &mut RenderCache, start_color: u32, end_color: u32) {
         if self.viewport.width == 0 || self.viewport.height == 0 {
             return;
         }
@@ -534,31 +681,15 @@ impl PixelFrame<'_> {
             return;
         }
 
-        let visible_width = (clip.right - clip.left) as usize;
-        let visible_height = (clip.bottom - clip.top) as usize;
-        let local_left = clip.left - self.viewport.x;
-        let local_top = clip.top - self.viewport.y;
-        let mut visible_pixels = vec![0; visible_width * visible_height];
-        draw_linear_gradient(
-            &mut visible_pixels,
-            visible_width,
-            visible_height,
+        let gradient = cache.gradient_pixels(
+            self.stride,
+            self.frame_height,
+            self.viewport,
             start_color,
             end_color,
-            (-(local_left as f32), -(local_top as f32)),
-            (
-                self.viewport.width as f32 - local_left as f32,
-                self.viewport.height as f32 - local_top as f32,
-            ),
         );
-
-        for row in 0..visible_height {
-            let dest_y = clip.top as usize + row;
-            let dest_start = dest_y * self.stride + clip.left as usize;
-            let dest_end = dest_start + visible_width;
-            let src_start = row * visible_width;
-            let src_end = src_start + visible_width;
-            self.pixels[dest_start..dest_end].copy_from_slice(&visible_pixels[src_start..src_end]);
+        if gradient.len() == self.pixels.len() {
+            self.pixels.copy_from_slice(gradient);
         }
     }
 }

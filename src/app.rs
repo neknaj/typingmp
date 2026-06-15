@@ -567,32 +567,29 @@ impl App {
 
                 let rebuild_cache = self.scroll_cache.as_ref().is_none_or(|cache| match cache {
                     ScrollCache::Ready(ready) => {
-                        ready.width != width
-                            || ready.height != height
-                            || ready.font_generation != font_generation
+                        ready.font_generation != font_generation
                             || (ready.font_pixel_size - base_pixel_font_size).abs() > f32::EPSILON
                             || ready.current.line != status.line
                     }
                 });
 
-                let current_cache = if rebuild_cache {
-                    build_scroll_line_cache(
+                let rebuilt_current_cache = if rebuild_cache {
+                    Some(build_scroll_line_cache(
                         current_line_content,
                         &self.fonts,
                         base_pixel_font_size,
                         status.line,
-                    )
+                    ))
                 } else {
-                    match &self.scroll_cache {
-                        Some(ScrollCache::Ready(ready)) => ready.current.clone(),
-                        _ => build_scroll_line_cache(
-                            current_line_content,
-                            &self.fonts,
-                            base_pixel_font_size,
-                            status.line,
-                        ),
-                    }
+                    None
                 };
+                let current_cache = rebuilt_current_cache
+                    .as_ref()
+                    .or(match &self.scroll_cache {
+                        Some(ScrollCache::Ready(ready)) => Some(&ready.current),
+                        _ => None,
+                    })
+                    .expect("scroll cache should exist or be rebuilt");
 
                 let line_origin = match &self.scroll_cache {
                     Some(ScrollCache::Ready(previous_cache))
@@ -619,16 +616,17 @@ impl App {
                 };
 
                 let cursor_in_line = cursor_position_from_status(
-                    &current_cache,
+                    current_cache,
                     status.word,
                     status.segment,
                     status.char_,
                 );
                 let cursor_world = line_origin + cursor_in_line;
+                let current_total_width = current_cache.total_width;
 
                 let scroll_position = typing_line_scroll_position(
                     line_origin,
-                    current_cache.total_width,
+                    current_total_width,
                     cursor_in_line,
                     width,
                 );
@@ -659,16 +657,26 @@ impl App {
                 model.scroll.scroll += diff * 7.5 * (clamped_delta_time / 1000.0);
                 model.scroll.max = scroll_position.max;
 
-                self.scroll_cache = Some(ScrollCache::Ready(ScrollCacheState {
-                    width,
-                    height,
-                    font_pixel_size: base_pixel_font_size,
-                    font_generation,
-                    line_origin,
-                    cursor_in_line,
-                    cursor_world,
-                    current: current_cache,
-                }));
+                if let Some(current) = rebuilt_current_cache {
+                    self.scroll_cache = Some(ScrollCache::Ready(ScrollCacheState {
+                        width,
+                        height,
+                        font_pixel_size: base_pixel_font_size,
+                        font_generation,
+                        line_origin,
+                        cursor_in_line,
+                        cursor_world,
+                        current,
+                    }));
+                } else if let Some(ScrollCache::Ready(cache)) = self.scroll_cache.as_mut() {
+                    cache.width = width;
+                    cache.height = height;
+                    cache.font_pixel_size = base_pixel_font_size;
+                    cache.font_generation = font_generation;
+                    cache.line_origin = line_origin;
+                    cache.cursor_in_line = cursor_in_line;
+                    cache.cursor_world = cursor_world;
+                }
             }
         }
     }
