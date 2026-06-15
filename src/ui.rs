@@ -15,13 +15,12 @@ use std::vec::Vec;
 use alloc::{
     format,
     string::{String, ToString},
+    vec,
 };
 #[cfg(not(feature = "uefi"))]
 use std::string::{String, ToString};
 
-use crate::app::{
-    typing_line_scroll_offset, App, AppSnapshot, AppState, Script, ScrollCache, SettingsItem,
-};
+use crate::app::{typing_line_scroll_offset, App, AppSnapshot, AppState, FontTarget, ScrollCache};
 use crate::font::{
     plain_text_script_runs, script_for_segment, scripts_for_line, segment_script_runs, FontScript,
     Fonts,
@@ -93,6 +92,8 @@ pub enum UpperSegmentState {
     Pending,
     /// 現在入力中のセグメント。
     Active,
+    /// Context lines shown before/after the active typing line.
+    Muted,
 }
 
 pub struct UpperTypingSegment {
@@ -423,7 +424,7 @@ fn build_settings_ui(
             horizontal: HorizontalAlign::Center,
             vertical: VerticalAlign::Top,
         },
-        font_size: FontSize::WindowHeight(0.2),
+        font_size: FontSize::WindowHeight(0.12),
         color: 0xFF_FFFFFF,
     });
 
@@ -432,93 +433,167 @@ fn build_settings_ui(
         return;
     }
 
-    let settings_rows = [
-        (
-            SettingsItem::Japanese,
-            font_setting_label(app.fonts(), Script::Japanese),
-        ),
-        (
-            SettingsItem::ChineseSimplified,
-            font_setting_label(app.fonts(), Script::ChineseSimplified),
-        ),
-        (
-            SettingsItem::TraditionalChinese,
-            font_setting_label(app.fonts(), Script::TraditionalChinese),
-        ),
-        (
-            SettingsItem::English,
-            font_setting_label(app.fonts(), Script::English),
-        ),
-        (
-            SettingsItem::AspectRatio,
-            format!(
-                "Aspect Ratio: {}",
-                snapshot.display_settings.aspect_ratio.label()
-            ),
-        ),
-        (
-            SettingsItem::DisplayScale,
-            format!("Display Scale: {}", snapshot.display_settings.scale.label()),
-        ),
-    ];
+    let settings_rows = settings_table_rows(app, snapshot);
+    let total_rows = settings_rows.len();
+    if total_rows == 0 {
+        return;
+    }
 
-    for (i, (settings_item, label)) in settings_rows.iter().enumerate() {
-        let is_selected = i == snapshot.selected_settings_item.index();
+    let scale = snapshot.display_settings.scale.multiplier();
+    let row_step = (0.062 * scale).clamp(0.058, 0.14);
+    let list_y_start = 0.29;
+    let list_y_end = 0.84;
+    let list_capacity = (((list_y_end - list_y_start) / row_step).floor() as usize)
+        .max(1)
+        .min(total_rows);
+    let selected_index = snapshot.selected_settings_item.index().min(total_rows - 1);
+    let start_index = selected_index
+        .saturating_add(1)
+        .saturating_sub(list_capacity)
+        .min(total_rows - list_capacity);
+    let end_index = (start_index + list_capacity).min(total_rows);
 
-        let mut display_text = if is_selected {
-            format!("> {}", label)
-        } else {
-            format!("  {}", label)
-        };
+    if start_index > 0 {
+        render_list.push(Renderable::Text {
+            text: "↑".to_string(),
+            anchor: Anchor::TopCenter,
+            shift: Shift {
+                x: 0.0,
+                y: list_y_start - 0.045,
+            },
+            align: Align {
+                horizontal: HorizontalAlign::Center,
+                vertical: VerticalAlign::Top,
+            },
+            font_size: FontSize::WindowHeight(0.032),
+            color: 0xFF_888888,
+        });
+    }
 
-        if is_selected && settings_item.font_script().is_some() {
-            display_text.push_str(" <assign>");
-        } else if is_selected {
-            display_text.push_str(" <cycle>");
-        }
-
+    for (visible_index, row) in settings_rows[start_index..end_index].iter().enumerate() {
+        let row_index = start_index + visible_index;
+        let is_selected = row_index == selected_index;
         let color = if is_selected {
             0xFF_FFFF00
         } else {
             0xFF_FFFFFF
         };
+        let action_color = if is_selected {
+            0xFF_FFFF00
+        } else {
+            0xFF_888888
+        };
+        let y = list_y_start + visible_index as f32 * row_step;
+        let marker = if is_selected { ">" } else { " " };
 
+        render_settings_cell(render_list, marker.to_string(), -0.43, y, color);
+        render_settings_cell(render_list, row.label.clone(), -0.35, y, color);
+        render_settings_cell(render_list, fit_table_text(&row.value, 25), -0.03, y, color);
+        render_settings_cell(render_list, row.action.to_string(), 0.34, y, action_color);
+    }
+
+    if end_index < total_rows {
         render_list.push(Renderable::Text {
-            text: display_text,
-            anchor: Anchor::Center,
+            text: "↓".to_string(),
+            anchor: Anchor::TopCenter,
             shift: Shift {
                 x: 0.0,
-                y: 0.0 + (i as f32 * 0.1),
+                y: list_y_start + list_capacity as f32 * row_step,
             },
             align: Align {
                 horizontal: HorizontalAlign::Center,
-                vertical: VerticalAlign::Center,
+                vertical: VerticalAlign::Top,
             },
-            font_size: FontSize::WindowHeight(0.05),
-            color,
+            font_size: FontSize::WindowHeight(0.032),
+            color: 0xFF_888888,
         });
     }
 }
 
-fn font_setting_label(fonts: &Fonts, script: FontScript) -> String {
-    format!(
-        "{}: {}",
-        script.settings_label(),
-        fonts.name_for_script(script)
-    )
+struct SettingsTableRow {
+    label: String,
+    value: String,
+    action: &'static str,
+}
+
+fn settings_table_rows(app: &App, snapshot: AppSnapshot<'_>) -> Vec<SettingsTableRow> {
+    vec![
+        font_setting_row(app.fonts(), FontTarget::Ui),
+        font_setting_row(app.fonts(), FontTarget::Script(FontScript::Japanese)),
+        font_setting_row(
+            app.fonts(),
+            FontTarget::Script(FontScript::ChineseSimplified),
+        ),
+        font_setting_row(
+            app.fonts(),
+            FontTarget::Script(FontScript::TraditionalChinese),
+        ),
+        font_setting_row(app.fonts(), FontTarget::Script(FontScript::English)),
+        SettingsTableRow {
+            label: "Aspect Ratio".to_string(),
+            value: snapshot.display_settings.aspect_ratio.label().to_string(),
+            action: "cycle",
+        },
+        SettingsTableRow {
+            label: "Display Scale".to_string(),
+            value: snapshot.display_settings.scale.label().to_string(),
+            action: "cycle",
+        },
+    ]
+}
+
+fn font_setting_row(fonts: &Fonts, target: FontTarget) -> SettingsTableRow {
+    SettingsTableRow {
+        label: target.settings_label().to_string(),
+        value: fonts.name_for_target(target).to_string(),
+        action: "assign",
+    }
+}
+
+fn render_settings_cell(
+    render_list: &mut Vec<Renderable>,
+    text: String,
+    x: f32,
+    y: f32,
+    color: u32,
+) {
+    render_list.push(Renderable::Text {
+        text,
+        anchor: Anchor::TopCenter,
+        shift: Shift { x, y },
+        align: Align {
+            horizontal: HorizontalAlign::Left,
+            vertical: VerticalAlign::Top,
+        },
+        font_size: FontSize::WindowHeight(0.042),
+        color,
+    });
+}
+
+fn fit_table_text(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+
+    let mut result = text
+        .chars()
+        .take(max_chars.saturating_sub(3))
+        .collect::<String>();
+    result.push_str("...");
+    result
 }
 
 fn build_font_picker_ui(app: &App, render_list: &mut Vec<Renderable>) {
-    let selected_script = app
+    let selected_target = app
         .selected_settings_item
-        .font_script()
-        .unwrap_or(FontScript::Japanese);
+        .font_target()
+        .unwrap_or(FontTarget::Ui);
 
     render_list.push(Renderable::Text {
         text: format!(
             "{}: {}",
-            selected_script.settings_label(),
-            app.fonts().name_for_script(selected_script)
+            selected_target.settings_label(),
+            app.fonts().name_for_target(selected_target)
         ),
         anchor: Anchor::TopCenter,
         shift: Shift { x: 0.0, y: 0.32 },
@@ -1016,6 +1091,37 @@ fn push_upper_typing_segment(
     });
 }
 
+fn upper_segments_for_line(
+    line: &crate::model::Line,
+    state: UpperSegmentState,
+) -> Vec<UpperTypingSegment> {
+    let line_scripts = scripts_for_line(line);
+    let mut segments = Vec::new();
+    let mut segment_index = 0usize;
+
+    for word in &line.words {
+        for segment in &word.segments {
+            let segment_script = line_scripts
+                .get(segment_index)
+                .copied()
+                .unwrap_or_else(|| script_for_segment(segment));
+            segment_index += 1;
+            let (base_text, ruby_text, anno_text) = segment_display_parts(segment);
+            push_upper_typing_segment(
+                &mut segments,
+                segment,
+                base_text,
+                ruby_text,
+                anno_text,
+                segment_script,
+                state,
+            );
+        }
+    }
+
+    segments
+}
+
 fn push_lower_completed_segments(
     segments: &mut Vec<LowerTypingSegment>,
     fonts: &Fonts,
@@ -1223,17 +1329,28 @@ fn build_typing_ui(
     render_list.push(Renderable::Background { gradient });
 
     if let Some(model) = app.typing_model() {
-        render_list.push(Renderable::BigText {
-            text: model.content.title.to_string(),
-            anchor: Anchor::TopCenter,
-            shift: Shift { x: 0.0, y: 0.01 },
-            align: Align {
-                horizontal: HorizontalAlign::Center,
-                vertical: VerticalAlign::Top,
-            },
-            font_size: FontSize::WindowHeight(0.12),
-            color: ACTIVE_COLOR,
-        });
+        let title_font_size = FontSize::WindowHeight(0.12);
+        let title_pixel_font_size = calculate_pixel_font_size(title_font_size, width, height)
+            * app.display_settings().scale.multiplier();
+        let title_segments =
+            upper_segments_for_line(&model.content.title, UpperSegmentState::Active);
+        if !title_segments.is_empty() {
+            render_list.push(Renderable::TypingUpper {
+                segments: title_segments,
+                anchor: Anchor::TopCenter,
+                shift: Shift { x: 0.0, y: 0.06 },
+                align: Align {
+                    horizontal: HorizontalAlign::Center,
+                    vertical: VerticalAlign::Top,
+                },
+                font_size: title_font_size,
+                line_alignment: TypingLineAlignment::full_line(measure_line_base_width(
+                    &model.content.title,
+                    fonts,
+                    title_pixel_font_size,
+                )),
+            });
+        }
 
         let base_font_size = FontSize::WindowHeight(BASE_FONT_SIZE_RATIO);
         let base_pixel_font_size = calculate_pixel_font_size(base_font_size, width, height)
@@ -1705,8 +1822,13 @@ fn build_typing_ui(
             let line_to_display_signed = model.status.line.get() as isize + offset;
             if line_to_display_signed >= 0 && (line_to_display_signed as usize) < line_count {
                 let line_idx_context = line_to_display_signed as usize;
-                render_list.push(Renderable::Text {
-                    text: model.content.lines[line_idx_context].to_string(),
+                let context_font_size = FontSize::WindowHeight(0.08);
+                let context_pixel_font_size =
+                    calculate_pixel_font_size(context_font_size, width, height)
+                        * app.display_settings().scale.multiplier();
+                let context_line = &model.content.lines[line_idx_context];
+                render_list.push(Renderable::TypingUpper {
+                    segments: upper_segments_for_line(context_line, UpperSegmentState::Muted),
                     anchor: Anchor::Center,
                     shift: Shift {
                         x: 0.0,
@@ -1716,8 +1838,12 @@ fn build_typing_ui(
                         horizontal: HorizontalAlign::Center,
                         vertical: VerticalAlign::Center,
                     },
-                    font_size: FontSize::WindowHeight(0.08),
-                    color: 0xFF_444444,
+                    font_size: context_font_size,
+                    line_alignment: TypingLineAlignment::full_line(measure_line_base_width(
+                        context_line,
+                        fonts,
+                        context_pixel_font_size,
+                    )),
                 });
             }
         }
@@ -1867,7 +1993,7 @@ pub fn calculate_aligned_position(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{App, AppEvent, Fonts};
+    use crate::app::{App, AppEvent, Fonts, SettingsItem};
     use crate::display::DisplayScale;
     use crate::font::FontScript;
     use crate::io::{FontAssetId, FontEntry, FontSource};
@@ -1879,7 +2005,7 @@ mod tests {
                 .expect("test font should parse")
         }
 
-        Fonts::new(font(), font(), font(), font())
+        Fonts::new(font(), font(), font(), font(), font())
     }
 
     fn typing_app(problem: &str) -> App {
@@ -1893,7 +2019,16 @@ mod tests {
         let upper_segments = render_list
             .iter()
             .find_map(|item| match item {
-                Renderable::TypingUpper { segments, .. } => Some(segments.as_slice()),
+                Renderable::TypingUpper {
+                    segments,
+                    anchor: Anchor::Center,
+                    align:
+                        Align {
+                            horizontal: HorizontalAlign::Left,
+                            ..
+                        },
+                    ..
+                } => Some(segments.as_slice()),
                 _ => None,
             })
             .expect("typing upper renderable should exist");
@@ -1911,7 +2046,16 @@ mod tests {
         let upper_alignment = render_list
             .iter()
             .find_map(|item| match item {
-                Renderable::TypingUpper { line_alignment, .. } => Some(*line_alignment),
+                Renderable::TypingUpper {
+                    anchor: Anchor::Center,
+                    align:
+                        Align {
+                            horizontal: HorizontalAlign::Left,
+                            ..
+                        },
+                    line_alignment,
+                    ..
+                } => Some(*line_alignment),
                 _ => None,
             })
             .expect("typing upper renderable should exist");
@@ -1929,9 +2073,16 @@ mod tests {
         render_list
             .iter()
             .find_map(|item| match item {
-                Renderable::TypingUpper { line_alignment, .. } => {
-                    Some(line_alignment.full_line_width)
-                }
+                Renderable::TypingUpper {
+                    anchor: Anchor::Center,
+                    align:
+                        Align {
+                            horizontal: HorizontalAlign::Left,
+                            ..
+                        },
+                    line_alignment,
+                    ..
+                } => Some(line_alignment.full_line_width),
                 _ => None,
             })
             .expect("typing upper renderable should exist")
@@ -1944,6 +2095,39 @@ mod tests {
                 Renderable::Text { text, .. } | Renderable::BigText { text, .. } => {
                     Some(text.as_str())
                 }
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn title_segments(render_list: &[Renderable]) -> &[UpperTypingSegment] {
+        render_list
+            .iter()
+            .find_map(|item| match item {
+                Renderable::TypingUpper {
+                    segments,
+                    anchor: Anchor::TopCenter,
+                    ..
+                } => Some(segments.as_slice()),
+                _ => None,
+            })
+            .expect("typing title renderable should exist")
+    }
+
+    fn context_segments(render_list: &[Renderable]) -> Vec<&[UpperTypingSegment]> {
+        render_list
+            .iter()
+            .filter_map(|item| match item {
+                Renderable::TypingUpper {
+                    segments,
+                    anchor: Anchor::Center,
+                    align:
+                        Align {
+                            horizontal: HorizontalAlign::Center,
+                            ..
+                        },
+                    ..
+                } => Some(segments.as_slice()),
                 _ => None,
             })
             .collect()
@@ -2033,6 +2217,48 @@ mod tests {
     }
 
     #[test]
+    fn typing_title_preserves_ruby_base_and_script() {
+        let app = typing_app("#title [春晓/chun1xiao3]\n[春眠/chun1mian2]");
+
+        let render_list = build_ui(&app, app.fonts(), 800, 500);
+        let title = title_segments(&render_list);
+
+        assert_eq!(title[0].base_text, "春晓");
+        assert_eq!(title[0].ruby_text.as_deref(), Some("chun1xiao3"));
+        assert_eq!(title[0].script, FontScript::ChineseSimplified);
+    }
+
+    #[test]
+    fn typing_context_lines_preserve_problem_ruby() {
+        let mut app = typing_app("#title Test\n[前/まえ]\n[今/いま]\n[次/つぎ]");
+        app.on_event(AppEvent::Char {
+            c: 'm',
+            timestamp: 1.0,
+        });
+        app.on_event(AppEvent::Char {
+            c: 'a',
+            timestamp: 2.0,
+        });
+        app.on_event(AppEvent::Char {
+            c: 'e',
+            timestamp: 3.0,
+        });
+
+        let render_list = build_ui(&app, app.fonts(), 800, 500);
+        let context = context_segments(&render_list);
+
+        assert_eq!(context.len(), 2);
+        assert_eq!(context[0][0].base_text, "前");
+        assert_eq!(context[0][0].ruby_text.as_deref(), Some("まえ"));
+        assert_eq!(context[1][0].base_text, "次");
+        assert_eq!(context[1][0].ruby_text.as_deref(), Some("つぎ"));
+        assert!(context
+            .iter()
+            .flat_map(|segments| segments.iter())
+            .all(|segment| segment.state == UpperSegmentState::Muted));
+    }
+
+    #[test]
     fn settings_font_picker_lists_available_font_files() {
         let mut app = App::new(test_fonts());
         app.state = AppState::Settings;
@@ -2063,6 +2289,30 @@ mod tests {
             .iter()
             .any(|text| text.contains("MaShanZheng-Regular")));
         assert!(texts.iter().any(|text| text.contains("Kalam-Regular")));
+    }
+
+    #[test]
+    fn settings_table_lists_ui_font_and_keeps_selected_row_visible() {
+        let mut app = App::new(test_fonts());
+        app.state = AppState::Settings;
+
+        let render_list = build_ui(&app, app.fonts(), 320, 240);
+        let texts = render_texts(&render_list);
+        assert!(texts.contains(&"UI Font"));
+        assert!(texts.contains(&"Simplified Chinese Font"));
+        assert!(texts.contains(&"Traditional Chinese Font"));
+        assert!(!texts.contains(&"Chinese Simplified Font"));
+
+        app.selected_settings_item = SettingsItem::DisplayScale;
+        app.display_settings.scale = DisplayScale::Percent200;
+
+        let render_list = build_ui(&app, app.fonts(), 320, 240);
+        let texts = render_texts(&render_list);
+
+        assert!(texts.contains(&"Display Scale"));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains(app.display_settings.scale.label())));
     }
 
     #[test]
@@ -2191,16 +2441,23 @@ mod tests {
         for item in &render_list {
             match item {
                 Renderable::TypingUpper {
-                    anchor,
+                    anchor: Anchor::Center,
                     shift,
-                    align,
+                    align:
+                        Align {
+                            horizontal: HorizontalAlign::Left,
+                            ..
+                        },
                     line_alignment,
                     ..
                 } => {
                     assert_line_left_matches_scroll_offset(
-                        *anchor,
+                        Anchor::Center,
                         *shift,
-                        *align,
+                        Align {
+                            horizontal: HorizontalAlign::Left,
+                            vertical: VerticalAlign::Center,
+                        },
                         line_alignment.full_line_width,
                         scroll_offset,
                     );

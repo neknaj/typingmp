@@ -105,7 +105,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             match bundled_font_data(request.font_id) {
                 Some(bytes) => {
                     if let Err(err) =
-                        app.apply_font_bytes(request.script, request.font_name, bytes.to_vec())
+                        app.apply_font_bytes(request.target, request.font_name, bytes.to_vec())
                     {
                         app.report_visible_error(format!("failed to apply font: {err:?}"));
                     }
@@ -151,6 +151,9 @@ impl Drop for AnsiTerminalGuard {
 }
 
 fn bundled_fonts() -> Result<Fonts, BackendError> {
+    let ui_font =
+        FontVec::try_from_vec(include_bytes!("../fonts/NotoSerifJP-Regular.ttf").to_vec())
+            .map_err(|_| BackendError::asset("failed to parse Noto Serif JP font"))?;
     let japanese_font =
         FontVec::try_from_vec(include_bytes!("../fonts/YujiSyuku-Regular.ttf").to_vec())
             .map_err(|_| BackendError::asset("failed to parse Yuji Syuku font"))?;
@@ -164,6 +167,7 @@ fn bundled_fonts() -> Result<Fonts, BackendError> {
         .map_err(|_| BackendError::asset("failed to parse Kalam font"))?;
 
     Ok(Fonts::new(
+        ui_font,
         japanese_font,
         simplified_chinese_font,
         traditional_chinese_font,
@@ -232,7 +236,14 @@ fn render_frame(
                 line_alignment,
                 ..
             } => {
-                let total_width_chars = current_line_base_char_count(app).max(1);
+                let visible_width_chars = upper_segments_char_count(&segments);
+                let total_width_chars = if line_alignment.visible_start_width > 0 {
+                    current_line_base_char_count(app)
+                        .max(visible_width_chars)
+                        .max(1)
+                } else {
+                    visible_width_chars.max(1)
+                };
                 let anchor_pos =
                     ui::calculate_anchor_position(anchor, shift, viewport.columns, viewport.rows);
                 let (mut pen_x, pen_y) =
@@ -240,6 +251,20 @@ fn render_frame(
                 pen_x += visible_start_chars(line_alignment, total_width_chars);
 
                 for segment in segments {
+                    if let Some(ruby) = &segment.ruby_text {
+                        let ruby_x = pen_x
+                            + (segment.base_text.chars().count() as i32
+                                - ruby.chars().count() as i32)
+                                / 2;
+                        draw_plain_text_at(
+                            &mut cells,
+                            ruby,
+                            ruby_x,
+                            pen_y - 1,
+                            viewport.columns,
+                            upper_segment_color(segment.state),
+                        );
+                    }
                     draw_plain_text_at(
                         &mut cells,
                         &segment.base_text,
@@ -270,6 +295,7 @@ fn render_frame(
                     match segment {
                         LowerTypingSegment::Completed {
                             base_text,
+                            ruby_text,
                             is_correct,
                             ..
                         } => {
@@ -278,6 +304,20 @@ fn render_frame(
                             } else {
                                 AnsiColor::from_argb(ui::INCORRECT_COLOR)
                             };
+                            if let Some(ruby) = ruby_text {
+                                let ruby_x = pen_x
+                                    + (base_text.chars().count() as i32
+                                        - ruby.chars().count() as i32)
+                                        / 2;
+                                draw_plain_text_at(
+                                    &mut cells,
+                                    &ruby,
+                                    ruby_x,
+                                    pen_y - 1,
+                                    viewport.columns,
+                                    color,
+                                );
+                            }
                             draw_plain_text_at(
                                 &mut cells,
                                 &base_text,
@@ -360,6 +400,13 @@ fn current_line_base_char_count(app: &App) -> usize {
                 .sum()
         })
         .unwrap_or(0)
+}
+
+fn upper_segments_char_count(segments: &[ui::UpperTypingSegment]) -> usize {
+    segments
+        .iter()
+        .map(|segment| segment.base_text.chars().count())
+        .sum()
 }
 
 fn segment_base_text(segment: &Segment) -> String {
@@ -498,6 +545,7 @@ fn upper_segment_color(state: ui::UpperSegmentState) -> AnsiColor {
         ui::UpperSegmentState::Incorrect => AnsiColor::from_argb(ui::INCORRECT_COLOR),
         ui::UpperSegmentState::Active => AnsiColor::from_argb(ui::ACTIVE_COLOR),
         ui::UpperSegmentState::Pending => AnsiColor::from_argb(ui::PENDING_COLOR),
+        ui::UpperSegmentState::Muted => AnsiColor::from_argb(0xFF_444444),
     }
 }
 

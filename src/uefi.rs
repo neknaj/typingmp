@@ -37,6 +37,8 @@ fn run_inner() -> core::result::Result<(), Status> {
     // UEFI ではファイルシステムアクセスが困難なため、バイナリにフォントを埋め込む
     let yuji_font_data: &[u8] = include_bytes!("../fonts/YujiSyuku-Regular.ttf");
     let yuji_font = load_embedded_font(yuji_font_data)?;
+    let ui_font_data: &[u8] = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
+    let ui_font = load_embedded_font(ui_font_data)?;
 
     let simplified_chinese_font_data: &[u8] = include_bytes!("../fonts/MaShanZheng-Regular.ttf");
     let simplified_chinese_font = load_embedded_font(simplified_chinese_font_data)?;
@@ -47,6 +49,7 @@ fn run_inner() -> core::result::Result<(), Status> {
 
     // Fonts構造体を初期化
     let fonts = Fonts::new(
+        ui_font,
         yuji_font,
         simplified_chinese_font,
         traditional_chinese_font,
@@ -120,7 +123,7 @@ fn run_inner() -> core::result::Result<(), Status> {
             match bundled_font_data(request.font_id) {
                 Some(bytes) => {
                     if app
-                        .apply_font_bytes(request.script, request.font_name, bytes.to_vec())
+                        .apply_font_bytes(request.target, request.font_name, bytes.to_vec())
                         .is_err()
                     {
                         app.report_visible_error("failed to apply font");

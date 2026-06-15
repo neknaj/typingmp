@@ -2,20 +2,21 @@
 
 ## 目的
 
-typingmp のフォント設定は、アプリ全体の表示フォントを切り替える機能ではない。目的は、日本語、中国語、英語が混在する問題文の各表示 segment に対して、reading や base の文字種から適切な script を自動判定し、その script に対応するフォントで描画することである。
+typingmp のフォント設定は、UI 文字用のフォントと、問題文の script 別フォントを明示的に切り替える機能である。問題文については、日本語、中国語、英語が混在する各表示 segment に対して、reading や base の文字種から適切な script を自動判定し、その script に対応するフォントで描画する。
 
 ## フォントスロット
 
-フォントは次の 4 スロットとして管理する。
+フォントは次の 5 スロットとして管理する。
 
 | slot | 既定フォント | 用途 |
 |---|---|---|
+| UI Font | `NotoSerifJP` | メニュー、設定、ステータス、ヘルプ、結果、問題一覧、問題ソースなど、問題文の ruby/base 表示ではない UI 文字として表示する。 |
 | Japanese | `YujiSyuku` | reading が平仮名または片仮名の segment。日本語漢字、日本語 kana、日本語約物として表示する。 |
-| Chinese Simplified | `MaShanZheng` | reading がピンインの segment。簡体字と中国語文脈の約物として表示する。 |
+| Simplified Chinese | `MaShanZheng` | reading がピンインの segment。簡体字と中国語文脈の約物として表示する。 |
 | Traditional Chinese | `MaShanZheng` | reading が注音符号の segment。繁体字と繁体字中国語文脈の約物として表示する。現時点では専用フォントが未用意のため簡体字と同じ既定フォントを使う。 |
 | English | `Kalam` | アルファベット、Latin 系文字、ASCII/英語約物として表示する。 |
 
-Settings 画面はこの 4 スロットへフォントを割り当てる画面であり、現在の描画モードやアプリ全体のフォントを選ぶ画面ではない。各スロットには `fonts/` 配下の `.ttf` / `.otf` をすべて候補として出す。ファイルシステムを列挙できるデスクトップ系バックエンドでは `fonts/` とシステムフォントを列挙し、WASM/WASI/UEFI ではビルド時に列挙した `fonts/` の埋め込み/配布フォントを候補として使う。
+Settings 画面はこの 5 スロットへフォントを割り当てる画面である。各スロットには `fonts/` 配下の `.ttf` / `.otf` をすべて候補として出す。ファイルシステムを列挙できるデスクトップ系バックエンドでは `fonts/` とシステムフォントを列挙し、WASM/WASI/UEFI ではビルド時に列挙した `fonts/` の埋め込み/配布フォントを候補として使う。通常の端末セル描画では任意フォントを適用できないため、TUI/WASI の plain text は端末側フォントに従う。
 
 ## 判定規則
 
@@ -36,7 +37,7 @@ plain segment は reading を持たないため base の文字種から script r
 
 script 判定は描画だけでなく、スクロール計算、segment 幅、typing 下段の入力済み幅にも使う。描画で使うフォントと計測で使うフォントがずれると、上段の全文、下段の入力済み内容、カーソル位置、スクロール位置が再びずれるため、必ず同じ `FontScript` と同じ `Fonts` から width を計算する。mixed-script の plain segment や `{inner/annotation}` は segment 全体を単一フォントで測らず、script run ごとに描画・計測する。
 
-アプリ UI chrome、メニュー、ステータスなど問題文ではない text は Japanese スロットを primary font として使う。
+アプリ UI chrome、メニュー、ステータスなど問題文ではない text は UI Font スロットを使う。title、現在行、前後の文脈行など問題ファイルから構造化された `Line` は、UI text ではなく ruby/base と script 別フォントを持つ問題コンテンツとして描画する。問題ソース表示は raw `.ntq` の確認画面なので、`[base/reading]` 構文を ruby に変換せず UI Font で表示する。
 
 ## 型安全性
 

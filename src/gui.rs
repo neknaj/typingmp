@@ -38,6 +38,9 @@ const FRAME_DURATION: Duration = Duration::from_millis(16);
 #[cfg(not(feature = "uefi"))]
 pub fn run() -> Result<(), Box<dyn Error>> {
     let asset_provider = DesktopAssetProvider::discover();
+    let ui_font =
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::NotoSerifJpRegular)?)
+            .map_err(|_| BackendError::asset("failed to parse Noto Serif JP font"))?;
     let japanese_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::YujiSyukuRegular)?)
             .map_err(|_| BackendError::asset("failed to parse Yuji Syuku font"))?;
@@ -52,6 +55,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
             .map_err(|_| BackendError::asset("failed to parse Kalam font"))?;
 
     let fonts = Fonts::new(
+        ui_font,
         japanese_font,
         simplified_chinese_font,
         traditional_chinese_font,
@@ -183,7 +187,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                     match asset_provider.load_font(request.font_id) {
                         Ok(bytes) => {
                             if let Err(err) =
-                                app.apply_font_bytes(request.script, request.font_name, bytes)
+                                app.apply_font_bytes(request.target, request.font_name, bytes)
                             {
                                 app.report_visible_error(format!("failed to apply font: {err:?}"));
                             }

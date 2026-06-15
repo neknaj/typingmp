@@ -350,7 +350,7 @@ fn render_argb(
                 color,
             } => draw_aligned_text(
                 &mut frame,
-                fonts.primary(),
+                fonts.ui(),
                 text,
                 TextPlacement {
                     anchor: *anchor,
@@ -840,6 +840,7 @@ fn upper_segment_color(state: UpperSegmentState) -> u32 {
         UpperSegmentState::Incorrect => ui::INCORRECT_COLOR,
         UpperSegmentState::Active => ui::ACTIVE_COLOR,
         UpperSegmentState::Pending => ui::PENDING_COLOR,
+        UpperSegmentState::Muted => 0xFF_444444,
     }
 }
 
@@ -1306,7 +1307,13 @@ mod tests {
     }
 
     fn test_fonts() -> Fonts {
-        Fonts::new(test_font(), test_font(), test_font(), test_font())
+        Fonts::new(
+            test_font(),
+            test_font(),
+            test_font(),
+            test_font(),
+            test_font(),
+        )
     }
 
     #[test]

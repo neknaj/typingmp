@@ -457,6 +457,8 @@ async fn start_async() -> Result<(), JsValue> {
         .dyn_into::<CanvasRenderingContext2d>()?;
 
     // フォントをサーバーから非同期 fetch する（WASM バイナリへの埋め込みを回避）
+    let ui_font = FontVec::try_from_vec(fetch_font_bytes("./fonts/NotoSerifJP-Regular.ttf").await?)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let japanese_font =
         FontVec::try_from_vec(fetch_font_bytes("./fonts/YujiSyuku-Regular.ttf").await?)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
@@ -470,6 +472,7 @@ async fn start_async() -> Result<(), JsValue> {
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     let fonts = Fonts::new(
+        ui_font,
         japanese_font,
         simplified_chinese_font,
         traditional_chinese_font,
@@ -792,7 +795,7 @@ async fn start_async() -> Result<(), JsValue> {
                         Ok(bytes) => {
                             let mut app_mut = app_for_font.borrow_mut();
                             if let Err(err) =
-                                app_mut.apply_font_bytes(request.script, request.font_name, bytes)
+                                app_mut.apply_font_bytes(request.target, request.font_name, bytes)
                             {
                                 app_mut
                                     .report_visible_error(format!("failed to apply font: {err:?}"));

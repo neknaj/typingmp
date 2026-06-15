@@ -11,7 +11,7 @@ use crate::app::scroll::{
     line_origin_from_start, typing_line_scroll_position, ScrollCacheState,
 };
 use crate::display::DisplaySettings;
-pub use crate::font::{FontScript as Script, Fonts};
+pub use crate::font::{FontScript as Script, FontTarget, Fonts};
 use crate::io::{FontAssetId, FontEntry, ProblemRepository};
 use crate::model::{
     CharIndex, LineIndex, ResultModel, Scroll, SegmentIndex, TypingModel, TypingStatus, WordIndex,
@@ -103,6 +103,7 @@ impl MainMenuItem {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsItem {
+    UiFont,
     Japanese,
     ChineseSimplified,
     TraditionalChinese,
@@ -114,28 +115,31 @@ pub enum SettingsItem {
 impl SettingsItem {
     pub const fn index(self) -> usize {
         match self {
-            Self::Japanese => 0,
-            Self::ChineseSimplified => 1,
-            Self::TraditionalChinese => 2,
-            Self::English => 3,
-            Self::AspectRatio => 4,
-            Self::DisplayScale => 5,
+            Self::UiFont => 0,
+            Self::Japanese => 1,
+            Self::ChineseSimplified => 2,
+            Self::TraditionalChinese => 3,
+            Self::English => 4,
+            Self::AspectRatio => 5,
+            Self::DisplayScale => 6,
         }
     }
 
-    pub const fn font_script(self) -> Option<Script> {
+    pub const fn font_target(self) -> Option<FontTarget> {
         match self {
-            Self::Japanese => Some(Script::Japanese),
-            Self::ChineseSimplified => Some(Script::ChineseSimplified),
-            Self::TraditionalChinese => Some(Script::TraditionalChinese),
-            Self::English => Some(Script::English),
+            Self::UiFont => Some(FontTarget::Ui),
+            Self::Japanese => Some(FontTarget::Script(Script::Japanese)),
+            Self::ChineseSimplified => Some(FontTarget::Script(Script::ChineseSimplified)),
+            Self::TraditionalChinese => Some(FontTarget::Script(Script::TraditionalChinese)),
+            Self::English => Some(FontTarget::Script(Script::English)),
             Self::AspectRatio | Self::DisplayScale => None,
         }
     }
 
     pub fn previous(self) -> Self {
         match self {
-            Self::Japanese => Self::Japanese,
+            Self::UiFont => Self::UiFont,
+            Self::Japanese => Self::UiFont,
             Self::ChineseSimplified => Self::Japanese,
             Self::TraditionalChinese => Self::ChineseSimplified,
             Self::English => Self::TraditionalChinese,
@@ -146,6 +150,7 @@ impl SettingsItem {
 
     pub fn next(self) -> Self {
         match self {
+            Self::UiFont => Self::Japanese,
             Self::Japanese => Self::ChineseSimplified,
             Self::ChineseSimplified => Self::TraditionalChinese,
             Self::TraditionalChinese => Self::English,
@@ -232,7 +237,7 @@ impl From<ScreenKeyboardUiCommand> for UiCommand {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FontLoadRequest {
-    pub script: Script,
+    pub target: FontTarget,
     pub font_id: FontAssetId,
     pub font_name: String,
 }
@@ -300,7 +305,7 @@ impl App {
             state: AppState::MainMenu,
             selected_main_menu_item: MainMenuItem::Start,
             selected_problem_item: 0,
-            selected_settings_item: SettingsItem::Japanese,
+            selected_settings_item: SettingsItem::UiFont,
             problem_repository,
             typing_model: None,
             result_model: None,
@@ -386,13 +391,15 @@ impl App {
 
     pub fn apply_font_bytes(
         &mut self,
-        script: Script,
+        target: FontTarget,
         font_name: String,
         bytes: Vec<u8>,
     ) -> Result<(), FontApplyError> {
         let font = FontVec::try_from_vec(bytes).map_err(|_| FontApplyError::InvalidFontData)?;
-        self.fonts.set_for_script(script, font_name, font);
-        self.scroll_cache = None;
+        self.fonts.set_for_target(target, font_name, font);
+        if !matches!(target, FontTarget::Ui) {
+            self.scroll_cache = None;
+        }
         Ok(())
     }
 
@@ -406,7 +413,8 @@ impl App {
                 self.display_settings.scale = self.display_settings.scale.next();
                 self.scroll_cache = None;
             }
-            SettingsItem::Japanese
+            SettingsItem::UiFont
+            | SettingsItem::Japanese
             | SettingsItem::ChineseSimplified
             | SettingsItem::TraditionalChinese
             | SettingsItem::English => {}
@@ -437,7 +445,8 @@ impl App {
                 };
                 self.scroll_cache = None;
             }
-            SettingsItem::Japanese
+            SettingsItem::UiFont
+            | SettingsItem::Japanese
             | SettingsItem::ChineseSimplified
             | SettingsItem::TraditionalChinese
             | SettingsItem::English => return false,
@@ -715,7 +724,7 @@ impl App {
                             self.selected_settings_item = self.selected_settings_item.next();
                         }
                         AppEvent::Enter => {
-                            if self.selected_settings_item.font_script().is_some() {
+                            if self.selected_settings_item.font_target().is_some() {
                                 self.settings_picking_font = true;
                                 self.selected_font_item = 0;
                             } else {
@@ -745,11 +754,11 @@ impl App {
                         }
                         AppEvent::Enter => {
                             if self.selected_font_item < font_count {
-                                if let Some(script) = self.selected_settings_item.font_script() {
+                                if let Some(target) = self.selected_settings_item.font_target() {
                                     let selected_font =
                                         &self.available_fonts[self.selected_font_item];
                                     self.requested_font_load = Some(FontLoadRequest {
-                                        script,
+                                        target,
                                         font_id: selected_font.id,
                                         font_name: selected_font.name.clone(),
                                     });
@@ -956,7 +965,7 @@ mod tests {
                 .expect("test font should parse")
         }
 
-        Fonts::new(font(), font(), font(), font())
+        Fonts::new(font(), font(), font(), font(), font())
     }
 
     #[test]

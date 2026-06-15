@@ -11,6 +11,7 @@ pub const DEFAULT_JAPANESE_FONT_NAME: &str = "YujiSyuku";
 pub const DEFAULT_CHINESE_SIMPLIFIED_FONT_NAME: &str = "MaShanZheng";
 pub const DEFAULT_TRADITIONAL_CHINESE_FONT_NAME: &str = "MaShanZheng";
 pub const DEFAULT_ENGLISH_FONT_NAME: &str = "Kalam";
+pub const DEFAULT_UI_FONT_NAME: &str = "NotoSerifJP";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FontScript {
@@ -24,7 +25,7 @@ impl FontScript {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Japanese => "Japanese",
-            Self::ChineseSimplified => "Chinese Simplified",
+            Self::ChineseSimplified => "Simplified Chinese",
             Self::TraditionalChinese => "Traditional Chinese",
             Self::English => "English",
         }
@@ -33,14 +34,30 @@ impl FontScript {
     pub const fn settings_label(self) -> &'static str {
         match self {
             Self::Japanese => "Japanese Font",
-            Self::ChineseSimplified => "Chinese Simplified Font",
+            Self::ChineseSimplified => "Simplified Chinese Font",
             Self::TraditionalChinese => "Traditional Chinese Font",
             Self::English => "English Font",
         }
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FontTarget {
+    Ui,
+    Script(FontScript),
+}
+
+impl FontTarget {
+    pub const fn settings_label(self) -> &'static str {
+        match self {
+            Self::Ui => "UI Font",
+            Self::Script(script) => script.settings_label(),
+        }
+    }
+}
+
 pub struct Fonts {
+    ui: FontSlot,
     japanese: FontSlot,
     chinese_simplified: FontSlot,
     traditional_chinese: FontSlot,
@@ -64,12 +81,14 @@ impl FontSlot {
 
 impl Fonts {
     pub fn new(
+        ui: FontVec,
         japanese: FontVec,
         chinese_simplified: FontVec,
         traditional_chinese: FontVec,
         english: FontVec,
     ) -> Self {
         Self {
+            ui: FontSlot::new(ui, DEFAULT_UI_FONT_NAME),
             japanese: FontSlot::new(japanese, DEFAULT_JAPANESE_FONT_NAME),
             chinese_simplified: FontSlot::new(
                 chinese_simplified,
@@ -96,6 +115,10 @@ impl Fonts {
         &self.slot_for_script(script).name
     }
 
+    pub fn name_for_target(&self, target: FontTarget) -> &str {
+        &self.slot_for_target(target).name
+    }
+
     pub fn set_for_script(&mut self, script: FontScript, name: String, font: FontVec) {
         let slot = self.slot_for_script_mut(script);
         slot.font = font;
@@ -103,8 +126,33 @@ impl Fonts {
         self.generation = self.generation.wrapping_add(1);
     }
 
+    pub fn set_for_target(&mut self, target: FontTarget, name: String, font: FontVec) {
+        let slot = self.slot_for_target_mut(target);
+        slot.font = font;
+        slot.name = name;
+        self.generation = self.generation.wrapping_add(1);
+    }
+
+    pub fn ui(&self) -> &FontVec {
+        &self.ui.font
+    }
+
     pub fn primary(&self) -> &FontVec {
         &self.japanese.font
+    }
+
+    fn slot_for_target(&self, target: FontTarget) -> &FontSlot {
+        match target {
+            FontTarget::Ui => &self.ui,
+            FontTarget::Script(script) => self.slot_for_script(script),
+        }
+    }
+
+    fn slot_for_target_mut(&mut self, target: FontTarget) -> &mut FontSlot {
+        match target {
+            FontTarget::Ui => &mut self.ui,
+            FontTarget::Script(script) => self.slot_for_script_mut(script),
+        }
     }
 
     fn slot_for_script(&self, script: FontScript) -> &FontSlot {
