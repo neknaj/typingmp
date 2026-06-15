@@ -204,6 +204,21 @@ struct RasterizedText {
     alpha: Vec<u8>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FrameCacheKey {
+    buffer_ptr: usize,
+    buffer_len: usize,
+    width: usize,
+    height: usize,
+    viewport_x: i32,
+    viewport_y: i32,
+    viewport_width: usize,
+    viewport_height: usize,
+    viewport_scale_bits: u32,
+    font_generation: u64,
+    render_hash: u64,
+}
+
 /// Shared render cache used by pixel backends.
 pub struct RenderCache {
     font_generation: u64,
@@ -213,6 +228,9 @@ pub struct RenderCache {
     text_bitmaps: Vec<Option<TextBitmapCacheEntry>>,
     text_bitmap_count: usize,
     text_bitmap_bytes: usize,
+    previous_frame: Option<FrameCacheKey>,
+    #[cfg(test)]
+    frame_cache_hits: usize,
 }
 
 impl RenderCache {
@@ -233,6 +251,9 @@ impl RenderCache {
             text_bitmaps: Vec::new(),
             text_bitmap_count: 0,
             text_bitmap_bytes: 0,
+            previous_frame: None,
+            #[cfg(test)]
+            frame_cache_hits: 0,
         }
     }
 
@@ -243,6 +264,7 @@ impl RenderCache {
             self.text_metrics.clear();
             self.text_metric_count = 0;
             self.clear_text_bitmaps();
+            self.previous_frame = None;
         }
     }
 
@@ -442,6 +464,11 @@ impl RenderCache {
     fn text_bitmap_cache_len(&self) -> usize {
         self.text_bitmap_count
     }
+
+    #[cfg(test)]
+    fn frame_cache_hits(&self) -> usize {
+        self.frame_cache_hits
+    }
 }
 
 fn text_metric_hash(font_key: usize, size_bits: u32, text: &str) -> usize {
@@ -579,6 +606,324 @@ fn rasterize_text_alpha<F: Font>(
     })
 }
 
+fn frame_cache_key(
+    pixels: &[u32],
+    width: usize,
+    height: usize,
+    viewport: DisplayViewport,
+    font_generation: u64,
+    render_list: &[Renderable],
+) -> FrameCacheKey {
+    FrameCacheKey {
+        buffer_ptr: pixels.as_ptr() as usize,
+        buffer_len: pixels.len(),
+        width,
+        height,
+        viewport_x: viewport.x,
+        viewport_y: viewport.y,
+        viewport_width: viewport.width,
+        viewport_height: viewport.height,
+        viewport_scale_bits: viewport.scale.to_bits(),
+        font_generation,
+        render_hash: render_list_hash(render_list),
+    }
+}
+
+fn render_list_hash(render_list: &[Renderable]) -> u64 {
+    let mut hash = 14_695_981_039_346_656_037u64;
+    hash_usize(&mut hash, render_list.len());
+    for item in render_list {
+        match item {
+            Renderable::Background { gradient } => {
+                hash_usize(&mut hash, 1);
+                hash_u32(&mut hash, gradient.start_color);
+                hash_u32(&mut hash, gradient.end_color);
+            }
+            Renderable::Text {
+                text,
+                anchor,
+                shift,
+                align,
+                font_size,
+                color,
+            } => {
+                hash_usize(&mut hash, 2);
+                hash_text_renderable(&mut hash, text, *anchor, *shift, *align, *font_size, *color);
+            }
+            Renderable::BigText {
+                text,
+                anchor,
+                shift,
+                align,
+                font_size,
+                color,
+            } => {
+                hash_usize(&mut hash, 3);
+                hash_text_renderable(&mut hash, text, *anchor, *shift, *align, *font_size, *color);
+            }
+            Renderable::TypingUpper {
+                segments,
+                anchor,
+                shift,
+                align,
+                font_size,
+                line_alignment,
+            } => {
+                hash_usize(&mut hash, 4);
+                hash_anchor(&mut hash, *anchor);
+                hash_shift(&mut hash, *shift);
+                hash_align(&mut hash, *align);
+                hash_font_size(&mut hash, *font_size);
+                hash_typing_line_alignment(&mut hash, *line_alignment);
+                hash_usize(&mut hash, segments.len());
+                for segment in segments {
+                    hash_str(&mut hash, &segment.base_text);
+                    hash_option_str(&mut hash, segment.ruby_text.as_deref());
+                    hash_option_str(&mut hash, segment.anno_text.as_deref());
+                    hash_usize(&mut hash, segment.anno_group_run_count);
+                    hash_option_font_script(&mut hash, segment.anno_script);
+                    hash_font_script(&mut hash, segment.script);
+                    hash_upper_segment_state(&mut hash, segment.state);
+                }
+            }
+            Renderable::TypingLower {
+                segments,
+                anchor,
+                shift,
+                align,
+                font_size,
+                line_alignment,
+            } => {
+                hash_usize(&mut hash, 5);
+                hash_anchor(&mut hash, *anchor);
+                hash_shift(&mut hash, *shift);
+                hash_align(&mut hash, *align);
+                hash_font_size(&mut hash, *font_size);
+                hash_typing_line_alignment(&mut hash, *line_alignment);
+                hash_usize(&mut hash, segments.len());
+                for segment in segments {
+                    hash_lower_typing_segment(&mut hash, segment);
+                }
+            }
+            Renderable::ProgressBar {
+                anchor,
+                shift,
+                width_ratio,
+                height_ratio,
+                progress,
+                bg_color,
+                fg_color,
+            } => {
+                hash_usize(&mut hash, 6);
+                hash_anchor(&mut hash, *anchor);
+                hash_shift(&mut hash, *shift);
+                hash_u32(&mut hash, width_ratio.to_bits());
+                hash_u32(&mut hash, height_ratio.to_bits());
+                hash_u32(&mut hash, progress.to_bits());
+                hash_u32(&mut hash, *bg_color);
+                hash_u32(&mut hash, *fg_color);
+            }
+        }
+    }
+    hash
+}
+
+fn hash_text_renderable(
+    hash: &mut u64,
+    text: &str,
+    anchor: ui::Anchor,
+    shift: ui::Shift,
+    align: ui::Align,
+    font_size: FontSize,
+    color: u32,
+) {
+    hash_str(hash, text);
+    hash_anchor(hash, anchor);
+    hash_shift(hash, shift);
+    hash_align(hash, align);
+    hash_font_size(hash, font_size);
+    hash_u32(hash, color);
+}
+
+fn hash_lower_typing_segment(hash: &mut u64, segment: &LowerTypingSegment) {
+    match segment {
+        LowerTypingSegment::Completed {
+            base_text,
+            ruby_text,
+            script,
+            is_correct,
+            width,
+        } => {
+            hash_usize(hash, 1);
+            hash_str(hash, base_text);
+            hash_option_str(hash, ruby_text.as_deref());
+            hash_font_script(hash, *script);
+            hash_bool(hash, *is_correct);
+            hash_u32(hash, *width);
+        }
+        LowerTypingSegment::Active { elements, script } => {
+            hash_usize(hash, 2);
+            hash_font_script(hash, *script);
+            hash_usize(hash, elements.len());
+            for element in elements {
+                hash_active_lower_element(hash, element);
+            }
+        }
+    }
+}
+
+fn hash_active_lower_element(hash: &mut u64, element: &ActiveLowerElement) {
+    match element {
+        ActiveLowerElement::Typed {
+            character,
+            is_correct,
+            script,
+        } => {
+            hash_usize(hash, 1);
+            hash_char(hash, *character);
+            hash_bool(hash, *is_correct);
+            hash_font_script(hash, *script);
+        }
+        ActiveLowerElement::Cursor => hash_usize(hash, 2),
+        ActiveLowerElement::UnconfirmedInput { text, script } => {
+            hash_usize(hash, 3);
+            hash_str(hash, text);
+            hash_font_script(hash, *script);
+        }
+        ActiveLowerElement::LastIncorrectInput { character, script } => {
+            hash_usize(hash, 4);
+            hash_char(hash, *character);
+            hash_font_script(hash, *script);
+        }
+    }
+}
+
+fn hash_anchor(hash: &mut u64, anchor: ui::Anchor) {
+    let value = match anchor {
+        ui::Anchor::TopLeft => 1,
+        ui::Anchor::TopCenter => 2,
+        ui::Anchor::TopRight => 3,
+        ui::Anchor::CenterLeft => 4,
+        ui::Anchor::Center => 5,
+        ui::Anchor::CenterRight => 6,
+        ui::Anchor::BottomLeft => 7,
+        ui::Anchor::BottomCenter => 8,
+        ui::Anchor::BottomRight => 9,
+    };
+    hash_usize(hash, value);
+}
+
+fn hash_shift(hash: &mut u64, shift: ui::Shift) {
+    hash_u32(hash, shift.x.to_bits());
+    hash_u32(hash, shift.y.to_bits());
+}
+
+fn hash_align(hash: &mut u64, align: ui::Align) {
+    let horizontal = match align.horizontal {
+        ui::HorizontalAlign::Left => 1,
+        ui::HorizontalAlign::Center => 2,
+        ui::HorizontalAlign::Right => 3,
+    };
+    let vertical = match align.vertical {
+        ui::VerticalAlign::Top => 1,
+        ui::VerticalAlign::Center => 2,
+        ui::VerticalAlign::Bottom => 3,
+    };
+    hash_usize(hash, horizontal);
+    hash_usize(hash, vertical);
+}
+
+fn hash_font_size(hash: &mut u64, font_size: FontSize) {
+    match font_size {
+        FontSize::WindowHeight(value) => {
+            hash_usize(hash, 1);
+            hash_u32(hash, value.to_bits());
+        }
+        FontSize::WindowAreaSqrt(value) => {
+            hash_usize(hash, 2);
+            hash_u32(hash, value.to_bits());
+        }
+    }
+}
+
+fn hash_typing_line_alignment(hash: &mut u64, alignment: ui::TypingLineAlignment) {
+    hash_u32(hash, alignment.full_line_width);
+    hash_u32(hash, alignment.visible_start_width);
+}
+
+fn hash_upper_segment_state(hash: &mut u64, state: ui::UpperSegmentState) {
+    let value = match state {
+        ui::UpperSegmentState::Correct => 1,
+        ui::UpperSegmentState::Incorrect => 2,
+        ui::UpperSegmentState::Pending => 3,
+        ui::UpperSegmentState::Active => 4,
+        ui::UpperSegmentState::Muted => 5,
+    };
+    hash_usize(hash, value);
+}
+
+fn hash_option_font_script(hash: &mut u64, script: Option<crate::font::FontScript>) {
+    match script {
+        Some(script) => {
+            hash_bool(hash, true);
+            hash_font_script(hash, script);
+        }
+        None => hash_bool(hash, false),
+    }
+}
+
+fn hash_font_script(hash: &mut u64, script: crate::font::FontScript) {
+    let value = match script {
+        crate::font::FontScript::Japanese => 1,
+        crate::font::FontScript::ChineseSimplified => 2,
+        crate::font::FontScript::TraditionalChinese => 3,
+        crate::font::FontScript::English => 4,
+    };
+    hash_usize(hash, value);
+}
+
+fn hash_option_str(hash: &mut u64, value: Option<&str>) {
+    match value {
+        Some(value) => {
+            hash_bool(hash, true);
+            hash_str(hash, value);
+        }
+        None => hash_bool(hash, false),
+    }
+}
+
+fn hash_str(hash: &mut u64, value: &str) {
+    hash_usize(hash, value.len());
+    for byte in value.as_bytes() {
+        hash_byte(hash, *byte);
+    }
+}
+
+fn hash_char(hash: &mut u64, value: char) {
+    hash_u32(hash, value as u32);
+}
+
+fn hash_bool(hash: &mut u64, value: bool) {
+    hash_usize(hash, usize::from(value));
+}
+
+fn hash_u32(hash: &mut u64, value: u32) {
+    for byte in value.to_ne_bytes() {
+        hash_byte(hash, byte);
+    }
+}
+
+fn hash_usize(hash: &mut u64, value: usize) {
+    for byte in value.to_ne_bytes() {
+        hash_byte(hash, byte);
+    }
+}
+
+fn hash_byte(hash: &mut u64, byte: u8) {
+    *hash ^= u64::from(byte);
+    *hash = hash.wrapping_mul(1_099_511_628_211u64);
+}
+
 fn frame_clip_for_viewport(
     frame_width: usize,
     frame_height: usize,
@@ -643,6 +988,17 @@ pub struct ArgbSurface<'a> {
     pixels: &'a mut [u32],
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RenderOutcome {
+    changed: bool,
+}
+
+impl RenderOutcome {
+    pub fn changed(self) -> bool {
+        self.changed
+    }
+}
+
 impl<'a> ArgbSurface<'a> {
     pub fn new(width: usize, height: usize, pixels: &'a mut [u32]) -> Option<Self> {
         let required = width.checked_mul(height)?;
@@ -663,10 +1019,10 @@ impl<'a> ArgbSurface<'a> {
         display_settings: DisplaySettings,
         render_list: &[Renderable],
         cache: &mut RenderCache,
-    ) {
+    ) -> RenderOutcome {
         cache.prepare_fonts(fonts);
         let viewport = display_settings.viewport(self.width, self.height);
-        render_argb(
+        let changed = render_argb(
             self.pixels,
             self.width,
             self.height,
@@ -675,6 +1031,7 @@ impl<'a> ArgbSurface<'a> {
             render_list,
             cache,
         );
+        RenderOutcome { changed }
     }
 
     pub fn pixels(&self) -> &[u32] {
@@ -690,7 +1047,23 @@ fn render_argb(
     fonts: &Fonts,
     render_list: &[Renderable],
     cache: &mut RenderCache,
-) {
+) -> bool {
+    let frame_key = frame_cache_key(
+        pixels,
+        width,
+        height,
+        viewport,
+        fonts.generation(),
+        render_list,
+    );
+    if cache.previous_frame == Some(frame_key) {
+        #[cfg(test)]
+        {
+            cache.frame_cache_hits += 1;
+        }
+        return false;
+    }
+
     let mut frame = PixelFrame {
         pixels,
         stride: width,
@@ -806,6 +1179,8 @@ fn render_argb(
             ),
         }
     }
+    cache.previous_frame = Some(frame_key);
+    true
 }
 
 struct PixelFrame<'a> {
@@ -2049,7 +2424,7 @@ mod tests {
     #[test]
     fn argb_surface_renders_and_reuses_text_measurements() {
         let fonts = test_fonts();
-        let render_list = vec![
+        let mut render_list = vec![
             Renderable::Background {
                 gradient: crate::ui::Gradient {
                     start_color: 0xFF_220000,
@@ -2074,7 +2449,9 @@ mod tests {
         {
             let mut surface =
                 ArgbSurface::new(160, 90, &mut pixels).expect("surface dimensions should be valid");
-            surface.render(&fonts, DisplaySettings::default(), &render_list, &mut cache);
+            assert!(surface
+                .render(&fonts, DisplaySettings::default(), &render_list, &mut cache)
+                .changed());
         }
         let cache_len_after_first_render = cache.text_measure_cache_len();
         let bitmap_cache_len_after_first_render = cache.text_bitmap_cache_len();
@@ -2086,14 +2463,30 @@ mod tests {
         {
             let mut surface =
                 ArgbSurface::new(160, 90, &mut pixels).expect("surface dimensions should be valid");
-            surface.render(&fonts, DisplaySettings::default(), &render_list, &mut cache);
+            assert!(!surface
+                .render(&fonts, DisplaySettings::default(), &render_list, &mut cache)
+                .changed());
         }
         assert_eq!(cache.text_measure_cache_len(), cache_len_after_first_render);
         assert_eq!(
             cache.text_bitmap_cache_len(),
             bitmap_cache_len_after_first_render
         );
+        assert_eq!(cache.frame_cache_hits(), 1);
         assert_eq!(pixels, first_pixels);
+
+        if let Renderable::Text { text, .. } = &mut render_list[1] {
+            *text = "Changed".to_string();
+        }
+        {
+            let mut surface =
+                ArgbSurface::new(160, 90, &mut pixels).expect("surface dimensions should be valid");
+            assert!(surface
+                .render(&fonts, DisplaySettings::default(), &render_list, &mut cache)
+                .changed());
+        }
+        assert_eq!(cache.frame_cache_hits(), 1);
+        assert_ne!(pixels, first_pixels);
     }
 
     #[test]

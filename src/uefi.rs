@@ -149,13 +149,17 @@ fn run_inner() -> core::result::Result<(), Status> {
         let fonts = app.fonts();
         let render_list = ui::build_ui(&app, fonts, viewport.width, viewport.height);
         if let Some(mut surface) = ArgbSurface::new(width, height, &mut argb_buffer) {
-            surface.render(fonts, display_settings, &render_list, &mut render_cache);
-            for (pixel, color) in pixel_buffer.iter_mut().zip(surface.pixels().iter()) {
-                *pixel = BltPixel::new(
-                    ((*color >> 16) & 0xFF) as u8,
-                    ((*color >> 8) & 0xFF) as u8,
-                    (*color & 0xFF) as u8,
-                );
+            let frame_changed = surface
+                .render(fonts, display_settings, &render_list, &mut render_cache)
+                .changed();
+            if frame_changed {
+                for (pixel, color) in pixel_buffer.iter_mut().zip(surface.pixels().iter()) {
+                    *pixel = BltPixel::new(
+                        ((*color >> 16) & 0xFF) as u8,
+                        ((*color >> 8) & 0xFF) as u8,
+                        (*color & 0xFF) as u8,
+                    );
+                }
             }
         }
         firmware(gop.blt(BltOp::BufferToVideo {

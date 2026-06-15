@@ -225,7 +225,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                     return;
                 }
 
-                render_frame(
+                let frame_changed = render_frame(
                     &mut app,
                     width,
                     height,
@@ -240,7 +240,8 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                 let viewport = app.display_settings().viewport(width, height);
                 app.update(viewport.width, viewport.height, delta_time.min(100.0));
 
-                if let Err(err) = present_frame(width, height, &app, &mut pixel_buffer, &mut pixels)
+                if let Err(err) =
+                    present_frame(width, height, frame_changed, &mut pixel_buffer, &mut pixels)
                 {
                     eprintln!("Failed to draw frame: {err}");
                     *control_flow = ControlFlow::Exit;
@@ -259,13 +260,17 @@ fn render_frame(
     height: usize,
     pixel_buffer: &mut [u32],
     render_cache: &mut RenderCache,
-) {
+) -> bool {
     let display_settings = app.display_settings();
     let viewport = display_settings.viewport(width, height);
     let fonts = app.fonts();
     let render_list = ui::build_ui(app, fonts, viewport.width, viewport.height);
     if let Some(mut surface) = ArgbSurface::new(width, height, pixel_buffer) {
-        surface.render(fonts, display_settings, &render_list, render_cache);
+        surface
+            .render(fonts, display_settings, &render_list, render_cache)
+            .changed()
+    } else {
+        false
     }
 }
 
@@ -273,20 +278,22 @@ fn render_frame(
 fn present_frame(
     width: usize,
     height: usize,
-    _app: &App,
+    frame_changed: bool,
     pixel_buffer: &mut [u32],
     pixels: &mut Pixels,
 ) -> Result<(), Box<dyn Error>> {
     if width * height > 0 && pixel_buffer.len() != width * height {
         return Ok(());
     }
-    let frame = pixels.frame_mut();
-    for (i, color) in pixel_buffer.iter().enumerate() {
-        let base = i * 4;
-        frame[base] = ((color >> 16) & 0xff) as u8;
-        frame[base + 1] = ((color >> 8) & 0xff) as u8;
-        frame[base + 2] = (color & 0xff) as u8;
-        frame[base + 3] = ((color >> 24) & 0xff) as u8;
+    if frame_changed {
+        let frame = pixels.frame_mut();
+        for (i, color) in pixel_buffer.iter().enumerate() {
+            let base = i * 4;
+            frame[base] = ((color >> 16) & 0xff) as u8;
+            frame[base + 1] = ((color >> 8) & 0xff) as u8;
+            frame[base + 2] = (color & 0xff) as u8;
+            frame[base + 3] = ((color >> 24) & 0xff) as u8;
+        }
     }
     pixels
         .render()

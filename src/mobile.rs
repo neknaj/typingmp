@@ -138,14 +138,18 @@ fn render_frame(
     height: usize,
     pixel_buf: &mut Vec<u32>,
     render_cache: &mut RenderCache,
-) {
+) -> bool {
     pixel_buf.resize(width * height, 0u32);
     let display_settings = app.display_settings();
     let viewport = display_settings.viewport(width, height);
     let fonts = app.fonts();
     let render_list = ui::build_ui(app, fonts, viewport.width, viewport.height);
     if let Some(mut surface) = ArgbSurface::new(width, height, pixel_buf) {
-        surface.render(fonts, display_settings, &render_list, render_cache);
+        surface
+            .render(fonts, display_settings, &render_list, render_cache)
+            .changed()
+    } else {
+        false
     }
 }
 
@@ -353,8 +357,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         Err(err) => a.report_visible_error(err.to_string()),
                     }
                 }
-                render_frame(&a, w, h, &mut pixel_buf, &mut render_cache);
+                let frame_changed = render_frame(&a, w, h, &mut pixel_buf, &mut render_cache);
                 win.set_keyboard_visible(a.is_typing_active());
+                if !frame_changed {
+                    return;
+                }
             }
 
             // ピクセルバッファ → Slint Image（物理ピクセル等倍）

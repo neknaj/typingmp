@@ -909,12 +909,19 @@ async fn start_async() -> Result<(), JsValue> {
                 // pb.fill(0) は不要: renderer が viewport 外も含めて毎フレーム初期化する
 
                 let render_list = ui::build_ui(&app_borrow, fonts, viewport.width, viewport.height);
-                RENDER_CACHE.with(|cache| {
+                let frame_changed = RENDER_CACHE.with(|cache| {
                     let mut cache = cache.borrow_mut();
                     if let Some(mut surface) = ArgbSurface::new(width, height, &mut pb) {
-                        surface.render(fonts, display_settings, &render_list, &mut cache);
+                        surface
+                            .render(fonts, display_settings, &render_list, &mut cache)
+                            .changed()
+                    } else {
+                        false
                     }
                 });
+                if !frame_changed {
+                    return;
+                }
                 // u8 バッファも再利用してコピー（毎フレームの大量アロケーションを回避）
                 U8_BUFFER.with(|ub| {
                     let mut ub = ub.borrow_mut();
