@@ -770,9 +770,10 @@ fn draw_typing_lower(
                 pen_x += segment_width_px;
             }
             LowerTypingSegment::Active { elements, script } => {
-                let font = fonts.get_for_script(*script);
                 for element in elements {
-                    let (text, color) = active_lower_text_and_color(element);
+                    let (text, color, element_script) =
+                        active_lower_text_and_color(element, *script);
+                    let font = fonts.get_for_script(element_script);
                     let text_metrics = cache.measure_text(font, &text, pixel_font_size);
                     let text_width = text_metrics.width as i32;
                     if text_width > 0 {
@@ -842,11 +843,15 @@ fn upper_segment_color(state: UpperSegmentState) -> u32 {
     }
 }
 
-fn active_lower_text_and_color(element: &ActiveLowerElement) -> (String, u32) {
+fn active_lower_text_and_color(
+    element: &ActiveLowerElement,
+    fallback_script: crate::font::FontScript,
+) -> (String, u32, crate::font::FontScript) {
     match element {
         ActiveLowerElement::Typed {
             character,
             is_correct,
+            script,
         } => (
             character.to_string(),
             if *is_correct {
@@ -854,11 +859,14 @@ fn active_lower_text_and_color(element: &ActiveLowerElement) -> (String, u32) {
             } else {
                 ui::INCORRECT_COLOR
             },
+            *script,
         ),
-        ActiveLowerElement::Cursor => ("|".to_string(), ui::CURSOR_COLOR),
-        ActiveLowerElement::UnconfirmedInput(text) => (text.clone(), ui::UNCONFIRMED_COLOR),
-        ActiveLowerElement::LastIncorrectInput(character) => {
-            (character.to_string(), ui::WRONG_KEY_COLOR)
+        ActiveLowerElement::Cursor => ("|".to_string(), ui::CURSOR_COLOR, fallback_script),
+        ActiveLowerElement::UnconfirmedInput { text, script } => {
+            (text.clone(), ui::UNCONFIRMED_COLOR, *script)
+        }
+        ActiveLowerElement::LastIncorrectInput { character, script } => {
+            (character.to_string(), ui::WRONG_KEY_COLOR, *script)
         }
     }
 }
@@ -1298,7 +1306,7 @@ mod tests {
     }
 
     fn test_fonts() -> Fonts {
-        Fonts::new(test_font(), test_font(), test_font())
+        Fonts::new(test_font(), test_font(), test_font(), test_font())
     }
 
     #[test]

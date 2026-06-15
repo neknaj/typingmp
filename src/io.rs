@@ -303,6 +303,8 @@ impl ProblemSourceProvider for ProblemRepository {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BundledFont {
     YujiSyukuRegular,
+    MaShanZhengRegular,
+    KalamRegular,
     NotoSerifJpRegular,
 }
 
@@ -310,6 +312,8 @@ impl BundledFont {
     pub const fn file_name(self) -> &'static str {
         match self {
             Self::YujiSyukuRegular => "YujiSyuku-Regular.ttf",
+            Self::MaShanZhengRegular => "MaShanZheng-Regular.ttf",
+            Self::KalamRegular => "Kalam-Regular.ttf",
             Self::NotoSerifJpRegular => "NotoSerifJP-Regular.ttf",
         }
     }
@@ -330,6 +334,8 @@ pub struct FontEntry {
     pub name: String,
     pub source: FontSource,
 }
+
+include!(concat!(env!("OUT_DIR"), "/bundled_font_files.rs"));
 
 pub trait AssetProvider {
     fn load_bundled_font(&self, font: BundledFont) -> Result<Vec<u8>, ProviderError>;

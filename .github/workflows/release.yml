@@ -235,8 +235,7 @@ jobs:
           mkdir -p dist/fonts
           cp pkg/rust_multibackend_app_bg.wasm dist/
           cp pkg/rust_multibackend_app.js dist/
-          cp fonts/YujiSyuku-Regular.ttf dist/fonts/
-          cp fonts/NotoSerifJP-Regular.ttf dist/fonts/
+          find fonts -maxdepth 1 -type f \( -name '*.ttf' -o -name '*.otf' \) -exec cp {} dist/fonts/ \;
           cp index.html dist/
           sed -i 's|./pkg/rust_multibackend_app.js|./rust_multibackend_app.js|' dist/index.html
 

@@ -2,7 +2,9 @@
 
 use crate::app::{App, AppEvent, CustomProblem, Fonts, UiCommand};
 use crate::backend::BackendError;
-use crate::io::{PersistentStore, ProviderError, ProviderErrorKind};
+use crate::io::{
+    bundled_font_entries, bundled_font_file_name, PersistentStore, ProviderError, ProviderErrorKind,
+};
 use crate::renderer::{ArgbSurface, RenderCache};
 use crate::screen_keyboard::{
     self, ScreenKeyboardAction, ScreenKeyboardKeyRole, ScreenKeyboardLayoutKind,
@@ -14,7 +16,7 @@ use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::Clamped;
 use wasm_bindgen::JsCast;
-use wasm_bindgen_futures::JsFuture;
+use wasm_bindgen_futures::{spawn_local, JsFuture};
 use web_sys::{
     CanvasRenderingContext2d, HtmlInputElement, ImageData, InputEvent, KeyboardEvent, WheelEvent,
 };
@@ -458,23 +460,27 @@ async fn start_async() -> Result<(), JsValue> {
     let japanese_font =
         FontVec::try_from_vec(fetch_font_bytes("./fonts/YujiSyuku-Regular.ttf").await?)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let traditional_chinese_font =
-        FontVec::try_from_vec(fetch_font_bytes("./fonts/NotoSerifJP-Regular.ttf").await?)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
     let simplified_chinese_font =
-        FontVec::try_from_vec(fetch_font_bytes("./fonts/NotoSerifJP-Regular.ttf").await?)
+        FontVec::try_from_vec(fetch_font_bytes("./fonts/MaShanZheng-Regular.ttf").await?)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let traditional_chinese_font =
+        FontVec::try_from_vec(fetch_font_bytes("./fonts/MaShanZheng-Regular.ttf").await?)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let english_font = FontVec::try_from_vec(fetch_font_bytes("./fonts/Kalam-Regular.ttf").await?)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     let fonts = Fonts::new(
         japanese_font,
         simplified_chinese_font,
         traditional_chinese_font,
+        english_font,
     );
 
     let app = Rc::new(RefCell::new(App::new(fonts)));
     // localStorage からカスタム問題を復元
     {
         let mut app_mut = app.borrow_mut();
+        app_mut.set_available_fonts(bundled_font_entries());
         match WebCustomProblemStore.load_custom_problems() {
             Ok(problems) => app_mut.set_custom_problems(problems),
             Err(err) => report_provider_error(
@@ -765,9 +771,42 @@ async fn start_async() -> Result<(), JsValue> {
         *last_time_borrow = now;
 
         {
-            let mut app_mut = app.borrow_mut();
-            let viewport = app_mut.display_settings().viewport(width, height);
-            app_mut.update(viewport.width, viewport.height, delta_time);
+            let font_load_request = {
+                let mut app_mut = app.borrow_mut();
+                let viewport = app_mut.display_settings().viewport(width, height);
+                app_mut.update(viewport.width, viewport.height, delta_time);
+                app_mut.take_font_load_request()
+            };
+
+            if let Some(request) = font_load_request {
+                let Some(file_name) = bundled_font_file_name(request.font_id) else {
+                    app.borrow_mut()
+                        .report_visible_error("selected bundled font was not found");
+                    schedule_next_frame(&f);
+                    return;
+                };
+                let app_for_font = app.clone();
+                let path = format!("./fonts/{file_name}");
+                spawn_local(async move {
+                    match fetch_font_bytes(&path).await {
+                        Ok(bytes) => {
+                            let mut app_mut = app_for_font.borrow_mut();
+                            if let Err(err) =
+                                app_mut.apply_font_bytes(request.script, request.font_name, bytes)
+                            {
+                                app_mut
+                                    .report_visible_error(format!("failed to apply font: {err:?}"));
+                            }
+                        }
+                        Err(err) => {
+                            app_for_font.borrow_mut().report_visible_error(format!(
+                                "failed to load font {file_name}: {}",
+                                js_value_to_string(&err)
+                            ));
+                        }
+                    }
+                });
+            }
         }
 
         // --- 描画処理（不変借用） ---

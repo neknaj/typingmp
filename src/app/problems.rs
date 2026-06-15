@@ -1,9 +1,7 @@
 extern crate alloc;
 
 use super::{App, AppEvent};
-#[cfg(not(any(feature = "wasm", feature = "wasi-tui", feature = "uefi")))]
-use crate::io::FontEntry;
-use crate::io::{CustomProblem, ProblemSourceProvider};
+use crate::io::{CustomProblem, FontEntry, ProblemSourceProvider};
 use alloc::{
     string::{String, ToString},
     vec::Vec,
@@ -116,7 +114,6 @@ impl App {
         }
     }
 
-    #[cfg(not(any(feature = "wasm", feature = "wasi-tui", feature = "uefi")))]
     pub fn set_available_fonts(&mut self, entries: Vec<FontEntry>) {
         self.available_fonts = entries;
         if self.selected_font_item >= self.available_fonts.len() {

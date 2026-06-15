@@ -1,10 +1,15 @@
 extern crate alloc;
 
-use crate::font::{script_for_segment, FontScript, Fonts};
+use crate::font::{
+    plain_text_script_runs, script_for_segment, scripts_for_line, segment_script_runs, FontScript,
+    Fonts, SegmentScriptRun,
+};
 use crate::model::{CharIndex, Line, LineIndex, Segment, SegmentIndex, WordIndex};
 use crate::renderer::gui_renderer;
-use ab_glyph::FontVec;
-use alloc::{string::String, vec::Vec};
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
 
 // セグメントの base テキストを返す（Anno は inner を連結）
 fn seg_base_text_owned(seg: &Segment) -> String {
@@ -47,9 +52,7 @@ fn seg_ruby_text_owned(seg: &Segment) -> Option<String> {
 
 #[derive(Clone)]
 pub(crate) struct ScrollLineSegmentCache {
-    pub base_text: String,
-    pub ruby_text: Option<String>,
-    pub script: FontScript,
+    pub display_runs: Vec<SegmentScriptRun>,
     pub base_width: f32,
     pub reading_width_prefix: Vec<f32>,
     pub word_index: usize,
@@ -156,17 +159,82 @@ pub(crate) fn typing_line_scroll_position(
     }
 }
 
-fn build_reading_width_prefix(font: &FontVec, text: &str, font_pixel_size: f32) -> Vec<f32> {
+fn build_reading_width_prefix(
+    fonts: &Fonts,
+    segment: &Segment,
+    script: FontScript,
+    text: &str,
+    font_pixel_size: f32,
+) -> Vec<f32> {
     let mut prefix = Vec::with_capacity(text.chars().count() + 1);
     prefix.push(0.0);
     let mut total = 0.0f32;
-    for character in text.chars() {
-        let mut buf = [0u8; 4];
-        let ch = character.encode_utf8(&mut buf);
-        total += gui_renderer::measure_text(font, ch, font_pixel_size).0 as f32;
-        prefix.push(total);
+    match segment {
+        Segment::Plain { .. } => {
+            for character in text.chars() {
+                let mut buf = [0u8; 4];
+                let ch = character.encode_utf8(&mut buf);
+                let run_script = plain_text_script_runs(ch, Some(script))
+                    .into_iter()
+                    .next()
+                    .map(|run| run.script)
+                    .unwrap_or(script);
+                total += gui_renderer::measure_text(
+                    fonts.get_for_script(run_script),
+                    ch,
+                    font_pixel_size,
+                )
+                .0 as f32;
+                prefix.push(total);
+            }
+        }
+        Segment::Anno { .. } => {
+            for run in segment_script_runs(segment, script) {
+                let font = fonts.get_for_script(run.script);
+                for character in run.reading_text.chars() {
+                    let mut buf = [0u8; 4];
+                    let ch = character.encode_utf8(&mut buf);
+                    total += gui_renderer::measure_text(font, ch, font_pixel_size).0 as f32;
+                    prefix.push(total);
+                }
+            }
+        }
+        Segment::Annotated { .. } => {
+            let font = fonts.get_for_script(script);
+            for character in text.chars() {
+                let mut buf = [0u8; 4];
+                let ch = character.encode_utf8(&mut buf);
+                total += gui_renderer::measure_text(font, ch, font_pixel_size).0 as f32;
+                prefix.push(total);
+            }
+        }
     }
     prefix
+}
+
+fn display_runs_for_segment(
+    segment: &Segment,
+    base_text: &str,
+    script: FontScript,
+) -> Vec<SegmentScriptRun> {
+    match segment {
+        Segment::Plain { .. } => plain_text_script_runs(base_text, Some(script))
+            .into_iter()
+            .map(|run| SegmentScriptRun {
+                reading_text: run.text.clone(),
+                base_text: run.text,
+                ruby_text: None,
+                script: run.script,
+            })
+            .collect(),
+        Segment::Anno { .. } => segment_script_runs(segment, script),
+        Segment::Annotated { .. } => alloc::vec![SegmentScriptRun {
+            base_text: base_text.to_string(),
+            reading_text: seg_reading_text_owned(segment),
+            ruby_text: seg_ruby_text_owned(segment),
+            script,
+        }],
+    }
 }
 
 pub(crate) fn build_scroll_line_cache(
@@ -175,29 +243,42 @@ pub(crate) fn build_scroll_line_cache(
     font_pixel_size: f32,
     line_index: LineIndex,
 ) -> ScrollLineCache {
+    let scripts = scripts_for_line(line);
     let mut segments = Vec::new();
     let mut segment_prefix_width = Vec::new();
     segment_prefix_width.push(0.0);
     let mut word_segment_starts = Vec::with_capacity(line.words.len());
     let mut total_width = 0.0f32;
+    let mut flat_segment_index = 0usize;
 
     for word in &line.words {
         word_segment_starts.push(segments.len());
         for segment in &word.segments {
             let base_text = seg_base_text_owned(segment);
             let reading_text = seg_reading_text_owned(segment);
-            let ruby_text = seg_ruby_text_owned(segment);
-            let script = script_for_segment(segment);
-            let font = fonts.get_for_script(script);
-            let base_width = gui_renderer::measure_text(font, &base_text, font_pixel_size).0 as f32;
+            let script = scripts
+                .get(flat_segment_index)
+                .copied()
+                .unwrap_or_else(|| script_for_segment(segment));
+            flat_segment_index += 1;
+            let display_runs = display_runs_for_segment(segment, &base_text, script);
+            let base_width = display_runs
+                .iter()
+                .map(|run| {
+                    gui_renderer::measure_text(
+                        fonts.get_for_script(run.script),
+                        &run.base_text,
+                        font_pixel_size,
+                    )
+                    .0 as f32
+                })
+                .sum::<f32>();
             let reading_width_prefix =
-                build_reading_width_prefix(font, &reading_text, font_pixel_size);
+                build_reading_width_prefix(fonts, segment, script, &reading_text, font_pixel_size);
             total_width += base_width;
             segment_prefix_width.push(total_width);
             segments.push(ScrollLineSegmentCache {
-                base_text,
-                ruby_text,
-                script,
+                display_runs,
                 base_width,
                 reading_width_prefix,
                 word_index: 0,
@@ -231,15 +312,24 @@ pub(crate) fn build_scroll_line_cache(
 
 fn line_total_width(line: &Line, fonts: &Fonts, font_pixel_size: f32) -> f32 {
     let mut total = 0.0f32;
+    let scripts = scripts_for_line(line);
+    let mut segment_index = 0usize;
     for word in &line.words {
         for segment in &word.segments {
-            let script = script_for_segment(segment);
-            total += gui_renderer::measure_text(
-                fonts.get_for_script(script),
-                &seg_base_text_owned(segment),
-                font_pixel_size,
-            )
-            .0 as f32;
+            let base_text = seg_base_text_owned(segment);
+            let script = scripts
+                .get(segment_index)
+                .copied()
+                .unwrap_or_else(|| script_for_segment(segment));
+            segment_index += 1;
+            for run in display_runs_for_segment(segment, &base_text, script) {
+                total += gui_renderer::measure_text(
+                    fonts.get_for_script(run.script),
+                    &run.base_text,
+                    font_pixel_size,
+                )
+                .0 as f32;
+            }
         }
     }
     total

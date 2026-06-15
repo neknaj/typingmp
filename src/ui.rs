@@ -22,7 +22,10 @@ use std::string::{String, ToString};
 use crate::app::{
     typing_line_scroll_offset, App, AppSnapshot, AppState, Script, ScrollCache, SettingsItem,
 };
-use crate::font::{script_for_segment, FontScript, Fonts};
+use crate::font::{
+    plain_text_script_runs, script_for_segment, scripts_for_line, segment_script_runs, FontScript,
+    Fonts,
+};
 use crate::model::{
     Segment, TypingCorrectnessChar, TypingCorrectnessSegment, TypingCorrectnessWord,
 };
@@ -101,10 +104,20 @@ pub struct UpperTypingSegment {
 }
 
 pub enum ActiveLowerElement {
-    Typed { character: char, is_correct: bool },
+    Typed {
+        character: char,
+        is_correct: bool,
+        script: FontScript,
+    },
     Cursor,
-    UnconfirmedInput(String),
-    LastIncorrectInput(char),
+    UnconfirmedInput {
+        text: String,
+        script: FontScript,
+    },
+    LastIncorrectInput {
+        character: char,
+        script: FontScript,
+    },
 }
 
 pub enum LowerTypingSegment {
@@ -278,7 +291,7 @@ pub fn build_ui(app: &App, fonts: &Fonts, width: usize, height: usize) -> Vec<Re
             build_problem_source_ui(app, snapshot, &mut render_list, menu_gradient)
         }
         AppState::Result => build_result_ui(app, &mut render_list, result_gradient),
-        AppState::Settings => build_settings_ui(snapshot, &mut render_list, settings_gradient),
+        AppState::Settings => build_settings_ui(app, snapshot, &mut render_list, settings_gradient),
         AppState::HowToUse => build_how_to_use_ui(snapshot, &mut render_list, menu_gradient),
     }
 
@@ -396,6 +409,7 @@ fn build_main_menu_ui(
 }
 
 fn build_settings_ui(
+    app: &App,
     snapshot: AppSnapshot<'_>,
     render_list: &mut Vec<Renderable>,
     gradient: Gradient,
@@ -413,18 +427,27 @@ fn build_settings_ui(
         color: 0xFF_FFFFFF,
     });
 
-    let fonts = [
+    if app.settings_picking_font {
+        build_font_picker_ui(app, render_list);
+        return;
+    }
+
+    let settings_rows = [
         (
             SettingsItem::Japanese,
-            Script::Japanese.settings_label().to_string(),
+            font_setting_label(app.fonts(), Script::Japanese),
         ),
         (
-            SettingsItem::SimplifiedChinese,
-            Script::SimplifiedChinese.settings_label().to_string(),
+            SettingsItem::ChineseSimplified,
+            font_setting_label(app.fonts(), Script::ChineseSimplified),
         ),
         (
             SettingsItem::TraditionalChinese,
-            Script::TraditionalChinese.settings_label().to_string(),
+            font_setting_label(app.fonts(), Script::TraditionalChinese),
+        ),
+        (
+            SettingsItem::English,
+            font_setting_label(app.fonts(), Script::English),
         ),
         (
             SettingsItem::AspectRatio,
@@ -439,7 +462,7 @@ fn build_settings_ui(
         ),
     ];
 
-    for (i, (settings_item, label)) in fonts.iter().enumerate() {
+    for (i, (settings_item, label)) in settings_rows.iter().enumerate() {
         let is_selected = i == snapshot.selected_settings_item.index();
 
         let mut display_text = if is_selected {
@@ -473,6 +496,88 @@ fn build_settings_ui(
             },
             font_size: FontSize::WindowHeight(0.05),
             color,
+        });
+    }
+}
+
+fn font_setting_label(fonts: &Fonts, script: FontScript) -> String {
+    format!(
+        "{}: {}",
+        script.settings_label(),
+        fonts.name_for_script(script)
+    )
+}
+
+fn build_font_picker_ui(app: &App, render_list: &mut Vec<Renderable>) {
+    let selected_script = app
+        .selected_settings_item
+        .font_script()
+        .unwrap_or(FontScript::Japanese);
+
+    render_list.push(Renderable::Text {
+        text: format!(
+            "{}: {}",
+            selected_script.settings_label(),
+            app.fonts().name_for_script(selected_script)
+        ),
+        anchor: Anchor::TopCenter,
+        shift: Shift { x: 0.0, y: 0.32 },
+        align: Align {
+            horizontal: HorizontalAlign::Center,
+            vertical: VerticalAlign::Top,
+        },
+        font_size: FontSize::WindowHeight(0.055),
+        color: 0xFF_AADDFF,
+    });
+
+    let item_height = 0.052;
+    let list_y_start = 0.43;
+    let list_height = 0.45;
+    let items_per_screen = (list_height / item_height) as usize;
+    let font_count = app.available_fonts.len();
+    let mut start_index = 0;
+    if app.selected_font_item >= items_per_screen {
+        start_index = app.selected_font_item - items_per_screen + 1;
+    }
+    let end_index = (start_index + items_per_screen).min(font_count);
+
+    for index in start_index..end_index {
+        let font = &app.available_fonts[index];
+        let selected = index == app.selected_font_item;
+        let source = match font.source {
+            crate::app::FontSource::Bundled => "fonts",
+            crate::app::FontSource::System => "system",
+        };
+        let marker = if selected { ">" } else { " " };
+        let color = if selected { 0xFF_FFFF00 } else { 0xFF_FFFFFF };
+
+        render_list.push(Renderable::Text {
+            text: format!("{marker} [{}] {}", source, font.name),
+            anchor: Anchor::TopCenter,
+            shift: Shift {
+                x: -0.26,
+                y: list_y_start + (index - start_index) as f32 * item_height,
+            },
+            align: Align {
+                horizontal: HorizontalAlign::Left,
+                vertical: VerticalAlign::Top,
+            },
+            font_size: FontSize::WindowHeight(0.04),
+            color,
+        });
+    }
+
+    if font_count == 0 {
+        render_list.push(Renderable::Text {
+            text: "No fonts found".to_string(),
+            anchor: Anchor::Center,
+            shift: Shift { x: 0.0, y: 0.12 },
+            align: Align {
+                horizontal: HorizontalAlign::Center,
+                vertical: VerticalAlign::Center,
+            },
+            font_size: FontSize::WindowHeight(0.045),
+            color: 0xFF_FF8888,
         });
     }
 }
@@ -814,6 +919,165 @@ fn segment_display_parts(seg: &Segment) -> (String, Option<String>, Option<Strin
     }
 }
 
+fn script_for_plain_character(character: char, context: FontScript) -> FontScript {
+    let mut buffer = [0_u8; 4];
+    plain_text_script_runs(character.encode_utf8(&mut buffer), Some(context))
+        .into_iter()
+        .next()
+        .map(|run| run.script)
+        .unwrap_or(context)
+}
+
+fn script_for_active_character(
+    segment: &Segment,
+    context: FontScript,
+    char_index: usize,
+    character: char,
+) -> FontScript {
+    match segment {
+        Segment::Plain { .. } => script_for_plain_character(character, context),
+        Segment::Anno { .. } => {
+            let mut offset = 0usize;
+            for run in segment_script_runs(segment, context) {
+                let run_len = run.reading_text.chars().count();
+                if char_index < offset + run_len {
+                    return run.script;
+                }
+                offset += run_len;
+            }
+            context
+        }
+        Segment::Annotated { .. } => context,
+    }
+}
+
+fn plain_base_runs(text: &str, context: FontScript) -> Vec<crate::font::TextScriptRun> {
+    plain_text_script_runs(text, Some(context))
+}
+
+fn segment_display_runs(
+    segment: &Segment,
+    base_text: &str,
+    ruby_text: Option<String>,
+    script: FontScript,
+) -> Vec<crate::font::SegmentScriptRun> {
+    if matches!(segment, Segment::Anno { .. }) {
+        return segment_script_runs(segment, script);
+    }
+
+    if matches!(segment, Segment::Plain { .. }) && ruby_text.is_none() {
+        return plain_base_runs(base_text, script)
+            .into_iter()
+            .map(|run| crate::font::SegmentScriptRun {
+                reading_text: run.text.clone(),
+                base_text: run.text,
+                ruby_text: None,
+                script: run.script,
+            })
+            .collect();
+    }
+
+    let mut runs = Vec::new();
+    runs.push(crate::font::SegmentScriptRun {
+        base_text: base_text.to_string(),
+        reading_text: segment_reading_text(segment),
+        ruby_text,
+        script,
+    });
+    runs
+}
+
+fn push_upper_typing_segment(
+    segments: &mut Vec<UpperTypingSegment>,
+    source_segment: &Segment,
+    base_text: String,
+    ruby_text: Option<String>,
+    anno_text: Option<String>,
+    script: FontScript,
+    state: UpperSegmentState,
+) {
+    if matches!(source_segment, Segment::Plain { .. } | Segment::Anno { .. }) {
+        for run in segment_display_runs(source_segment, &base_text, ruby_text, script) {
+            segments.push(UpperTypingSegment {
+                base_text: run.base_text,
+                ruby_text: run.ruby_text,
+                anno_text: None,
+                script: run.script,
+                state,
+            });
+        }
+        return;
+    }
+
+    segments.push(UpperTypingSegment {
+        base_text,
+        ruby_text,
+        anno_text,
+        script,
+        state,
+    });
+}
+
+fn push_lower_completed_segments(
+    segments: &mut Vec<LowerTypingSegment>,
+    fonts: &Fonts,
+    source_segment: &Segment,
+    base_text: String,
+    ruby_text: Option<String>,
+    script: FontScript,
+    is_correct: bool,
+    font_size: f32,
+) {
+    if matches!(source_segment, Segment::Plain { .. } | Segment::Anno { .. }) {
+        for run in segment_display_runs(source_segment, &base_text, ruby_text, script) {
+            let width = gui_renderer::measure_text(
+                fonts.get_for_script(run.script),
+                &run.base_text,
+                font_size,
+            )
+            .0;
+            segments.push(LowerTypingSegment::Completed {
+                base_text: run.base_text,
+                ruby_text: run.ruby_text,
+                script: run.script,
+                is_correct,
+                width,
+            });
+        }
+        return;
+    }
+
+    let width = gui_renderer::measure_text(fonts.get_for_script(script), &base_text, font_size).0;
+    segments.push(LowerTypingSegment::Completed {
+        base_text,
+        ruby_text,
+        script,
+        is_correct,
+        width,
+    });
+}
+
+fn push_unconfirmed_input_elements(
+    elements: &mut Vec<ActiveLowerElement>,
+    source_segment: &Segment,
+    text: String,
+    context: FontScript,
+) {
+    if matches!(source_segment, Segment::Plain { .. }) {
+        for run in plain_base_runs(&text, context) {
+            elements.push(ActiveLowerElement::UnconfirmedInput {
+                text: run.text,
+                script: run.script,
+            });
+        }
+    } else {
+        elements.push(ActiveLowerElement::UnconfirmedInput {
+            text,
+            script: context,
+        });
+    }
+}
+
 fn is_word_correct(word: &TypingCorrectnessWord) -> bool {
     word.segments.iter().all(is_segment_correct)
 }
@@ -823,15 +1087,31 @@ fn is_segment_correct(segment: &TypingCorrectnessSegment) -> bool {
 }
 
 fn measure_line_base_width(line: &crate::model::Line, fonts: &Fonts, font_size: f32) -> u32 {
+    let scripts = scripts_for_line(line);
+    let mut segment_index = 0usize;
+    let mut total = 0;
+
     line.words
         .iter()
         .flat_map(|word| &word.segments)
-        .map(|segment| {
+        .for_each(|segment| {
             let text = segment_base_text(segment);
-            let script = script_for_segment(segment);
-            gui_renderer::measure_text(fonts.get_for_script(script), &text, font_size).0
-        })
-        .sum()
+            let script = scripts
+                .get(segment_index)
+                .copied()
+                .unwrap_or_else(|| script_for_segment(segment));
+            segment_index += 1;
+            for run in segment_display_runs(segment, &text, None, script) {
+                total += gui_renderer::measure_text(
+                    fonts.get_for_script(run.script),
+                    &run.base_text,
+                    font_size,
+                )
+                .0;
+            }
+        });
+
+    total
 }
 
 const TYPING_SCROLL_OVERSCAN_RATIO: f32 = 0.25;
@@ -922,6 +1202,19 @@ fn cached_status_segment_index(
     word_start + status_segment.min(segment_count_in_word)
 }
 
+fn flat_segment_index_at(
+    line: &crate::model::Line,
+    word_index: usize,
+    segment_index: usize,
+) -> usize {
+    line.words
+        .iter()
+        .take(word_index)
+        .map(|word| word.segments.len())
+        .sum::<usize>()
+        + segment_index
+}
+
 fn build_typing_ui(
     app: &App,
     render_list: &mut Vec<Renderable>,
@@ -960,6 +1253,7 @@ fn build_typing_ui(
             return;
         };
         let status = &model.status;
+        let line_scripts = scripts_for_line(content_line);
         let cached_cache = match app.scroll_cache() {
             Some(ScrollCache::Ready(state)) if state.current.line == status.line => Some(state),
             _ => None,
@@ -1053,7 +1347,10 @@ fn build_typing_ui(
                     UpperSegmentState::Pending
                 };
 
-                let segment_script = script_for_segment(seg);
+                let segment_script = line_scripts
+                    .get(segment_index)
+                    .copied()
+                    .unwrap_or_else(|| script_for_segment(seg));
                 let (base_text, ruby_text, anno_text) = segment_display_parts(seg);
                 if word_idx == status.word.get()
                     && seg_idx == status.segment.get()
@@ -1084,7 +1381,11 @@ fn build_typing_ui(
                                     base_text: ch.to_string(),
                                     ruby_text: None,
                                     anno_text: None,
-                                    script: segment_script,
+                                    script: if matches!(seg, Segment::Plain { .. }) {
+                                        script_for_plain_character(ch, segment_script)
+                                    } else {
+                                        segment_script
+                                    },
                                     state,
                                 });
                             }
@@ -1092,13 +1393,15 @@ fn build_typing_ui(
                         }
                     }
                 }
-                upper_segments.push(UpperTypingSegment {
+                push_upper_typing_segment(
+                    &mut upper_segments,
+                    seg,
                     base_text,
                     ruby_text,
                     anno_text,
-                    script: segment_script,
+                    segment_script,
                     state,
-                });
+                );
             }
         }
 
@@ -1178,13 +1481,31 @@ fn build_typing_ui(
                         _ => false,
                     };
 
-                    lower_segments.push(LowerTypingSegment::Completed {
-                        base_text: cache_seg.base_text.clone(),
-                        ruby_text: cache_seg.ruby_text.clone(),
-                        script: cache_seg.script,
-                        is_correct,
-                        width: cache_seg.base_width as u32,
-                    });
+                    if cache_seg.display_runs.len() == 1 {
+                        lower_segments.push(LowerTypingSegment::Completed {
+                            base_text: cache_seg.display_runs[0].base_text.clone(),
+                            ruby_text: cache_seg.display_runs[0].ruby_text.clone(),
+                            script: cache_seg.display_runs[0].script,
+                            is_correct,
+                            width: cache_seg.base_width as u32,
+                        });
+                    } else {
+                        for run in &cache_seg.display_runs {
+                            let width = gui_renderer::measure_text(
+                                fonts.get_for_script(run.script),
+                                &run.base_text,
+                                base_pixel_font_size,
+                            )
+                            .0;
+                            lower_segments.push(LowerTypingSegment::Completed {
+                                base_text: run.base_text.clone(),
+                                ruby_text: run.ruby_text.clone(),
+                                script: run.script,
+                                is_correct,
+                                width,
+                            });
+                        }
+                    }
                 }
             }
 
@@ -1195,7 +1516,14 @@ fn build_typing_ui(
                     if let Some(active_seg_content) =
                         active_word_content.segments.get(status_segment)
                     {
-                        let active_script = script_for_segment(active_seg_content);
+                        let active_script = line_scripts
+                            .get(flat_segment_index_at(
+                                content_line,
+                                status_word,
+                                status_segment,
+                            ))
+                            .copied()
+                            .unwrap_or_else(|| script_for_segment(active_seg_content));
                         let reading_text = segment_reading_text(active_seg_content);
                         let mut active_elements = Vec::new();
 
@@ -1208,17 +1536,34 @@ fn build_typing_ui(
                             active_elements.push(ActiveLowerElement::Typed {
                                 character,
                                 is_correct,
+                                script: script_for_active_character(
+                                    active_seg_content,
+                                    active_script,
+                                    char_idx,
+                                    character,
+                                ),
                             });
                         }
 
                         if let Some(wrong_char) = status.last_wrong_keydown {
-                            active_elements
-                                .push(ActiveLowerElement::LastIncorrectInput(wrong_char));
+                            active_elements.push(ActiveLowerElement::LastIncorrectInput {
+                                character: wrong_char,
+                                script: script_for_active_character(
+                                    active_seg_content,
+                                    active_script,
+                                    status.char_.get(),
+                                    wrong_char,
+                                ),
+                            });
                         } else {
                             if !status.unconfirmed.is_empty() {
                                 let unconfirmed_text: String = status.unconfirmed.iter().collect();
-                                active_elements
-                                    .push(ActiveLowerElement::UnconfirmedInput(unconfirmed_text));
+                                push_unconfirmed_input_elements(
+                                    &mut active_elements,
+                                    active_seg_content,
+                                    unconfirmed_text,
+                                    active_script,
+                                );
                             }
                             active_elements.push(ActiveLowerElement::Cursor);
                         }
@@ -1236,22 +1581,22 @@ fn build_typing_ui(
                     content_line.words.get(word_idx),
                     correctness_line.words.get(word_idx),
                 ) {
-                    for seg in &word.segments {
-                        let script = script_for_segment(seg);
+                    for (seg_idx, seg) in word.segments.iter().enumerate() {
+                        let script = line_scripts
+                            .get(flat_segment_index_at(content_line, word_idx, seg_idx))
+                            .copied()
+                            .unwrap_or_else(|| script_for_segment(seg));
                         let (base_text, ruby_text, _) = segment_display_parts(seg);
-                        let seg_width = gui_renderer::measure_text(
-                            fonts.get_for_script(script),
-                            &base_text,
-                            base_pixel_font_size,
-                        )
-                        .0;
-                        lower_segments.push(LowerTypingSegment::Completed {
+                        push_lower_completed_segments(
+                            &mut lower_segments,
+                            fonts,
+                            seg,
                             base_text,
                             ruby_text,
                             script,
-                            is_correct: is_word_correct(correctness_word),
-                            width: seg_width,
-                        });
+                            is_word_correct(correctness_word),
+                            base_pixel_font_size,
+                        );
                     }
                 }
             }
@@ -1262,30 +1607,37 @@ fn build_typing_ui(
             ) {
                 for seg_idx in 0..status_segment {
                     if let Some(seg) = active_word_content.segments.get(seg_idx) {
-                        let script = script_for_segment(seg);
+                        let script = line_scripts
+                            .get(flat_segment_index_at(content_line, status_word, seg_idx))
+                            .copied()
+                            .unwrap_or_else(|| script_for_segment(seg));
                         let (base_text, ruby_text, _) = segment_display_parts(seg);
                         let is_correct = active_correctness_word
                             .segments
                             .get(seg_idx)
                             .is_some_and(is_segment_correct);
-                        let width = gui_renderer::measure_text(
-                            fonts.get_for_script(script),
-                            &base_text,
-                            base_pixel_font_size,
-                        )
-                        .0;
-                        lower_segments.push(LowerTypingSegment::Completed {
+                        push_lower_completed_segments(
+                            &mut lower_segments,
+                            fonts,
+                            seg,
                             base_text,
                             ruby_text,
                             script,
                             is_correct,
-                            width,
-                        });
+                            base_pixel_font_size,
+                        );
                     }
                 }
 
                 if let Some(active_seg_content) = active_word_content.segments.get(status_segment) {
-                    let active_script = script_for_segment(active_seg_content);
+                    let active_script = line_scripts
+                        .get(flat_segment_index_at(
+                            content_line,
+                            status_word,
+                            status_segment,
+                        ))
+                        .copied()
+                        .unwrap_or_else(|| script_for_segment(active_seg_content));
                     let reading_text = segment_reading_text(active_seg_content);
                     let mut active_elements = Vec::new();
 
@@ -1298,16 +1650,34 @@ fn build_typing_ui(
                         active_elements.push(ActiveLowerElement::Typed {
                             character,
                             is_correct,
+                            script: script_for_active_character(
+                                active_seg_content,
+                                active_script,
+                                char_idx,
+                                character,
+                            ),
                         });
                     }
 
                     if let Some(wrong_char) = status.last_wrong_keydown {
-                        active_elements.push(ActiveLowerElement::LastIncorrectInput(wrong_char));
+                        active_elements.push(ActiveLowerElement::LastIncorrectInput {
+                            character: wrong_char,
+                            script: script_for_active_character(
+                                active_seg_content,
+                                active_script,
+                                status.char_.get(),
+                                wrong_char,
+                            ),
+                        });
                     } else {
                         if !status.unconfirmed.is_empty() {
                             let unconfirmed_text: String = status.unconfirmed.iter().collect();
-                            active_elements
-                                .push(ActiveLowerElement::UnconfirmedInput(unconfirmed_text));
+                            push_unconfirmed_input_elements(
+                                &mut active_elements,
+                                active_seg_content,
+                                unconfirmed_text,
+                                active_script,
+                            );
                         }
                         active_elements.push(ActiveLowerElement::Cursor);
                     }
@@ -1507,6 +1877,7 @@ mod tests {
     use crate::app::{App, AppEvent, Fonts};
     use crate::display::DisplayScale;
     use crate::font::FontScript;
+    use crate::io::{FontAssetId, FontEntry, FontSource};
     use ab_glyph::FontVec;
 
     fn test_fonts() -> Fonts {
@@ -1515,7 +1886,7 @@ mod tests {
                 .expect("test font should parse")
         }
 
-        Fonts::new(font(), font(), font())
+        Fonts::new(font(), font(), font(), font())
     }
 
     fn typing_app(problem: &str) -> App {
@@ -1573,6 +1944,18 @@ mod tests {
             .expect("typing upper renderable should exist")
     }
 
+    fn render_texts(render_list: &[Renderable]) -> Vec<&str> {
+        render_list
+            .iter()
+            .filter_map(|item| match item {
+                Renderable::Text { text, .. } | Renderable::BigText { text, .. } => {
+                    Some(text.as_str())
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
     fn assert_line_left_matches_scroll_offset(
         anchor: Anchor,
         shift: Shift,
@@ -1619,11 +2002,13 @@ mod tests {
             [
                 ActiveLowerElement::Typed {
                     character: '色',
-                    is_correct: true
+                    is_correct: true,
+                    ..
                 },
                 ActiveLowerElement::Typed {
                     character: 'は',
-                    is_correct: true
+                    is_correct: true,
+                    ..
                 },
                 ActiveLowerElement::Cursor
             ]
@@ -1645,13 +2030,46 @@ mod tests {
         let (upper_segments, lower_segments) = typing_rows(&render_list);
 
         assert_eq!(upper_segments[0].script, FontScript::Japanese);
-        assert_eq!(upper_segments[1].script, FontScript::SimplifiedChinese);
+        assert_eq!(upper_segments[1].script, FontScript::ChineseSimplified);
         assert_eq!(upper_segments[2].script, FontScript::TraditionalChinese);
 
         let LowerTypingSegment::Active { script, .. } = &lower_segments[0] else {
             panic!("first lower segment should be active");
         };
         assert_eq!(*script, FontScript::Japanese);
+    }
+
+    #[test]
+    fn settings_font_picker_lists_available_font_files() {
+        let mut app = App::new(test_fonts());
+        app.state = AppState::Settings;
+        app.settings_picking_font = true;
+        app.set_available_fonts(vec![
+            FontEntry {
+                id: FontAssetId(0),
+                name: "YujiSyuku-Regular".to_string(),
+                source: FontSource::Bundled,
+            },
+            FontEntry {
+                id: FontAssetId(1),
+                name: "MaShanZheng-Regular".to_string(),
+                source: FontSource::Bundled,
+            },
+            FontEntry {
+                id: FontAssetId(2),
+                name: "Kalam-Regular".to_string(),
+                source: FontSource::Bundled,
+            },
+        ]);
+
+        let render_list = build_ui(&app, app.fonts(), 800, 500);
+        let texts = render_texts(&render_list);
+
+        assert!(texts.iter().any(|text| text.contains("YujiSyuku-Regular")));
+        assert!(texts
+            .iter()
+            .any(|text| text.contains("MaShanZheng-Regular")));
+        assert!(texts.iter().any(|text| text.contains("Kalam-Regular")));
     }
 
     #[test]
@@ -1718,7 +2136,12 @@ mod tests {
             .current
             .segments
             .iter()
-            .position(|segment| &segment.base_text == first_upper_text)
+            .position(|segment| {
+                segment
+                    .display_runs
+                    .first()
+                    .is_some_and(|run| &run.base_text == first_upper_text)
+            })
             .expect("visible upper segment should come from the scroll cache");
         assert_eq!(
             upper_alignment.visible_start_width,
@@ -1736,7 +2159,12 @@ mod tests {
             .current
             .segments
             .iter()
-            .position(|segment| &segment.base_text == first_completed_text)
+            .position(|segment| {
+                segment
+                    .display_runs
+                    .first()
+                    .is_some_and(|run| &run.base_text == first_completed_text)
+            })
             .expect("visible lower segment should come from the scroll cache");
         assert_eq!(
             lower_alignment.visible_start_width,

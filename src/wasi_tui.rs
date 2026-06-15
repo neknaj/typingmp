@@ -1,5 +1,6 @@
 use crate::app::{App, AppEvent, Fonts};
 use crate::backend::BackendError;
+use crate::io::{bundled_font_data, bundled_font_entries};
 use crate::model::Segment;
 use crate::ui::{self, ActiveLowerElement, Align, Anchor, LowerTypingSegment, Renderable, Shift};
 use ab_glyph::FontVec;
@@ -84,6 +85,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let _terminal_guard = AnsiTerminalGuard;
     let fonts = bundled_fonts()?;
     let mut app = App::new(fonts);
+    app.set_available_fonts(bundled_font_entries());
     app.on_event(AppEvent::Start);
 
     let mut stdout = io::stdout();
@@ -99,6 +101,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         let delta_time = (now - last_frame_time).max(0.0);
         last_frame_time = now;
         app.update(virtual_viewport.width, virtual_viewport.height, delta_time);
+        if let Some(request) = app.take_font_load_request() {
+            match bundled_font_data(request.font_id) {
+                Some(bytes) => {
+                    if let Err(err) =
+                        app.apply_font_bytes(request.script, request.font_name, bytes.to_vec())
+                    {
+                        app.report_visible_error(format!("failed to apply font: {err:?}"));
+                    }
+                }
+                None => app.report_visible_error("selected bundled font was not found"),
+            }
+        }
 
         let frame = render_frame(
             &app,
@@ -141,16 +155,19 @@ fn bundled_fonts() -> Result<Fonts, BackendError> {
         FontVec::try_from_vec(include_bytes!("../fonts/YujiSyuku-Regular.ttf").to_vec())
             .map_err(|_| BackendError::asset("failed to parse Yuji Syuku font"))?;
     let simplified_chinese_font =
-        FontVec::try_from_vec(include_bytes!("../fonts/NotoSerifJP-Regular.ttf").to_vec())
-            .map_err(|_| BackendError::asset("failed to parse Noto Serif JP font"))?;
+        FontVec::try_from_vec(include_bytes!("../fonts/MaShanZheng-Regular.ttf").to_vec())
+            .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
     let traditional_chinese_font =
-        FontVec::try_from_vec(include_bytes!("../fonts/NotoSerifJP-Regular.ttf").to_vec())
-            .map_err(|_| BackendError::asset("failed to parse Noto Serif JP font"))?;
+        FontVec::try_from_vec(include_bytes!("../fonts/MaShanZheng-Regular.ttf").to_vec())
+            .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
+    let english_font = FontVec::try_from_vec(include_bytes!("../fonts/Kalam-Regular.ttf").to_vec())
+        .map_err(|_| BackendError::asset("failed to parse Kalam font"))?;
 
     Ok(Fonts::new(
         japanese_font,
         simplified_chinese_font,
         traditional_chinese_font,
+        english_font,
     ))
 }
 
@@ -489,6 +506,7 @@ fn active_lower_text_and_color(element: &ActiveLowerElement) -> (String, AnsiCol
         ActiveLowerElement::Typed {
             character,
             is_correct,
+            ..
         } => (
             character.to_string(),
             if *is_correct {
@@ -498,10 +516,10 @@ fn active_lower_text_and_color(element: &ActiveLowerElement) -> (String, AnsiCol
             },
         ),
         ActiveLowerElement::Cursor => ("|".to_string(), AnsiColor::from_argb(ui::CURSOR_COLOR)),
-        ActiveLowerElement::UnconfirmedInput(text) => {
+        ActiveLowerElement::UnconfirmedInput { text, .. } => {
             (text.clone(), AnsiColor::from_argb(ui::UNCONFIRMED_COLOR))
         }
-        ActiveLowerElement::LastIncorrectInput(character) => (
+        ActiveLowerElement::LastIncorrectInput { character, .. } => (
             character.to_string(),
             AnsiColor::from_argb(ui::WRONG_KEY_COLOR),
         ),

@@ -12,9 +12,7 @@ use crate::app::scroll::{
 };
 use crate::display::DisplaySettings;
 pub use crate::font::{FontScript as Script, Fonts};
-#[cfg(not(any(feature = "wasm", feature = "wasi-tui", feature = "uefi")))]
-use crate::io::FontEntry;
-use crate::io::{FontAssetId, ProblemRepository};
+use crate::io::{FontAssetId, FontEntry, ProblemRepository};
 use crate::model::{
     CharIndex, LineIndex, ResultModel, Scroll, SegmentIndex, TypingModel, TypingStatus, WordIndex,
 };
@@ -106,8 +104,9 @@ impl MainMenuItem {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingsItem {
     Japanese,
-    SimplifiedChinese,
+    ChineseSimplified,
     TraditionalChinese,
+    English,
     AspectRatio,
     DisplayScale,
 }
@@ -116,18 +115,20 @@ impl SettingsItem {
     pub const fn index(self) -> usize {
         match self {
             Self::Japanese => 0,
-            Self::SimplifiedChinese => 1,
+            Self::ChineseSimplified => 1,
             Self::TraditionalChinese => 2,
-            Self::AspectRatio => 3,
-            Self::DisplayScale => 4,
+            Self::English => 3,
+            Self::AspectRatio => 4,
+            Self::DisplayScale => 5,
         }
     }
 
     pub const fn font_script(self) -> Option<Script> {
         match self {
             Self::Japanese => Some(Script::Japanese),
-            Self::SimplifiedChinese => Some(Script::SimplifiedChinese),
+            Self::ChineseSimplified => Some(Script::ChineseSimplified),
             Self::TraditionalChinese => Some(Script::TraditionalChinese),
+            Self::English => Some(Script::English),
             Self::AspectRatio | Self::DisplayScale => None,
         }
     }
@@ -135,18 +136,20 @@ impl SettingsItem {
     pub fn previous(self) -> Self {
         match self {
             Self::Japanese => Self::Japanese,
-            Self::SimplifiedChinese => Self::Japanese,
-            Self::TraditionalChinese => Self::SimplifiedChinese,
-            Self::AspectRatio => Self::TraditionalChinese,
+            Self::ChineseSimplified => Self::Japanese,
+            Self::TraditionalChinese => Self::ChineseSimplified,
+            Self::English => Self::TraditionalChinese,
+            Self::AspectRatio => Self::English,
             Self::DisplayScale => Self::AspectRatio,
         }
     }
 
     pub fn next(self) -> Self {
         match self {
-            Self::Japanese => Self::SimplifiedChinese,
-            Self::SimplifiedChinese => Self::TraditionalChinese,
-            Self::TraditionalChinese => Self::AspectRatio,
+            Self::Japanese => Self::ChineseSimplified,
+            Self::ChineseSimplified => Self::TraditionalChinese,
+            Self::TraditionalChinese => Self::English,
+            Self::English => Self::AspectRatio,
             Self::AspectRatio => Self::DisplayScale,
             Self::DisplayScale => Self::DisplayScale,
         }
@@ -227,10 +230,11 @@ impl From<ScreenKeyboardUiCommand> for UiCommand {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FontLoadRequest {
     pub script: Script,
     pub font_id: FontAssetId,
+    pub font_name: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -258,10 +262,8 @@ pub struct App {
     /// フォントピッカーを開いているか
     pub(crate) settings_picking_font: bool,
     /// フォントピッカー内の選択インデックス
-    #[cfg(not(any(feature = "wasm", feature = "wasi-tui", feature = "uefi")))]
     pub(crate) selected_font_item: usize,
     /// 発見されたフォント一覧（起動時にディスカバリー）
-    #[cfg(not(any(feature = "wasm", feature = "wasi-tui", feature = "uefi")))]
     pub(crate) available_fonts: Vec<FontEntry>,
     requested_font_load: Option<FontLoadRequest>,
     pub(crate) fps: f64,
@@ -310,9 +312,7 @@ impl App {
             fonts,
             display_settings: DisplaySettings::default(),
             settings_picking_font: false,
-            #[cfg(not(any(feature = "wasm", feature = "wasi-tui", feature = "uefi")))]
             selected_font_item: 0,
-            #[cfg(not(any(feature = "wasm", feature = "wasi-tui", feature = "uefi")))]
             available_fonts: Vec::new(),
             requested_font_load: None,
             fps: 0.0,
@@ -387,10 +387,11 @@ impl App {
     pub fn apply_font_bytes(
         &mut self,
         script: Script,
+        font_name: String,
         bytes: Vec<u8>,
     ) -> Result<(), FontApplyError> {
         let font = FontVec::try_from_vec(bytes).map_err(|_| FontApplyError::InvalidFontData)?;
-        self.fonts.set_for_script(script, font);
+        self.fonts.set_for_script(script, font_name, font);
         self.scroll_cache = None;
         Ok(())
     }
@@ -406,8 +407,9 @@ impl App {
                 self.scroll_cache = None;
             }
             SettingsItem::Japanese
-            | SettingsItem::SimplifiedChinese
-            | SettingsItem::TraditionalChinese => {}
+            | SettingsItem::ChineseSimplified
+            | SettingsItem::TraditionalChinese
+            | SettingsItem::English => {}
         }
     }
 
@@ -436,8 +438,9 @@ impl App {
                 self.scroll_cache = None;
             }
             SettingsItem::Japanese
-            | SettingsItem::SimplifiedChinese
-            | SettingsItem::TraditionalChinese => return false,
+            | SettingsItem::ChineseSimplified
+            | SettingsItem::TraditionalChinese
+            | SettingsItem::English => return false,
         }
 
         true
@@ -713,25 +716,8 @@ impl App {
                         }
                         AppEvent::Enter => {
                             if self.selected_settings_item.font_script().is_some() {
-                                #[cfg(not(any(
-                                    feature = "wasm",
-                                    feature = "wasi-tui",
-                                    feature = "uefi"
-                                )))]
-                                {
-                                    self.settings_picking_font = true;
-                                    self.selected_font_item = 0;
-                                }
-                                #[cfg(any(
-                                    feature = "wasm",
-                                    feature = "wasi-tui",
-                                    feature = "uefi"
-                                ))]
-                                {
-                                    self.status_text =
-                                        "Font assignment is unavailable on this backend."
-                                            .to_string();
-                                }
+                                self.settings_picking_font = true;
+                                self.selected_font_item = 0;
                             } else {
                                 self.advance_selected_display_setting();
                             }
@@ -747,45 +733,34 @@ impl App {
                     }
                 } else {
                     // フォントピッカーモード: Up/Down で available_fonts を選択、Enter で適用
-                    #[cfg(not(any(feature = "wasm", feature = "wasi-tui", feature = "uefi")))]
-                    {
-                        let font_count = self.available_fonts.len();
-                        match event {
-                            AppEvent::Up if self.selected_font_item > 0 => {
-                                self.selected_font_item -= 1;
-                            }
-                            AppEvent::Down
-                                if font_count > 0 && self.selected_font_item < font_count - 1 =>
-                            {
-                                self.selected_font_item += 1;
-                            }
-                            AppEvent::Enter => {
-                                if self.selected_font_item < font_count {
-                                    if let Some(script) = self.selected_settings_item.font_script()
-                                    {
-                                        let font_id =
-                                            self.available_fonts[self.selected_font_item].id;
-                                        self.requested_font_load =
-                                            Some(FontLoadRequest { script, font_id });
-                                    }
+                    let font_count = self.available_fonts.len();
+                    match event {
+                        AppEvent::Up if self.selected_font_item > 0 => {
+                            self.selected_font_item -= 1;
+                        }
+                        AppEvent::Down
+                            if font_count > 0 && self.selected_font_item < font_count - 1 =>
+                        {
+                            self.selected_font_item += 1;
+                        }
+                        AppEvent::Enter => {
+                            if self.selected_font_item < font_count {
+                                if let Some(script) = self.selected_settings_item.font_script() {
+                                    let selected_font =
+                                        &self.available_fonts[self.selected_font_item];
+                                    self.requested_font_load = Some(FontLoadRequest {
+                                        script,
+                                        font_id: selected_font.id,
+                                        font_name: selected_font.name.clone(),
+                                    });
                                 }
-                                self.settings_picking_font = false;
                             }
-                            AppEvent::Escape => {
-                                self.settings_picking_font = false;
-                            }
-                            _ => {}
+                            self.settings_picking_font = false;
                         }
-                    }
-                    // WASM / WASI / UEFI ではフォントピッカー操作なし
-                    #[cfg(any(feature = "wasm", feature = "wasi-tui", feature = "uefi"))]
-                    {
-                        match event {
-                            AppEvent::Escape | AppEvent::Enter => {
-                                self.settings_picking_font = false;
-                            }
-                            _ => {}
+                        AppEvent::Escape => {
+                            self.settings_picking_font = false;
                         }
+                        _ => {}
                     }
                 }
             }
@@ -981,7 +956,7 @@ mod tests {
                 .expect("test font should parse")
         }
 
-        Fonts::new(font(), font(), font())
+        Fonts::new(font(), font(), font(), font())
     }
 
     #[test]

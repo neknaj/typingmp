@@ -41,17 +41,21 @@ pub fn run() -> Result<(), Box<dyn Error>> {
     let japanese_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::YujiSyukuRegular)?)
             .map_err(|_| BackendError::asset("failed to parse Yuji Syuku font"))?;
-    let traditional_chinese_font =
-        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::NotoSerifJpRegular)?)
-            .map_err(|_| BackendError::asset("failed to parse Noto Serif JP font"))?;
     let simplified_chinese_font =
-        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::NotoSerifJpRegular)?)
-            .map_err(|_| BackendError::asset("failed to parse Noto Serif JP font"))?;
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::MaShanZhengRegular)?)
+            .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
+    let traditional_chinese_font =
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::MaShanZhengRegular)?)
+            .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
+    let english_font =
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::KalamRegular)?)
+            .map_err(|_| BackendError::asset("failed to parse Kalam font"))?;
 
     let fonts = Fonts::new(
         japanese_font,
         simplified_chinese_font,
         traditional_chinese_font,
+        english_font,
     );
 
     let event_loop = EventLoop::new();
@@ -178,7 +182,9 @@ pub fn run() -> Result<(), Box<dyn Error>> {
                 if let Some(request) = app.take_font_load_request() {
                     match asset_provider.load_font(request.font_id) {
                         Ok(bytes) => {
-                            if let Err(err) = app.apply_font_bytes(request.script, bytes) {
+                            if let Err(err) =
+                                app.apply_font_bytes(request.script, request.font_name, bytes)
+                            {
                                 app.report_visible_error(format!("failed to apply font: {err:?}"));
                             }
                         }

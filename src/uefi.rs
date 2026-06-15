@@ -3,6 +3,7 @@
 extern crate alloc;
 
 use crate::app::{App, AppEvent, Fonts};
+use crate::io::{bundled_font_data, bundled_font_entries};
 use crate::renderer::{ArgbSurface, RenderCache};
 use crate::ui;
 use ab_glyph::FontVec;
@@ -37,16 +38,24 @@ fn run_inner() -> core::result::Result<(), Status> {
     let yuji_font_data: &[u8] = include_bytes!("../fonts/YujiSyuku-Regular.ttf");
     let yuji_font = load_embedded_font(yuji_font_data)?;
 
-    let traditional_chinese_font_data: &[u8] = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
-    let traditional_chinese_font = load_embedded_font(traditional_chinese_font_data)?;
-    let simplified_chinese_font_data: &[u8] = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
+    let simplified_chinese_font_data: &[u8] = include_bytes!("../fonts/MaShanZheng-Regular.ttf");
     let simplified_chinese_font = load_embedded_font(simplified_chinese_font_data)?;
+    let traditional_chinese_font_data: &[u8] = include_bytes!("../fonts/MaShanZheng-Regular.ttf");
+    let traditional_chinese_font = load_embedded_font(traditional_chinese_font_data)?;
+    let english_font_data: &[u8] = include_bytes!("../fonts/Kalam-Regular.ttf");
+    let english_font = load_embedded_font(english_font_data)?;
 
     // Fonts構造体を初期化
-    let fonts = Fonts::new(yuji_font, simplified_chinese_font, traditional_chinese_font);
+    let fonts = Fonts::new(
+        yuji_font,
+        simplified_chinese_font,
+        traditional_chinese_font,
+        english_font,
+    );
 
     // AppにFontsを渡して初期化
     let mut app = App::new(fonts);
+    app.set_available_fonts(bundled_font_entries());
     app.on_event(AppEvent::Start);
 
     let timer_event = firmware(unsafe {
@@ -107,6 +116,19 @@ fn run_inner() -> core::result::Result<(), Status> {
         let display_settings = app.display_settings();
         let viewport = display_settings.viewport(width, height);
         app.update(viewport.width, viewport.height, delta_time);
+        if let Some(request) = app.take_font_load_request() {
+            match bundled_font_data(request.font_id) {
+                Some(bytes) => {
+                    if app
+                        .apply_font_bytes(request.script, request.font_name, bytes.to_vec())
+                        .is_err()
+                    {
+                        app.report_visible_error("failed to apply font");
+                    }
+                }
+                None => app.report_visible_error("selected bundled font was not found"),
+            }
+        }
 
         let fonts = app.fonts();
         let render_list = ui::build_ui(&app, fonts, viewport.width, viewport.height);

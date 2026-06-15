@@ -5,11 +5,11 @@ use crate::app::{App, AppEvent, Fonts, TuiDisplayMode};
 #[cfg(not(feature = "uefi"))]
 use crate::backend::BackendError;
 #[cfg(not(feature = "uefi"))]
-use crate::font::script_for_segment;
+use crate::font::{script_for_segment, scripts_for_line, segment_script_runs};
 #[cfg(not(feature = "uefi"))]
 use crate::io::{AssetProvider, BundledFont, DesktopAssetProvider};
 #[cfg(not(feature = "uefi"))]
-use crate::model::Segment;
+use crate::model::{Line, Segment};
 #[cfg(not(feature = "uefi"))]
 use crate::renderer::{gui_renderer, tui_renderer}; // gui_renderer をインポート
 #[cfg(not(feature = "uefi"))]
@@ -197,6 +197,39 @@ fn u32_to_crossterm_color(c: u32) -> Color {
     Color::Rgb { r, g, b }
 }
 
+#[cfg(not(feature = "uefi"))]
+fn tui_line_widths(
+    line: &Line,
+    fonts: &Fonts,
+    renderer: fn(&FontVec, &str, f32) -> (Vec<char>, usize, usize, usize),
+    render_font_size: f32,
+    font_size_px: f32,
+) -> (u32, f32) {
+    let scripts = scripts_for_line(line);
+    let mut total_cells = 0_u32;
+    let mut total_pixels = 0.0_f32;
+    let mut segment_index = 0usize;
+
+    for word in &line.words {
+        for segment in &word.segments {
+            let script = scripts
+                .get(segment_index)
+                .copied()
+                .unwrap_or_else(|| script_for_segment(segment));
+            segment_index += 1;
+
+            for run in segment_script_runs(segment, script) {
+                let font = fonts.get_for_script(run.script);
+                total_cells += renderer(font, &run.base_text, render_font_size).1 as u32;
+                total_pixels +=
+                    gui_renderer::measure_text(font, &run.base_text, font_size_px).0 as f32;
+            }
+        }
+    }
+
+    (total_cells, total_pixels)
+}
+
 /// TUIアプリケーションのメイン関数
 #[cfg(not(feature = "uefi"))]
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -204,17 +237,21 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let japanese_font =
         FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::YujiSyukuRegular)?)
             .map_err(|_| BackendError::asset("failed to parse Yuji Syuku font"))?;
-    let traditional_chinese_font =
-        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::NotoSerifJpRegular)?)
-            .map_err(|_| BackendError::asset("failed to parse Noto Serif JP font"))?;
     let simplified_chinese_font =
-        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::NotoSerifJpRegular)?)
-            .map_err(|_| BackendError::asset("failed to parse Noto Serif JP font"))?;
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::MaShanZhengRegular)?)
+            .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
+    let traditional_chinese_font =
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::MaShanZhengRegular)?)
+            .map_err(|_| BackendError::asset("failed to parse Ma Shan Zheng font"))?;
+    let english_font =
+        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::KalamRegular)?)
+            .map_err(|_| BackendError::asset("failed to parse Kalam font"))?;
 
     let fonts = Fonts::new(
         japanese_font,
         simplified_chinese_font,
         traditional_chinese_font,
+        english_font,
     );
 
     let mut stdout = stdout();
@@ -252,7 +289,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(request) = app.take_font_load_request() {
             match asset_provider.load_font(request.font_id) {
                 Ok(bytes) => {
-                    if let Err(err) = app.apply_font_bytes(request.script, bytes) {
+                    if let Err(err) = app.apply_font_bytes(request.script, request.font_name, bytes)
+                    {
                         app.report_visible_error(format!("failed to apply font: {err:?}"));
                     }
                 }
@@ -361,32 +399,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             let Some(typing_model) = app.typing_model() else {
                                 continue;
                             };
-                            let full_line_words =
-                                &typing_model.content.lines[typing_model.status.line.get()].words;
+                            let full_line =
+                                &typing_model.content.lines[typing_model.status.line.get()];
 
-                            let (total_width_cells, total_width_pixels) = full_line_words
-                                .iter()
-                                .flat_map(|w| &w.segments)
-                                .fold((0_u32, 0.0_f32), |(acc_cells, acc_pixels), seg| {
-                                    let text = match seg {
-                                        Segment::Plain { text } => text.clone(),
-                                        Segment::Annotated { base, .. } => base.clone(),
-                                        Segment::Anno { inner, .. } => inner
-                                            .iter()
-                                            .map(|s| match s {
-                                                Segment::Plain { text } => text.as_str(),
-                                                Segment::Annotated { base, .. } => base.as_str(),
-                                                Segment::Anno { .. } => "",
-                                            })
-                                            .collect(),
-                                    };
-                                    let font = fonts.get_for_script(script_for_segment(seg));
-                                    let cells = renderer(font, &text, render_font_size).1 as u32;
-                                    let pixels =
-                                        gui_renderer::measure_text(font, &text, font_size_px).0
-                                            as f32;
-                                    (acc_cells + cells, acc_pixels + pixels)
-                                });
+                            let (total_width_cells, total_width_pixels) = tui_line_widths(
+                                full_line,
+                                fonts,
+                                renderer,
+                                render_font_size,
+                                font_size_px,
+                            );
 
                             if total_width_cells == 0 {
                                 continue;
@@ -592,32 +614,16 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             let Some(typing_model) = app.typing_model() else {
                                 continue;
                             };
-                            let full_line_words =
-                                &typing_model.content.lines[typing_model.status.line.get()].words;
+                            let full_line =
+                                &typing_model.content.lines[typing_model.status.line.get()];
 
-                            let (total_width_cells, total_width_pixels) = full_line_words
-                                .iter()
-                                .flat_map(|w| &w.segments)
-                                .fold((0_u32, 0.0_f32), |(acc_cells, acc_pixels), seg| {
-                                    let text = match seg {
-                                        Segment::Plain { text } => text.clone(),
-                                        Segment::Annotated { base, .. } => base.clone(),
-                                        Segment::Anno { inner, .. } => inner
-                                            .iter()
-                                            .map(|s| match s {
-                                                Segment::Plain { text } => text.as_str(),
-                                                Segment::Annotated { base, .. } => base.as_str(),
-                                                Segment::Anno { .. } => "",
-                                            })
-                                            .collect(),
-                                    };
-                                    let font = fonts.get_for_script(script_for_segment(seg));
-                                    let cells = renderer(font, &text, render_font_size).1 as u32;
-                                    let pixels =
-                                        gui_renderer::measure_text(font, &text, font_size_px).0
-                                            as f32;
-                                    (acc_cells + cells, acc_pixels + pixels)
-                                });
+                            let (total_width_cells, total_width_pixels) = tui_line_widths(
+                                full_line,
+                                fonts,
+                                renderer,
+                                render_font_size,
+                                font_size_px,
+                            );
 
                             if total_width_cells == 0 {
                                 continue;
@@ -741,12 +747,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                         pen_x += art_width as i32;
                                     }
                                     LowerTypingSegment::Active { elements, script } => {
-                                        let font = fonts.get_for_script(script);
                                         for el in elements {
-                                            let (text_to_render, color) = match el {
+                                            let (text_to_render, color, element_script) = match el {
                                                 ActiveLowerElement::Typed {
                                                     character,
                                                     is_correct,
+                                                    script,
                                                 } => (
                                                     character.to_string(),
                                                     u32_to_crossterm_color(if is_correct {
@@ -754,20 +760,31 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                                     } else {
                                                         ui::INCORRECT_COLOR
                                                     }),
+                                                    script,
                                                 ),
                                                 ActiveLowerElement::Cursor => (
                                                     "|".to_string(),
                                                     u32_to_crossterm_color(ui::CURSOR_COLOR),
+                                                    script,
                                                 ),
-                                                ActiveLowerElement::UnconfirmedInput(s) => (
-                                                    s.clone(),
+                                                ActiveLowerElement::UnconfirmedInput {
+                                                    text,
+                                                    script,
+                                                } => (
+                                                    text.clone(),
                                                     u32_to_crossterm_color(ui::UNCONFIRMED_COLOR),
+                                                    script,
                                                 ),
-                                                ActiveLowerElement::LastIncorrectInput(c) => (
-                                                    c.to_string(),
+                                                ActiveLowerElement::LastIncorrectInput {
+                                                    character,
+                                                    script,
+                                                } => (
+                                                    character.to_string(),
                                                     u32_to_crossterm_color(ui::WRONG_KEY_COLOR),
+                                                    script,
                                                 ),
                                             };
+                                            let font = fonts.get_for_script(element_script);
 
                                             if text_to_render == "|" {
                                                 let cursor_height = line_total_height;
@@ -888,6 +905,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                                 ActiveLowerElement::Typed {
                                                     character,
                                                     is_correct,
+                                                    ..
                                                 } => (
                                                     character.to_string(),
                                                     u32_to_crossterm_color(if is_correct {
@@ -900,12 +918,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                                     "|".to_string(),
                                                     u32_to_crossterm_color(ui::CURSOR_COLOR),
                                                 ),
-                                                ActiveLowerElement::UnconfirmedInput(s) => (
-                                                    s.clone(),
+                                                ActiveLowerElement::UnconfirmedInput {
+                                                    text,
+                                                    ..
+                                                } => (
+                                                    text.clone(),
                                                     u32_to_crossterm_color(ui::UNCONFIRMED_COLOR),
                                                 ),
-                                                ActiveLowerElement::LastIncorrectInput(c) => (
-                                                    c.to_string(),
+                                                ActiveLowerElement::LastIncorrectInput {
+                                                    character,
+                                                    ..
+                                                } => (
+                                                    character.to_string(),
                                                     u32_to_crossterm_color(ui::WRONG_KEY_COLOR),
                                                 ),
                                             };

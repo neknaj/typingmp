@@ -2,19 +2,20 @@
 
 ## 目的
 
-typingmp のフォント設定は、アプリ全体の表示フォントを切り替える機能ではない。目的は、日本語と中国語が混在する問題文の各表示 segment に対して、reading から適切な script を自動判定し、その script に対応するフォントで描画することである。
+typingmp のフォント設定は、アプリ全体の表示フォントを切り替える機能ではない。目的は、日本語、中国語、英語が混在する問題文の各表示 segment に対して、reading や base の文字種から適切な script を自動判定し、その script に対応するフォントで描画することである。
 
 ## フォントスロット
 
-フォントは次の 3 スロットとして管理する。
+フォントは次の 4 スロットとして管理する。
 
-| slot | 用途 |
-|---|---|
-| Japanese | reading が平仮名または片仮名の segment。日本語漢字として表示する。 |
-| Simplified Chinese | reading がピンインの segment。簡体字として表示する。 |
-| Traditional Chinese | reading が注音の segment。繁体字として表示する。 |
+| slot | 既定フォント | 用途 |
+|---|---|---|
+| Japanese | `YujiSyuku` | reading が平仮名または片仮名の segment。日本語漢字、日本語 kana、日本語約物として表示する。 |
+| Chinese Simplified | `MaShanZheng` | reading がピンインの segment。簡体字と中国語文脈の約物として表示する。 |
+| Traditional Chinese | `MaShanZheng` | reading が注音符号の segment。繁体字と繁体字中国語文脈の約物として表示する。現時点では専用フォントが未用意のため簡体字と同じ既定フォントを使う。 |
+| English | `Kalam` | アルファベット、Latin 系文字、ASCII/英語約物として表示する。 |
 
-Settings 画面はこの 3 スロットへフォントを割り当てる画面であり、現在の描画モードやアプリ全体のフォントを選ぶ画面ではない。
+Settings 画面はこの 4 スロットへフォントを割り当てる画面であり、現在の描画モードやアプリ全体のフォントを選ぶ画面ではない。各スロットには `fonts/` 配下の `.ttf` / `.otf` をすべて候補として出す。ファイルシステムを列挙できるデスクトップ系バックエンドでは `fonts/` とシステムフォントを列挙し、WASM/WASI/UEFI ではビルド時に列挙した `fonts/` の埋め込み/配布フォントを候補として使う。
 
 ## 判定規則
 
@@ -24,14 +25,16 @@ Settings 画面はこの 3 スロットへフォントを割り当てる画面�
 |---|---|
 | 平仮名、片仮名、半角片仮名を含む | `Japanese` |
 | 注音符号を含む | `TraditionalChinese` |
-| ASCII / Latin 系文字を含む | `SimplifiedChinese` |
+| ASCII / Latin 系文字を含む | `ChineseSimplified` |
 | 判定材料がない plain segment | `Japanese` |
 
 `{inner/annotation}` は annotation ではなく inner 側の reading を連結して判定する。日本語 kana と注音や pinyin が同じ reading に混在する malformed な segment では、より明確な非日本語表記である注音を優先し、次に kana、最後に Latin を見る。
 
+plain segment は reading を持たないため base の文字種から script run に分割する。平仮名、片仮名、日本語固有の約物は `Japanese`、注音符号は `TraditionalChinese`、アルファベットや英語約物は `English` とする。CJK 共有約物や空白は周辺文脈を継承するが、CJK 共有約物は `English` を継承しない。漢字だけで判定材料がない plain segment は `Japanese` に倒す。
+
 ## 描画と計測
 
-script 判定は描画だけでなく、スクロール計算、segment 幅、typing 下段の入力済み幅にも使う。描画で使うフォントと計測で使うフォントがずれると、上段の全文、下段の入力済み内容、カーソル位置、スクロール位置が再びずれるため、必ず同じ `FontScript` と同じ `Fonts` から width を計算する。
+script 判定は描画だけでなく、スクロール計算、segment 幅、typing 下段の入力済み幅にも使う。描画で使うフォントと計測で使うフォントがずれると、上段の全文、下段の入力済み内容、カーソル位置、スクロール位置が再びずれるため、必ず同じ `FontScript` と同じ `Fonts` から width を計算する。mixed-script の plain segment や `{inner/annotation}` は segment 全体を単一フォントで測らず、script run ごとに描画・計測する。
 
 アプリ UI chrome、メニュー、ステータスなど問題文ではない text は Japanese スロットを primary font として使う。
 
