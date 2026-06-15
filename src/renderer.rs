@@ -2447,6 +2447,87 @@ mod tests {
         })
     }
 
+    fn render_test_pixels(fonts: &Fonts, render_list: &[Renderable]) -> Vec<u32> {
+        let mut pixels = vec![0u32; 240 * 120];
+        let mut cache = RenderCache::new();
+        let mut surface = ArgbSurface::new(240, 120, &mut pixels).expect("surface should be valid");
+        assert!(surface
+            .render(fonts, DisplaySettings::default(), render_list, &mut cache)
+            .changed());
+        pixels
+    }
+
+    fn lower_unconfirmed_render_list(script: FontScript) -> Vec<Renderable> {
+        vec![
+            Renderable::Background {
+                gradient: crate::ui::Gradient {
+                    start_color: 0xFF_000000,
+                    end_color: 0xFF_000000,
+                },
+            },
+            Renderable::TypingLower {
+                segments: vec![LowerTypingSegment::Active {
+                    elements: vec![ActiveLowerElement::UnconfirmedInput {
+                        text: "testing".to_string(),
+                        script,
+                    }],
+                    script,
+                }],
+                anchor: Anchor::Center,
+                shift: Shift { x: 0.0, y: 0.0 },
+                align: Align {
+                    horizontal: HorizontalAlign::Center,
+                    vertical: VerticalAlign::Center,
+                },
+                font_size: FontSize::WindowHeight(0.28),
+                line_alignment: crate::ui::TypingLineAlignment::full_line(0),
+            },
+        ]
+    }
+
+    fn upper_ruby_render_list(script: FontScript) -> Vec<Renderable> {
+        vec![
+            Renderable::Background {
+                gradient: crate::ui::Gradient {
+                    start_color: 0xFF_000000,
+                    end_color: 0xFF_000000,
+                },
+            },
+            Renderable::TypingUpper {
+                segments: vec![crate::ui::UpperTypingSegment {
+                    base_text: "testing".to_string(),
+                    ruby_text: Some("ruby".to_string()),
+                    anno_text: None,
+                    anno_group_run_count: 0,
+                    anno_script: None,
+                    script,
+                    state: UpperSegmentState::Active,
+                }],
+                anchor: Anchor::Center,
+                shift: Shift { x: 0.0, y: 0.0 },
+                align: Align {
+                    horizontal: HorizontalAlign::Center,
+                    vertical: VerticalAlign::Center,
+                },
+                font_size: FontSize::WindowHeight(0.28),
+                line_alignment: crate::ui::TypingLineAlignment::full_line(0),
+            },
+        ]
+    }
+
+    fn assert_render_changes_when_target_font_changes(
+        target: FontTarget,
+        render_list: &[Renderable],
+        message: &str,
+    ) {
+        let mut fonts = test_fonts();
+        let base_pixels = render_test_pixels(&fonts, render_list);
+        fonts.set_for_target(target, "Kalam-Regular".to_string(), kalam_font());
+        let changed_pixels = render_test_pixels(&fonts, render_list);
+
+        assert_ne!(changed_pixels, base_pixels, "{message}");
+    }
+
     #[test]
     fn argb_surface_renders_and_reuses_text_measurements() {
         let fonts = test_fonts();
@@ -2516,73 +2597,39 @@ mod tests {
     }
 
     #[test]
-    fn lower_unconfirmed_rendering_uses_unconfirmed_font_slot() {
-        let mut fonts = test_fonts();
-        let render_list = vec![
-            Renderable::Background {
-                gradient: crate::ui::Gradient {
-                    start_color: 0xFF_000000,
-                    end_color: 0xFF_000000,
-                },
-            },
-            Renderable::TypingLower {
-                segments: vec![LowerTypingSegment::Active {
-                    elements: vec![ActiveLowerElement::UnconfirmedInput {
-                        text: "testing".to_string(),
-                        script: FontScript::Japanese,
-                    }],
-                    script: FontScript::Japanese,
-                }],
-                anchor: Anchor::Center,
-                shift: Shift { x: 0.0, y: 0.0 },
-                align: Align {
-                    horizontal: HorizontalAlign::Center,
-                    vertical: VerticalAlign::Center,
-                },
-                font_size: FontSize::WindowHeight(0.28),
-                line_alignment: crate::ui::TypingLineAlignment::full_line(0),
-            },
-        ];
-
-        let mut base_pixels = vec![0u32; 240 * 120];
-        let mut base_cache = RenderCache::new();
-        {
-            let mut surface =
-                ArgbSurface::new(240, 120, &mut base_pixels).expect("surface should be valid");
-            assert!(surface
-                .render(
-                    &fonts,
-                    DisplaySettings::default(),
-                    &render_list,
-                    &mut base_cache,
-                )
-                .changed());
+    fn lower_unconfirmed_rendering_uses_unconfirmed_font_slots() {
+        for script in [
+            FontScript::Japanese,
+            FontScript::ChineseSimplified,
+            FontScript::TraditionalChinese,
+        ] {
+            let render_list = lower_unconfirmed_render_list(script);
+            assert_render_changes_when_target_font_changes(
+                FontTarget::Unconfirmed(script),
+                &render_list,
+                "changing the unconfirmed font must affect GUI lower unconfirmed rendering",
+            );
         }
+    }
 
-        fonts.set_for_target(
-            FontTarget::Unconfirmed(FontScript::Japanese),
-            "Kalam-Regular".to_string(),
-            kalam_font(),
-        );
-        let mut unconfirmed_pixels = vec![0u32; 240 * 120];
-        let mut unconfirmed_cache = RenderCache::new();
-        {
-            let mut surface = ArgbSurface::new(240, 120, &mut unconfirmed_pixels)
-                .expect("surface should be valid");
-            assert!(surface
-                .render(
-                    &fonts,
-                    DisplaySettings::default(),
-                    &render_list,
-                    &mut unconfirmed_cache,
-                )
-                .changed());
+    #[test]
+    fn chinese_upper_base_and_ruby_rendering_use_separate_font_slots() {
+        for script in [
+            FontScript::ChineseSimplified,
+            FontScript::TraditionalChinese,
+        ] {
+            let render_list = upper_ruby_render_list(script);
+            assert_render_changes_when_target_font_changes(
+                FontTarget::Script(script),
+                &render_list,
+                "changing the Chinese base font must affect GUI upper base rendering",
+            );
+            assert_render_changes_when_target_font_changes(
+                FontTarget::Ruby(script),
+                &render_list,
+                "changing the Chinese ruby font must affect GUI upper ruby rendering",
+            );
         }
-
-        assert_ne!(
-            unconfirmed_pixels, base_pixels,
-            "changing the Japanese unconfirmed font must affect GUI lower unconfirmed rendering"
-        );
     }
 
     #[test]
