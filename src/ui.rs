@@ -227,11 +227,11 @@ pub(crate) const HOW_TO_USE_CONTENT: &[(&str, u32)] = &[
     ("", 0xFF_000000),
     ("[ タイピング設定 ]", 0xFF_FFDD88),
     (
-        "  問題ソース、スクリプト、表示モードを選択できます",
+        "  UI、各言語、日/中rubyのフォントを個別に選択できます",
         0xFF_CCCCCC,
     ),
     (
-        "  環境ごとの入力方式やフォント設定が反映されます",
+        "  titleと問題文はruby/baseとscript判定で描画されます",
         0xFF_CCCCCC,
     ),
     ("", 0xFF_000000),

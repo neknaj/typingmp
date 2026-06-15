@@ -43,7 +43,7 @@ Marked-tone pinyin such as `[有/yǒu]` is a parse/lint error. The upper typing 
 ```
 
 - `base`: 画面に表示されるテキスト
-- `reading`: ユーザーがタイプするテキスト（ひらがな/カタカナ）
+- `reading`: ユーザーがタイプする読み。日本語かな、数字声調付きpinyin、注音符号、直接入力する英字などを指定できます
 - ルビは base テキストの上部に小さく表示されます
 
 ### アノテーション記法（anno）: `{inner/annotation}`

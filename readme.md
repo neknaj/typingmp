@@ -27,7 +27,7 @@ It serves as both a functional typing tutor for Japanese Romaji input and a tech
 
 -   **Intelligent WASM IME Handling**: The web version correctly handles Input Method Editors (IMEs) for Japanese input by using a hidden input field and resetting its state after each segment, ensuring a smooth typing experience.
 
--   **Font Selection**: Users can switch between multiple pre-packaged fonts (Yuji Syuku and Noto Serif JP) to customize their experience.
+-   **Script-Aware Font Selection**: Users can choose UI, Japanese, Simplified Chinese, Traditional Chinese, English, and Japanese/Chinese Ruby fonts independently from the bundled `fonts/` assets. Defaults are `YujiSyuku` for Japanese, `MaShanZheng` for Chinese, `Kalam` for English, and `NotoSerifJP` for UI text.
 
 ## 🏛️ Architecture
 

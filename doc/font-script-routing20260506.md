@@ -10,17 +10,20 @@ typingmp のフォント設定は、UI 文字用のフォントと、問題文�
 
 ## フォントスロット
 
-フォントは次の 5 スロットとして管理する。
+フォントは次の 8 スロットとして管理する。
 
 | slot | 既定フォント | 用途 |
 |---|---|---|
-| UI Font | `NotoSerifJP` | メニュー、設定、ステータス、ヘルプ、結果、問題一覧、問題ソースなど、問題文の ruby/base 表示ではない UI 文字として表示する。 |
-| Japanese | `YujiSyuku` | reading が平仮名または片仮名の segment。日本語漢字、日本語 kana、日本語約物として表示する。 |
-| Simplified Chinese | `MaShanZheng` | reading がピンインの segment。簡体字と中国語文脈の約物として表示する。 |
-| Traditional Chinese | `MaShanZheng` | reading が注音符号の segment。繁体字と繁体字中国語文脈の約物として表示する。現時点では専用フォントが未用意のため簡体字と同じ既定フォントを使う。 |
+| UI Font | `NotoSerifJP` | メニュー、設定、ステータス、ヘルプ、結果、問題一覧の chrome/badge、問題ソースなど、問題文の ruby/base 表示ではない UI 文字として表示する。 |
+| Japanese | `YujiSyuku` | reading が平仮名または片仮名の segment。日本語漢字、日本語 kana、日本語約物、未確定の日本語ローマ字入力を表示・計測する。 |
+| Japanese Ruby | `YujiSyuku` | Japanese segment の ruby 文字を表示する。 |
+| Simplified Chinese | `MaShanZheng` | reading がピンインの segment。簡体字、中国語文脈の約物、未確定の中国語入力を表示・計測する。 |
+| Simplified Chinese Ruby | `MaShanZheng` | Simplified Chinese segment の ruby 文字を表示する。 |
+| Traditional Chinese | `MaShanZheng` | reading が注音符号の segment。繁体字、繁体字中国語文脈の約物、未確定の中国語入力を表示・計測する。現時点では専用フォントが未用意のため簡体字と同じ既定フォントを使う。 |
+| Traditional Chinese Ruby | `MaShanZheng` | Traditional Chinese segment の ruby 文字を表示する。現時点では専用フォントが未用意のため簡体字 ruby と同じ既定フォントを使う。 |
 | English | `Kalam` | アルファベット、Latin 系文字、ASCII/英語約物として表示する。 |
 
-Settings 画面はこの 5 スロットへフォントを割り当てる画面である。各スロットには `fonts/` 配下の `.ttf` / `.otf` をすべて候補として出す。ファイルシステムを列挙できるデスクトップ系バックエンドでは `fonts/` とシステムフォントを列挙し、WASM/WASI/UEFI ではビルド時に列挙した `fonts/` の埋め込み/配布フォントを候補として使う。通常の端末セル描画では任意フォントを適用できないため、TUI/WASI の plain text は端末側フォントに従う。
+Settings 画面はこの 8 スロットへフォントを割り当てる画面である。base script スロットは base 文字、下段入力文字、スクロール計測、幅計測に使い、ruby スロットは ruby 文字の描画・計測に使う。各スロットには `fonts/` 配下の `.ttf` / `.otf` をすべて候補として出す。ファイルシステムを列挙できるデスクトップ系バックエンドでは `fonts/` とシステムフォントを列挙し、WASM/WASI/UEFI ではビルド時に列挙した `fonts/` の埋め込み/配布フォントを候補として使う。通常の端末セル描画では任意フォントを適用できないため、TUI/WASI の plain text は端末側フォントに従う。
 
 ## 判定規則
 

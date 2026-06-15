@@ -240,6 +240,7 @@ fn parse_ruby(
         );
     }
 
+    let reading_start = pos;
     let mut reading = String::new();
     if has_separator {
         while pos < chars.len() {
@@ -271,7 +272,7 @@ fn parse_ruby(
     {
         diagnostics.push(
             line_number,
-            start + base.chars().count() + 2,
+            reading_start.saturating_add(1),
             ParseDiagnosticKind::ChineseRubyMustUseNumberedPinyin,
         );
     }
@@ -947,6 +948,8 @@ mod tests {
             missing.first().map(|diagnostic| &diagnostic.kind),
             Some(&ParseDiagnosticKind::ChineseRubyMustUseNumberedPinyin)
         );
+        assert_eq!(missing.first().map(|diagnostic| diagnostic.line), Some(2));
+        assert_eq!(missing.first().map(|diagnostic| diagnostic.column), Some(4));
 
         let out_of_range = parse_problem("#title Test\n[\u{6709}/you6]")
             .expect_err("pinyin tone outside 1-5 should be rejected");
