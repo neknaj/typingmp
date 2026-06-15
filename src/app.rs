@@ -1107,6 +1107,60 @@ mod tests {
     }
 
     #[test]
+    fn settings_font_picker_requests_unconfirmed_font_target() {
+        let mut app = App::new(test_fonts());
+        app.state = AppState::Settings;
+        app.available_fonts = vec![FontEntry {
+            id: FontAssetId(42),
+            name: "Kalam-Regular".to_string(),
+            source: FontSource::Bundled,
+        }];
+        app.selected_settings_item =
+            SettingsItem::FontFamily(FontTarget::Unconfirmed(Script::Japanese));
+
+        app.on_event(AppEvent::Enter);
+        assert!(app.settings_picking_font);
+        app.on_event(AppEvent::Enter);
+
+        assert!(!app.settings_picking_font);
+        assert_eq!(
+            app.take_font_load_request(),
+            Some(FontLoadRequest {
+                target: FontTarget::Unconfirmed(Script::Japanese),
+                font_id: FontAssetId(42),
+                font_name: "Kalam-Regular".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn applying_unconfirmed_font_does_not_replace_base_font() {
+        let mut app = App::new(test_fonts());
+        let base_before = app
+            .fonts()
+            .name_for_target(FontTarget::Script(Script::Japanese))
+            .to_string();
+
+        app.apply_font_bytes(
+            FontTarget::Unconfirmed(Script::Japanese),
+            "Kalam-Regular".to_string(),
+            include_bytes!("../fonts/Kalam-Regular.ttf").to_vec(),
+        )
+        .expect("Kalam font should apply to Japanese unconfirmed slot");
+
+        assert_eq!(
+            app.fonts()
+                .name_for_target(FontTarget::Script(Script::Japanese)),
+            base_before
+        );
+        assert_eq!(
+            app.fonts()
+                .name_for_target(FontTarget::Unconfirmed(Script::Japanese)),
+            "Kalam-Regular"
+        );
+    }
+
+    #[test]
     fn backspace_after_wrong_key_preserves_unconfirmed_prefix() {
         let mut app = App::new(test_fonts());
         app.add_custom_problem(

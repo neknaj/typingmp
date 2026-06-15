@@ -2417,13 +2417,18 @@ pub mod tui_renderer {
 mod tests {
     use super::*;
     use crate::display::{DisplayAspectRatio, DisplaySettings};
-    use crate::font::{FontBundle, Fonts};
+    use crate::font::{FontBundle, FontScript, FontTarget, Fonts};
     use crate::ui::{Align, Anchor, FontSize, HorizontalAlign, Renderable, Shift, VerticalAlign};
     use ab_glyph::FontVec;
 
     fn test_font() -> FontVec {
         FontVec::try_from_vec(include_bytes!("../fonts/YujiSyuku-Regular.ttf").to_vec())
             .expect("test font should parse")
+    }
+
+    fn kalam_font() -> FontVec {
+        FontVec::try_from_vec(include_bytes!("../fonts/Kalam-Regular.ttf").to_vec())
+            .expect("Kalam font should parse")
     }
 
     fn test_fonts() -> Fonts {
@@ -2508,6 +2513,76 @@ mod tests {
         }
         assert_eq!(cache.frame_cache_hits(), 1);
         assert_ne!(pixels, first_pixels);
+    }
+
+    #[test]
+    fn lower_unconfirmed_rendering_uses_unconfirmed_font_slot() {
+        let mut fonts = test_fonts();
+        let render_list = vec![
+            Renderable::Background {
+                gradient: crate::ui::Gradient {
+                    start_color: 0xFF_000000,
+                    end_color: 0xFF_000000,
+                },
+            },
+            Renderable::TypingLower {
+                segments: vec![LowerTypingSegment::Active {
+                    elements: vec![ActiveLowerElement::UnconfirmedInput {
+                        text: "testing".to_string(),
+                        script: FontScript::Japanese,
+                    }],
+                    script: FontScript::Japanese,
+                }],
+                anchor: Anchor::Center,
+                shift: Shift { x: 0.0, y: 0.0 },
+                align: Align {
+                    horizontal: HorizontalAlign::Center,
+                    vertical: VerticalAlign::Center,
+                },
+                font_size: FontSize::WindowHeight(0.28),
+                line_alignment: crate::ui::TypingLineAlignment::full_line(0),
+            },
+        ];
+
+        let mut base_pixels = vec![0u32; 240 * 120];
+        let mut base_cache = RenderCache::new();
+        {
+            let mut surface =
+                ArgbSurface::new(240, 120, &mut base_pixels).expect("surface should be valid");
+            assert!(surface
+                .render(
+                    &fonts,
+                    DisplaySettings::default(),
+                    &render_list,
+                    &mut base_cache,
+                )
+                .changed());
+        }
+
+        fonts.set_for_target(
+            FontTarget::Unconfirmed(FontScript::Japanese),
+            "Kalam-Regular".to_string(),
+            kalam_font(),
+        );
+        let mut unconfirmed_pixels = vec![0u32; 240 * 120];
+        let mut unconfirmed_cache = RenderCache::new();
+        {
+            let mut surface = ArgbSurface::new(240, 120, &mut unconfirmed_pixels)
+                .expect("surface should be valid");
+            assert!(surface
+                .render(
+                    &fonts,
+                    DisplaySettings::default(),
+                    &render_list,
+                    &mut unconfirmed_cache,
+                )
+                .changed());
+        }
+
+        assert_ne!(
+            unconfirmed_pixels, base_pixels,
+            "changing the Japanese unconfirmed font must affect GUI lower unconfirmed rendering"
+        );
     }
 
     #[test]
