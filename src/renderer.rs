@@ -876,13 +876,34 @@ fn lower_typing_total_height(
                 .height as f32;
             if let LowerTypingSegment::Active { elements, .. } = segment {
                 for element in elements {
-                    if let ActiveLowerElement::UnconfirmedInput { text, script } = element {
-                        let size =
-                            fonts.scaled_size_for_unconfirmed_script(*script, pixel_font_size);
-                        let height = cache
-                            .measure_text(fonts.get_unconfirmed_for_script(*script), text, size)
-                            .height as f32;
-                        base_height = base_height.max(height);
+                    match element {
+                        ActiveLowerElement::Typed {
+                            character, script, ..
+                        }
+                        | ActiveLowerElement::LastIncorrectInput { character, script } => {
+                            let size = fonts.scaled_size_for_script(*script, pixel_font_size);
+                            let mut text = String::new();
+                            text.push(*character);
+                            let height = cache
+                                .measure_text(fonts.get_for_script(*script), &text, size)
+                                .height as f32;
+                            base_height = base_height.max(height);
+                        }
+                        ActiveLowerElement::Cursor => {
+                            let size = fonts.scaled_size_for_script(script, pixel_font_size);
+                            let height = cache
+                                .measure_text(fonts.get_for_script(script), "|", size)
+                                .height as f32;
+                            base_height = base_height.max(height);
+                        }
+                        ActiveLowerElement::UnconfirmedInput { text, script } => {
+                            let size =
+                                fonts.scaled_size_for_unconfirmed_script(*script, pixel_font_size);
+                            let height = cache
+                                .measure_text(fonts.get_unconfirmed_for_script(*script), text, size)
+                                .height as f32;
+                            base_height = base_height.max(height);
+                        }
                     }
                 }
             }

@@ -2,7 +2,7 @@
 
 ## Current Chinese Pinyin Rule
 
-Chinese Simplified pinyin ruby in `.ntq` files is authored with numbered tones, for example `[有/you3]` and `[春晓/chun1xiao3]`. Marked pinyin such as `[有/yǒu]` is rejected by parser diagnostics so problem files keep one canonical input form. The upper prompt and title rendering keep the numbered ruby because that is the typing target. Completed lower ruby converts numbered pinyin to tone marks for display only, for example `you3` becomes `yǒu`. Bopomofo remains the Traditional Chinese signal and is not converted by the pinyin display helper.
+Chinese Simplified pinyin ruby in `.ntq` files is authored with numbered tones, for example `[有/you3]` and `[春晓/chun1xiao3]`. Marked pinyin such as `[有/yǒu]` is rejected by parser diagnostics so problem files keep one canonical input form. Only the active upper prompt keeps numbered pinyin because it is the typing target. Problem titles, problem-menu titles, context lines, completed lower ruby, and unconfirmed lower input convert numbered pinyin to tone marks for presentation, for example `you3` becomes `yǒu`. Bopomofo remains the Traditional Chinese signal and is not converted by the pinyin display helper.
 
 ## 目的
 
@@ -10,20 +10,23 @@ typingmp のフォント設定は、UI 文字用のフォントと、問題文�
 
 ## フォントスロット
 
-フォントは次の 8 スロットとして管理する。
+フォントは次の 11 スロットとして管理する。UI、Japanese/Simplified Chinese/Traditional Chinese の base/ruby/unconfirmed、English base は、それぞれ font family と scale を独立して持つ。English の ruby/unconfirmed は English base スロットを共有する。
 
 | slot | 既定フォント | 用途 |
 |---|---|---|
 | UI Font | `NotoSerifJP` | メニュー、設定、ステータス、ヘルプ、結果、問題一覧の chrome/badge、問題ソースなど、問題文の ruby/base 表示ではない UI 文字として表示する。 |
-| Japanese | `YujiSyuku` | reading が平仮名または片仮名の segment。日本語漢字、日本語 kana、日本語約物、未確定の日本語ローマ字入力を表示・計測する。 |
+| Japanese | `YujiSyuku` | reading が平仮名または片仮名の segment。日本語漢字、日本語 kana、日本語約物、base 文字を表示・計測する。 |
 | Japanese Ruby | `YujiSyuku` | Japanese segment の ruby 文字を表示する。 |
-| Simplified Chinese | `MaShanZheng` | reading がピンインの segment。簡体字、中国語文脈の約物、未確定の中国語入力を表示・計測する。 |
-| Simplified Chinese Ruby | `MaShanZheng` | Simplified Chinese segment の ruby 文字を表示する。 |
-| Traditional Chinese | `MaShanZheng` | reading が注音符号の segment。繁体字、繁体字中国語文脈の約物、未確定の中国語入力を表示・計測する。現時点では専用フォントが未用意のため簡体字と同じ既定フォントを使う。 |
-| Traditional Chinese Ruby | `MaShanZheng` | Traditional Chinese segment の ruby 文字を表示する。現時点では専用フォントが未用意のため簡体字 ruby と同じ既定フォントを使う。 |
+| Japanese Unconfirmed | `YujiSyuku` | Japanese segment の未確定入力を表示・計測する。 |
+| Simplified Chinese | `LongCang` | reading がピンインの segment。簡体字、中国語文脈の約物、base 文字を表示・計測する。 |
+| Simplified Chinese Ruby | `Alegreya` | Simplified Chinese segment の ruby 文字を表示する。 |
+| Simplified Chinese Unconfirmed | `Alegreya` | Simplified Chinese segment の未確定入力を表示・計測する。 |
+| Traditional Chinese | `LongCang` | reading が注音符号の segment。繁体字、繁体字中国語文脈の約物、base 文字を表示・計測する。現時点では専用フォントが未用意のため簡体字と同じ既定フォントを使う。 |
+| Traditional Chinese Ruby | `Alegreya` | Traditional Chinese segment の ruby 文字を表示する。現時点では専用フォントが未用意のため簡体字 ruby と同じ既定フォントを使う。 |
+| Traditional Chinese Unconfirmed | `Alegreya` | Traditional Chinese segment の未確定入力を表示・計測する。現時点では専用フォントが未用意のため簡体字 unconfirmed と同じ既定フォントを使う。 |
 | English | `Kalam` | アルファベット、Latin 系文字、ASCII/英語約物として表示する。 |
 
-Settings 画面はこの 8 スロットへフォントを割り当てる画面である。base script スロットは base 文字、下段入力文字、スクロール計測、幅計測に使い、ruby スロットは ruby 文字の描画・計測に使う。各スロットには `fonts/` 配下の `.ttf` / `.otf` をすべて候補として出す。ファイルシステムを列挙できるデスクトップ系バックエンドでは `fonts/` とシステムフォントを列挙し、WASM/WASI/UEFI ではビルド時に列挙した `fonts/` の埋め込み/配布フォントを候補として使う。通常の端末セル描画では任意フォントを適用できないため、TUI/WASI の plain text は端末側フォントに従う。
+Settings 画面はこの 11 スロットへフォントを割り当て、各スロットの scale も変更できる画面である。base script スロットは base 文字、スクロール計測、幅計測に使い、ruby スロットは ruby 文字の描画・計測に使い、unconfirmed スロットは未確定入力の描画・計測に使う。各スロットには `fonts/` 配下の `.ttf` / `.otf` をすべて候補として出す。ファイルシステムを列挙できるデスクトップ系バックエンドでは `fonts/` とシステムフォントを列挙し、WASM/WASI/UEFI ではビルド時に列挙した `fonts/` の埋め込み/配布フォントを候補として使う。通常の端末セル描画では任意フォントを適用できないため、TUI/WASI の plain text は端末側フォントに従う。
 
 ## 判定規則
 
@@ -60,6 +63,7 @@ Settings 画面は font slot に加えて表示 viewport も扱う。ただし�
 |---|---|---|
 | Aspect Ratio | `DisplayAspectRatio` enum | 物理画面内に選択比率の viewport を最大内接させる。余白は letterbox / pillarbox として黒で埋める。 |
 | Display Scale | `DisplayScale` enum | viewport 座標系は維持し、文字系 UI の font size に倍率を掛ける。 |
+| IME Input | `bool` | 既定は disabled。disabled のとき WASM は hidden input/OS screen keyboard にフォーカスせず、printable key は `keydown` で処理する。enabled のときのみ IME 入力を受け付ける。 |
 
 aspect ratio は `Native`, `16:9`, `4:3`, `1:1`, `3:4`, `9:16` を持つ。display scale は `75%`, `100%`, `125%`, `150%`, `200%` の段階を持つ。どちらも raw number や free string では保持しない。
 

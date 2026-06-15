@@ -1183,6 +1183,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 match seg {
                                     LowerTypingSegment::Completed {
                                         base_text,
+                                        ruby_text,
                                         is_correct,
                                         ..
                                     } => {
@@ -1191,6 +1192,20 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                                         } else {
                                             ui::INCORRECT_COLOR
                                         });
+                                        if let Some(ruby) = ruby_text {
+                                            let ruby_x = pen_x
+                                                + (terminal_width::text_width(&base_text) as i32
+                                                    - terminal_width::text_width(&ruby) as i32)
+                                                    / 2;
+                                            draw_plain_text_at(
+                                                &mut current_buffer,
+                                                &ruby,
+                                                ruby_x,
+                                                pen_y - 1,
+                                                viewport,
+                                                color,
+                                            );
+                                        }
                                         draw_plain_text_at(
                                             &mut current_buffer,
                                             &base_text,

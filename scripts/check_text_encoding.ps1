@@ -21,6 +21,7 @@ $textExtensions = [System.Collections.Generic.HashSet[string]]::new([System.Stri
     ".json",
     ".lock",
     ".md",
+    ".ntq",
     ".ps1",
     ".py",
     ".rs",

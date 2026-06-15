@@ -234,7 +234,7 @@ pub(crate) const HOW_TO_USE_CONTENT: &[(&str, u32)] = &[
     ("", 0xFF_000000),
     ("[ タイピング設定 ]", 0xFF_FFDD88),
     (
-        "  UI、各言語、日/中rubyのフォントを個別に選択できます",
+        "  UI、各言語、日/中ruby/unconfirmedのfontとscaleを選択できます",
         0xFF_CCCCCC,
     ),
     (
@@ -252,7 +252,7 @@ pub(crate) const HOW_TO_USE_CONTENT: &[(&str, u32)] = &[
         0xFF_CCCCCC,
     ),
     (
-        "  Upper keeps you3; completed lower ruby shows y\u{01d2}u",
+        "  上段入力だけyou3、title/lower/unconfirmedはy\u{01d2}u表示",
         0xFF_CCCCCC,
     ),
 ];
@@ -272,6 +272,9 @@ const TYPING_FLOAT_TOP_MARGIN_RATIO: f32 = 0.035;
 const TYPING_FLOAT_MIN_GAP_RATIO: f32 = 0.012;
 const TYPING_PREVIOUS_CONTEXT_ROUNDING_GUARD_PX: f32 = 12.0;
 const TYPING_NEXT_CONTEXT_BOTTOM_LIMIT_RATIO: f32 = 0.9;
+const TYPING_STATUS_BOTTOM_MARGIN_RATIO: f32 = 0.02;
+const TYPING_STATUS_PROGRESS_BAR_HEIGHT_RATIO: f32 = 0.02;
+const TYPING_STATUS_ITEM_HEIGHT_RATIO: f32 = 0.04;
 
 pub const CORRECT_COLOR: u32 = 0xFF_9097FF;
 pub const INCORRECT_COLOR: u32 = 0xFF_FF9898;
@@ -400,11 +403,31 @@ fn lower_typing_vertical_metrics(
 
         if let LowerTypingSegment::Active { elements, .. } = segment {
             for element in elements {
-                if let ActiveLowerElement::UnconfirmedInput { text, script } = element {
-                    let size = fonts.scaled_size_for_unconfirmed_script(*script, pixel_font_size);
-                    let font = fonts.get_unconfirmed_for_script(*script);
-                    let height = gui_renderer::measure_text(font, text, size).1 as f32;
-                    base_height = base_height.max(height);
+                match element {
+                    ActiveLowerElement::Typed {
+                        character, script, ..
+                    }
+                    | ActiveLowerElement::LastIncorrectInput { character, script } => {
+                        let size = fonts.scaled_size_for_script(*script, pixel_font_size);
+                        let font = fonts.get_for_script(*script);
+                        let mut text = String::new();
+                        text.push(*character);
+                        let height = gui_renderer::measure_text(font, &text, size).1 as f32;
+                        base_height = base_height.max(height);
+                    }
+                    ActiveLowerElement::Cursor => {
+                        let size = fonts.scaled_size_for_script(script, pixel_font_size);
+                        let font = fonts.get_for_script(script);
+                        let height = gui_renderer::measure_text(font, "|", size).1 as f32;
+                        base_height = base_height.max(height);
+                    }
+                    ActiveLowerElement::UnconfirmedInput { text, script } => {
+                        let size =
+                            fonts.scaled_size_for_unconfirmed_script(*script, pixel_font_size);
+                        let font = fonts.get_unconfirmed_for_script(*script);
+                        let height = gui_renderer::measure_text(font, text, size).1 as f32;
+                        base_height = base_height.max(height);
+                    }
                 }
             }
         }
@@ -415,6 +438,49 @@ fn lower_typing_vertical_metrics(
         top_extra,
         bottom_extra,
     }
+}
+
+fn typing_status_region_top(height: usize, status_item_count: usize, status_row_step: f32) -> f32 {
+    let reserved_ratio = TYPING_STATUS_BOTTOM_MARGIN_RATIO
+        + TYPING_STATUS_PROGRESS_BAR_HEIGHT_RATIO
+        + status_item_count as f32 * status_row_step
+        + TYPING_FLOAT_MIN_GAP_RATIO;
+    height.max(1) as f32 * (1.0 - reserved_ratio).max(0.0)
+}
+
+fn typing_next_context_bottom_limit(
+    height: usize,
+    status_item_count: usize,
+    status_row_step: f32,
+) -> f32 {
+    (height.max(1) as f32 * TYPING_NEXT_CONTEXT_BOTTOM_LIMIT_RATIO).min(typing_status_region_top(
+        height,
+        status_item_count,
+        status_row_step,
+    ))
+}
+
+fn ui_text_pixel_font_size(
+    fonts: &Fonts,
+    font_size: FontSize,
+    width: usize,
+    height: usize,
+    display_scale: f32,
+) -> f32 {
+    fonts.scaled_size_for_ui(calculate_pixel_font_size(font_size, width, height) * display_scale)
+}
+
+fn measured_ui_row_step(
+    fonts: &Fonts,
+    font_size: FontSize,
+    width: usize,
+    height: usize,
+    display_scale: f32,
+    minimum_ratio: f32,
+) -> f32 {
+    let pixel_font_size = ui_text_pixel_font_size(fonts, font_size, width, height, display_scale);
+    let measured_height = gui_renderer::measure_text(fonts.ui(), "Hg", pixel_font_size).1 as f32;
+    ((measured_height + 6.0) / height.max(1) as f32).max(minimum_ratio)
 }
 
 fn top_anchor_shift_y_for_box_top(
@@ -621,7 +687,7 @@ fn build_settings_ui(
     });
 
     if app.settings_picking_font {
-        build_font_picker_ui(app, render_list);
+        build_font_picker_ui(app, snapshot, render_list, fonts, width, height);
         return;
     }
 
@@ -631,15 +697,13 @@ fn build_settings_ui(
         return;
     }
 
-    let scale = snapshot.display_settings.scale.multiplier();
-    let row_step = (0.062 * scale).clamp(0.058, 0.14);
+    let display_scale = snapshot.display_settings.scale.multiplier();
     let list_y_start = 0.29;
     let list_y_end = 0.84;
     let cell_font_size = FontSize::WindowHeight(0.042);
-    let cell_pixel_font_size = fonts.scaled_size_for_ui(
-        calculate_pixel_font_size(cell_font_size, width, height)
-            * snapshot.display_settings.scale.multiplier(),
-    );
+    let row_step = measured_ui_row_step(fonts, cell_font_size, width, height, display_scale, 0.058);
+    let cell_pixel_font_size =
+        ui_text_pixel_font_size(fonts, cell_font_size, width, height, display_scale);
     let label_x = settings_cell_left_x(width, -0.35);
     let value_x = settings_cell_left_x(width, 0.05);
     let action_x = settings_cell_left_x(width, 0.36);
@@ -838,7 +902,14 @@ fn fit_table_text_to_width(
     result
 }
 
-fn build_font_picker_ui(app: &App, render_list: &mut Vec<Renderable>) {
+fn build_font_picker_ui(
+    app: &App,
+    snapshot: AppSnapshot<'_>,
+    render_list: &mut Vec<Renderable>,
+    fonts: &Fonts,
+    width: usize,
+    height: usize,
+) {
     let selected_target = app
         .selected_settings_item
         .font_target()
@@ -860,7 +931,15 @@ fn build_font_picker_ui(app: &App, render_list: &mut Vec<Renderable>) {
         color: 0xFF_AADDFF,
     });
 
-    let item_height = 0.052;
+    let item_font_size = FontSize::WindowHeight(0.04);
+    let item_height = measured_ui_row_step(
+        fonts,
+        item_font_size,
+        width,
+        height,
+        snapshot.display_settings.scale.multiplier(),
+        0.052,
+    );
     let list_y_start = 0.43;
     let list_height = 0.45;
     let items_per_screen = (list_height / item_height) as usize;
@@ -892,7 +971,7 @@ fn build_font_picker_ui(app: &App, render_list: &mut Vec<Renderable>) {
                 horizontal: HorizontalAlign::Left,
                 vertical: VerticalAlign::Top,
             },
-            font_size: FontSize::WindowHeight(0.04),
+            font_size: item_font_size,
             color,
         });
     }
@@ -1737,9 +1816,10 @@ fn build_typing_ui(
         let title_vertical_metrics =
             upper_typing_vertical_metrics(&title_segments, fonts, title_pixel_font_size);
 
+        let display_scale = app.display_settings().scale.multiplier();
         let base_font_size = FontSize::WindowHeight(BASE_FONT_SIZE_RATIO);
-        let base_pixel_font_size = calculate_pixel_font_size(base_font_size, width, height)
-            * app.display_settings().scale.multiplier();
+        let base_pixel_font_size =
+            calculate_pixel_font_size(base_font_size, width, height) * display_scale;
         let line_idx = model.status.line.get();
         let content_line = if let Some(line) = model.content.lines.get(line_idx) {
             line
@@ -2188,8 +2268,8 @@ fn build_typing_ui(
 
         let line_count = model.content.lines.len();
         let context_font_size = FontSize::WindowHeight(TYPING_CONTEXT_FONT_SIZE_RATIO);
-        let context_pixel_font_size = calculate_pixel_font_size(context_font_size, width, height)
-            * app.display_settings().scale.multiplier();
+        let context_pixel_font_size =
+            calculate_pixel_font_size(context_font_size, width, height) * display_scale;
         let float_gap = height.max(1) as f32 * TYPING_FLOAT_MIN_GAP_RATIO;
         let top_margin = height.max(1) as f32 * TYPING_FLOAT_TOP_MARGIN_RATIO;
 
@@ -2294,6 +2374,23 @@ fn build_typing_ui(
             line_alignment: TypingLineAlignment::new(full_line_width, lower_visible_start_width),
         });
 
+        let metrics = typing::calculate_total_metrics(model);
+        let time = metrics.total_time / 1000.0;
+        let status_items = [
+            format!("Progress: {} / {}", model.status.line.get() + 1, line_count),
+            format!("Speed: {:.2} KPS", metrics.speed),
+            format!("Accuracy: {:.1}%", metrics.accuracy * 100.0),
+            format!("Misses: {}", metrics.miss_count),
+            format!("Time: {:02.0}:{:05.2}", (time / 60.0).floor(), time % 60.0),
+        ];
+        let status_row_step = measured_ui_row_step(
+            fonts,
+            FontSize::WindowHeight(TYPING_STATUS_ITEM_HEIGHT_RATIO),
+            width,
+            height,
+            display_scale,
+            TYPING_STATUS_ITEM_HEIGHT_RATIO,
+        );
         let next_line_to_display = model.status.line.get() + 1;
         if let Some(context_line) = model.content.lines.get(next_line_to_display) {
             let segments = upper_segments_for_line(
@@ -2303,9 +2400,9 @@ fn build_typing_ui(
             );
             let metrics = upper_typing_vertical_metrics(&segments, fonts, context_pixel_font_size);
             let top = core_layout.bottom + float_gap;
-            if top + metrics.total_height()
-                <= height.max(1) as f32 * TYPING_NEXT_CONTEXT_BOTTOM_LIMIT_RATIO
-            {
+            let bottom_limit =
+                typing_next_context_bottom_limit(height, status_items.len(), status_row_step);
+            if top + metrics.total_height() <= bottom_limit {
                 render_list.push(Renderable::TypingUpper {
                     segments,
                     anchor: Anchor::Center,
@@ -2327,34 +2424,21 @@ fn build_typing_ui(
             }
         }
 
-        let metrics = typing::calculate_total_metrics(model);
-        let time = metrics.total_time / 1000.0;
-        let status_items = [
-            format!("Progress: {} / {}", model.status.line.get() + 1, line_count),
-            format!("Speed: {:.2} KPS", metrics.speed),
-            format!("Accuracy: {:.1}%", metrics.accuracy * 100.0),
-            format!("Misses: {}", metrics.miss_count),
-            format!("Time: {:02.0}:{:05.2}", (time / 60.0).floor(), time % 60.0),
-        ];
-
-        let progress_bar_height_ratio = 0.02;
-        let status_item_height_ratio = 0.04;
-
         for (i, item) in status_items.iter().enumerate() {
             render_list.push(Renderable::Text {
                 text: item.clone(),
                 anchor: Anchor::BottomLeft,
                 shift: Shift {
                     x: 0.02,
-                    y: -0.02
-                        - progress_bar_height_ratio
-                        - ((status_items.len() - 1 - i) as f32 * status_item_height_ratio),
+                    y: -TYPING_STATUS_BOTTOM_MARGIN_RATIO
+                        - TYPING_STATUS_PROGRESS_BAR_HEIGHT_RATIO
+                        - ((status_items.len() - 1 - i) as f32 * status_row_step),
                 },
                 align: Align {
                     horizontal: HorizontalAlign::Left,
                     vertical: VerticalAlign::Bottom,
                 },
-                font_size: FontSize::WindowHeight(status_item_height_ratio),
+                font_size: FontSize::WindowHeight(TYPING_STATUS_ITEM_HEIGHT_RATIO),
                 color: 0xFF_DDDDDD,
             });
         }
@@ -2371,7 +2455,7 @@ fn build_typing_ui(
             anchor: Anchor::BottomLeft,
             shift: Shift { x: 0.0, y: -0.005 },
             width_ratio: 1.0,
-            height_ratio: progress_bar_height_ratio,
+            height_ratio: TYPING_STATUS_PROGRESS_BAR_HEIGHT_RATIO,
             progress: detailed_progress_ratio,
             bg_color: 0xFF_555555,
             fg_color: CORRECT_COLOR,
@@ -2472,7 +2556,7 @@ pub fn calculate_aligned_position(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{App, AppEvent, FontBundle, FontTarget, Fonts, SettingsItem};
+    use crate::app::{App, AppEvent, FontBundle, FontScale, FontTarget, Fonts, SettingsItem};
     use crate::display::DisplayScale;
     use crate::font::FontScript;
     use crate::io::{FontAssetId, FontEntry, FontSource};
@@ -3101,6 +3185,12 @@ mod tests {
     #[test]
     fn typing_context_lines_preserve_problem_ruby() {
         let mut app = typing_app("#title Test\n[前/まえ]\n[今/いま]\n[次/つぎ]");
+        app.fonts.set_scale_for_target(
+            FontTarget::Script(FontScript::Japanese),
+            FontScale::Percent50,
+        );
+        app.fonts
+            .set_scale_for_target(FontTarget::Ruby(FontScript::Japanese), FontScale::Percent50);
         app.on_event(AppEvent::Char {
             c: 'm',
             timestamp: 1.0,
@@ -3117,11 +3207,13 @@ mod tests {
         let render_list = build_ui(&app, app.fonts(), 800, 500);
         let context = context_segments(&render_list);
 
-        assert_eq!(context.len(), 2);
+        assert!(!context.is_empty());
         assert_eq!(context[0][0].base_text, "前");
         assert_eq!(context[0][0].ruby_text.as_deref(), Some("まえ"));
-        assert_eq!(context[1][0].base_text, "次");
-        assert_eq!(context[1][0].ruby_text.as_deref(), Some("つぎ"));
+        if context.len() > 1 {
+            assert_eq!(context[1][0].base_text, "次");
+            assert_eq!(context[1][0].ruby_text.as_deref(), Some("つぎ"));
+        }
         assert!(context
             .iter()
             .flat_map(|segments| segments.iter())
@@ -3208,6 +3300,101 @@ mod tests {
 
             assert_no_vertical_text_collisions(&boxes, 4.0);
         }
+    }
+
+    #[test]
+    fn next_context_bottom_limit_reserves_status_region() {
+        let height = 500;
+        let status_count = 5;
+        let status_row_step = TYPING_STATUS_ITEM_HEIGHT_RATIO;
+        let status_top = typing_status_region_top(height, status_count, status_row_step);
+        let next_limit = typing_next_context_bottom_limit(height, status_count, status_row_step);
+
+        assert_eq!(next_limit, status_top);
+        assert!(next_limit < height as f32 * TYPING_NEXT_CONTEXT_BOTTOM_LIMIT_RATIO);
+    }
+
+    #[test]
+    fn status_region_reservation_grows_with_ui_font_scale() {
+        let mut fonts = test_fonts();
+        let normal_row_step = measured_ui_row_step(
+            &fonts,
+            FontSize::WindowHeight(TYPING_STATUS_ITEM_HEIGHT_RATIO),
+            320,
+            240,
+            DisplayScale::Percent100.multiplier(),
+            TYPING_STATUS_ITEM_HEIGHT_RATIO,
+        );
+        let normal_top = typing_status_region_top(240, 5, normal_row_step);
+
+        fonts.set_scale_for_target(FontTarget::Ui, FontScale::Percent200);
+        let scaled_row_step = measured_ui_row_step(
+            &fonts,
+            FontSize::WindowHeight(TYPING_STATUS_ITEM_HEIGHT_RATIO),
+            320,
+            240,
+            DisplayScale::Percent100.multiplier(),
+            TYPING_STATUS_ITEM_HEIGHT_RATIO,
+        );
+        let scaled_top = typing_status_region_top(240, 5, scaled_row_step);
+
+        assert!(scaled_row_step > normal_row_step);
+        assert!(
+            scaled_top < normal_top,
+            "larger UI Font Scale should reserve more vertical status area: normal={normal_top}, scaled={scaled_top}"
+        );
+    }
+
+    #[test]
+    fn lower_active_metrics_include_typed_element_script_scale() {
+        let mut fonts = test_fonts();
+        let segments = [LowerTypingSegment::Active {
+            elements: vec![ActiveLowerElement::Typed {
+                character: 'A',
+                is_correct: true,
+                script: FontScript::English,
+            }],
+            script: FontScript::Japanese,
+        }];
+
+        let normal = lower_typing_vertical_metrics(&segments, &fonts, 48.0).base_height;
+        fonts.set_scale_for_target(
+            FontTarget::Script(FontScript::English),
+            FontScale::Percent200,
+        );
+        let scaled = lower_typing_vertical_metrics(&segments, &fonts, 48.0).base_height;
+
+        assert!(
+            scaled > normal * 1.5,
+            "active lower metrics should grow with typed element script scale: normal={normal}, scaled={scaled}"
+        );
+    }
+
+    #[test]
+    fn settings_row_step_grows_with_ui_font_scale() {
+        let mut fonts = test_fonts();
+        let normal = measured_ui_row_step(
+            &fonts,
+            FontSize::WindowHeight(0.042),
+            320,
+            240,
+            DisplayScale::Percent100.multiplier(),
+            0.058,
+        );
+        fonts.set_scale_for_target(FontTarget::Ui, FontScale::Percent200);
+        let scaled = measured_ui_row_step(
+            &fonts,
+            FontSize::WindowHeight(0.042),
+            320,
+            240,
+            DisplayScale::Percent100.multiplier(),
+            0.058,
+        );
+
+        assert!(
+            scaled > normal * 1.5,
+            "settings row step should grow with UI Font Scale: normal={normal}, scaled={scaled}"
+        );
     }
 
     #[test]

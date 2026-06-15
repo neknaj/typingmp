@@ -33,7 +33,7 @@ Chinese pinyin readings must be written with numbered tones in problem files.
 [春晓/chun1xiao3]
 ```
 
-Marked-tone pinyin such as `[有/yǒu]` is a parse/lint error. The upper typing prompt keeps the numbered reading (`you3`), and completed lower ruby is displayed with tone marks (`yǒu`). Bopomofo readings are treated as Traditional Chinese and are not converted by this pinyin display rule.
+Marked-tone pinyin such as `[有/yǒu]` is a parse/lint error. Only the active upper typing prompt keeps numbered pinyin (`you3`) because it shows the keys to type. Problem titles, problem-menu titles, context lines, completed lower ruby, and unconfirmed lower input are presentation text and display tone marks (`yǒu`). Bopomofo readings are treated as Traditional Chinese and are not converted by this pinyin display rule.
 
 読み仮名（ルビ）を付ける記法です。ユーザーは `reading` をタイプします。
 

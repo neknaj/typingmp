@@ -25,9 +25,9 @@ It serves as both a functional typing tutor for Japanese Romaji input and a tech
 
 -   **Flexible Japanese Romaji Support**: A comprehensive Romaji-to-Kana conversion table (`layout_data.rs`) allows for multiple typing styles (e.g., `shi` and `si` for し).
 
--   **Intelligent WASM IME Handling**: The web version correctly handles Input Method Editors (IMEs) for Japanese input by using a hidden input field and resetting its state after each segment, ensuring a smooth typing experience.
+-   **Configurable WASM IME Handling**: The web version defaults to direct `keydown` typing for low-latency input, and can optionally enable IME input from Settings when an OS IME or screen keyboard is needed.
 
--   **Script-Aware Font Selection**: Users can choose UI, Japanese, Simplified Chinese, Traditional Chinese, English, and Japanese/Chinese Ruby fonts independently from the bundled `fonts/` assets. Defaults are `YujiSyuku` for Japanese, `MaShanZheng` for Chinese, `Kalam` for English, and `NotoSerifJP` for UI text.
+-   **Script-Aware Font Selection**: Users can choose UI, Japanese, Simplified Chinese, Traditional Chinese, English, Japanese/Chinese Ruby, and Japanese/Chinese unconfirmed-input fonts and scales independently from the bundled `fonts/` assets. Defaults are `YujiSyuku` for Japanese base/ruby/unconfirmed, `LongCang` for Chinese base, `Alegreya` for Chinese ruby/unconfirmed, `Kalam` for English, and `NotoSerifJP` for UI text.
 
 ## 🏛️ Architecture
 
@@ -208,7 +208,7 @@ Chinese pinyin readings in `.ntq` files must use numbered tones.
 *   `[有/you3]`
 *   `[春晓/chun1xiao3]`
 
-Marked-tone pinyin such as `[有/yǒu]` is rejected as a parse/lint error. During play, the upper problem prompt keeps the numbered reading (`you3`), while completed lower ruby is displayed with tone marks (`yǒu`). Bopomofo readings are used for Traditional Chinese and are not converted by this pinyin rule.
+Marked-tone pinyin such as `[有/yǒu]` is rejected as a parse/lint error. During play, only the active upper prompt keeps numbered pinyin (`you3`) because it shows the keys to type. Problem titles, problem-menu titles, context lines, completed lower ruby, and unconfirmed lower input are presentation text and display tone marks (`yǒu`). Bopomofo readings are used for Traditional Chinese and are not converted by this pinyin rule.
 
 **Examples:**
 *   `[漢字/かんじ]` -> Displays "漢字", requires typing "かんじ".
