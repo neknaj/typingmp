@@ -180,9 +180,11 @@ Problem files are simple UTF-8 encoded text files that define the typing challen
 2.  **Problem Text**: Subsequent lines each represent one typing problem.
 
 ```
-#title [サンプル/さんぷる]問題集
-[吾輩/わがはい]は[猫/ねこ]である。/[名前/なまえ]はまだ[無/な]い。
-[走/はし]-れメロス
+#title いろは[歌/うた]
+[色/いろ]は[匂/にほ]-へ/ど[散/ち]-り/ぬる/を
+[我/わ]が[世/よ][誰/たれ]ぞ[常/つね]なら/む
+[有為/うゐ]の[奥山/おくやま][今日/けふ][越/こ]-え/て
+[浅/あさ]き[夢/ゆめ][見/み]じ[酔/ゑ]-ひ/も/せ/ず
 ```
 
 ### Syntax Rules
