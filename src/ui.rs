@@ -140,6 +140,45 @@ pub fn active_lower_element_uses_unconfirmed_font(element: &ActiveLowerElement) 
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ActiveLowerMeasureStyle {
+    script: FontScript,
+    use_unconfirmed_font: bool,
+}
+
+fn active_lower_measure_style(
+    element: &ActiveLowerElement,
+    fallback_script: FontScript,
+) -> ActiveLowerMeasureStyle {
+    match element {
+        ActiveLowerElement::Typed { script, .. }
+        | ActiveLowerElement::LastIncorrectInput { script, .. }
+        | ActiveLowerElement::UnconfirmedInput { script, .. } => ActiveLowerMeasureStyle {
+            script: *script,
+            use_unconfirmed_font: active_lower_element_uses_unconfirmed_font(element),
+        },
+        ActiveLowerElement::Cursor => ActiveLowerMeasureStyle {
+            script: fallback_script,
+            use_unconfirmed_font: false,
+        },
+    }
+}
+
+fn measure_active_lower_style_height(
+    fonts: &Fonts,
+    style: ActiveLowerMeasureStyle,
+    pixel_font_size: f32,
+) -> f32 {
+    if style.use_unconfirmed_font {
+        let size = fonts.scaled_size_for_unconfirmed_script(style.script, pixel_font_size);
+        gui_renderer::measure_text(fonts.get_unconfirmed_for_script(style.script), "Hg", size).1
+            as f32
+    } else {
+        let size = fonts.scaled_size_for_script(style.script, pixel_font_size);
+        gui_renderer::measure_text(fonts.get_for_script(style.script), "Hg", size).1 as f32
+    }
+}
+
 pub enum LowerTypingSegment {
     Completed {
         base_text: String,
@@ -425,42 +464,15 @@ fn lower_typing_vertical_metrics(
         bottom_extra = bottom_extra.max((ruby_y + ruby_height - segment_base_height).max(0.0));
 
         if let LowerTypingSegment::Active { elements, .. } = segment {
+            let mut measured_styles = Vec::new();
             for element in elements {
-                match element {
-                    ActiveLowerElement::Typed {
-                        character, script, ..
-                    }
-                    | ActiveLowerElement::LastIncorrectInput { character, script } => {
-                        let use_unconfirmed = active_lower_element_uses_unconfirmed_font(element);
-                        let size = if use_unconfirmed {
-                            fonts.scaled_size_for_unconfirmed_script(*script, pixel_font_size)
-                        } else {
-                            fonts.scaled_size_for_script(*script, pixel_font_size)
-                        };
-                        let font = if use_unconfirmed {
-                            fonts.get_unconfirmed_for_script(*script)
-                        } else {
-                            fonts.get_for_script(*script)
-                        };
-                        let mut text = String::new();
-                        text.push(*character);
-                        let height = gui_renderer::measure_text(font, &text, size).1 as f32;
-                        base_height = base_height.max(height);
-                    }
-                    ActiveLowerElement::Cursor => {
-                        let size = fonts.scaled_size_for_script(script, pixel_font_size);
-                        let font = fonts.get_for_script(script);
-                        let height = gui_renderer::measure_text(font, "|", size).1 as f32;
-                        base_height = base_height.max(height);
-                    }
-                    ActiveLowerElement::UnconfirmedInput { text, script } => {
-                        let size =
-                            fonts.scaled_size_for_unconfirmed_script(*script, pixel_font_size);
-                        let font = fonts.get_unconfirmed_for_script(*script);
-                        let height = gui_renderer::measure_text(font, text, size).1 as f32;
-                        base_height = base_height.max(height);
-                    }
+                let style = active_lower_measure_style(element, script);
+                if measured_styles.contains(&style) {
+                    continue;
                 }
+                measured_styles.push(style);
+                let height = measure_active_lower_style_height(fonts, style, pixel_font_size);
+                base_height = base_height.max(height);
             }
         }
     }

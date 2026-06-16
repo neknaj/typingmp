@@ -7,7 +7,7 @@ use crate::io::DesktopProblemSourceProvider;
 #[cfg(not(feature = "uefi"))]
 use crate::io::{AssetProvider, DesktopAssetProvider};
 #[cfg(not(feature = "uefi"))]
-use crate::renderer::{ArgbSurface, RenderCache};
+use crate::renderer::{write_argb_as_rgba_bytes, ArgbSurface, RenderCache};
 #[cfg(not(feature = "uefi"))]
 use crate::ui;
 #[cfg(not(feature = "uefi"))]
@@ -241,13 +241,7 @@ fn present_frame(
         return Ok(());
     }
     let frame = pixels.frame_mut();
-    for (i, color) in pixel_buffer.iter().enumerate() {
-        let base = i * 4;
-        frame[base] = ((color >> 16) & 0xff) as u8;
-        frame[base + 1] = ((color >> 8) & 0xff) as u8;
-        frame[base + 2] = (color & 0xff) as u8;
-        frame[base + 3] = ((color >> 24) & 0xff) as u8;
-    }
+    write_argb_as_rgba_bytes(pixel_buffer, frame);
     pixels
         .render()
         .map_err(|err| -> Box<dyn Error> { format!("{err}").into() })?;

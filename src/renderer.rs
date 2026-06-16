@@ -24,10 +24,19 @@ use crate::font::Fonts;
 use crate::ui::{
     self, ActiveLowerElement, FontSize, LowerTypingSegment, Renderable, UpperSegmentState,
 };
-use ab_glyph::{point, Font, OutlinedGlyph, PxScale, ScaleFont};
+use ab_glyph::{point, Font, FontVec, OutlinedGlyph, PxScale, ScaleFont};
 
 /// 背景の描画色
 pub const BG_COLOR: u32 = 0xFF_000000;
+
+pub fn write_argb_as_rgba_bytes(src: &[u32], dst: &mut [u8]) {
+    for (color, pixel) in src.iter().zip(dst.chunks_exact_mut(4)) {
+        pixel[0] = ((*color >> 16) & 0xFF) as u8;
+        pixel[1] = ((*color >> 8) & 0xFF) as u8;
+        pixel[2] = (*color & 0xFF) as u8;
+        pixel[3] = ((*color >> 24) & 0xFF) as u8;
+    }
+}
 
 /// ピクセルバッファに線形グラデーションを描画する
 pub fn draw_linear_gradient(
@@ -1805,41 +1814,47 @@ fn draw_typing_lower(
                 pen_x += segment_width_px;
             }
             LowerTypingSegment::Active { elements, script } => {
+                let mut run_text = String::new();
+                let mut run_style = None;
+                let mut run_chars = 0usize;
                 for element in elements {
-                    let (text, color, element_script) =
-                        active_lower_text_and_color(element, *script);
-                    let (font, size) = if ui::active_lower_element_uses_unconfirmed_font(element) {
-                        (
-                            fonts.get_unconfirmed_for_script(element_script),
-                            fonts.scaled_size_for_unconfirmed_script(
-                                element_script,
-                                pixel_font_size,
-                            ),
-                        )
-                    } else {
-                        (
-                            fonts.get_for_script(element_script),
-                            fonts.scaled_size_for_script(element_script, pixel_font_size),
-                        )
-                    };
-                    let text_metrics = cache.measure_text(font, &text, size);
-                    let text_width = text_metrics.width as i32;
-                    if text_width > 0 {
-                        draw_text_if_visible(
+                    let style = active_lower_text_style(element, *script);
+                    let element_chars = active_lower_element_char_count(element);
+                    if run_style != Some(style)
+                        || (!run_text.is_empty()
+                            && run_chars + element_chars > ACTIVE_LOWER_TEXT_CHUNK_CHARS)
+                    {
+                        draw_active_lower_text_run(
                             frame,
-                            font,
-                            &text,
-                            VisibleTextPlacement {
-                                pos: (pen_x as f32, y as f32),
-                                size,
-                                metrics: text_metrics,
-                            },
-                            color,
+                            fonts,
                             cache,
+                            ActiveLowerTextRun {
+                                pen_x: &mut pen_x,
+                                y,
+                                pixel_font_size,
+                                style: run_style,
+                                text: &run_text,
+                            },
                         );
+                        run_text.clear();
+                        run_chars = 0;
                     }
-                    pen_x += text_width;
+                    run_style = Some(style);
+                    append_active_lower_text(&mut run_text, element);
+                    run_chars += element_chars;
                 }
+                draw_active_lower_text_run(
+                    frame,
+                    fonts,
+                    cache,
+                    ActiveLowerTextRun {
+                        pen_x: &mut pen_x,
+                        y,
+                        pixel_font_size,
+                        style: run_style,
+                        text: &run_text,
+                    },
+                );
             }
         }
     }
@@ -1876,45 +1891,16 @@ fn lower_typing_total_height(
                 .measure_text(fonts.get_ruby_for_script(script), ruby_text, ruby_size)
                 .height as f32;
             if let LowerTypingSegment::Active { elements, .. } = segment {
+                let mut measured_styles = Vec::new();
                 for element in elements {
-                    match element {
-                        ActiveLowerElement::Typed {
-                            character, script, ..
-                        }
-                        | ActiveLowerElement::LastIncorrectInput { character, script } => {
-                            let use_unconfirmed =
-                                ui::active_lower_element_uses_unconfirmed_font(element);
-                            let size = if use_unconfirmed {
-                                fonts.scaled_size_for_unconfirmed_script(*script, pixel_font_size)
-                            } else {
-                                fonts.scaled_size_for_script(*script, pixel_font_size)
-                            };
-                            let mut text = String::new();
-                            text.push(*character);
-                            let font = if use_unconfirmed {
-                                fonts.get_unconfirmed_for_script(*script)
-                            } else {
-                                fonts.get_for_script(*script)
-                            };
-                            let height = cache.measure_text(font, &text, size).height as f32;
-                            base_height = base_height.max(height);
-                        }
-                        ActiveLowerElement::Cursor => {
-                            let size = fonts.scaled_size_for_script(script, pixel_font_size);
-                            let height = cache
-                                .measure_text(fonts.get_for_script(script), "|", size)
-                                .height as f32;
-                            base_height = base_height.max(height);
-                        }
-                        ActiveLowerElement::UnconfirmedInput { text, script } => {
-                            let size =
-                                fonts.scaled_size_for_unconfirmed_script(*script, pixel_font_size);
-                            let height = cache
-                                .measure_text(fonts.get_unconfirmed_for_script(*script), text, size)
-                                .height as f32;
-                            base_height = base_height.max(height);
-                        }
+                    let style = active_lower_text_style(element, script);
+                    if measured_styles.contains(&style) {
+                        continue;
                     }
+                    measured_styles.push(style);
+                    let (font, size) = active_lower_font_and_size(fonts, style, pixel_font_size);
+                    let height = cache.measure_text(font, "Hg", size).height as f32;
+                    base_height = base_height.max(height);
                 }
             }
             let ruby_y = -ruby_size * 0.5;
@@ -1964,32 +1950,126 @@ fn upper_segment_color(state: UpperSegmentState) -> u32 {
     }
 }
 
-fn active_lower_text_and_color(
+const ACTIVE_LOWER_TEXT_CHUNK_CHARS: usize = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ActiveLowerTextStyle {
+    color: u32,
+    script: crate::font::FontScript,
+    use_unconfirmed_font: bool,
+}
+
+fn active_lower_text_style(
     element: &ActiveLowerElement,
     fallback_script: crate::font::FontScript,
-) -> (String, u32, crate::font::FontScript) {
+) -> ActiveLowerTextStyle {
     match element {
         ActiveLowerElement::Typed {
-            character,
-            is_correct,
-            script,
-        } => (
-            character.to_string(),
-            if *is_correct {
+            is_correct, script, ..
+        } => ActiveLowerTextStyle {
+            color: if *is_correct {
                 ui::CORRECT_COLOR
             } else {
                 ui::INCORRECT_COLOR
             },
-            *script,
-        ),
-        ActiveLowerElement::Cursor => ("|".to_string(), ui::CURSOR_COLOR, fallback_script),
-        ActiveLowerElement::UnconfirmedInput { text, script } => {
-            (text.clone(), ui::UNCONFIRMED_COLOR, *script)
-        }
-        ActiveLowerElement::LastIncorrectInput { character, script } => {
-            (character.to_string(), ui::WRONG_KEY_COLOR, *script)
-        }
+            script: *script,
+            use_unconfirmed_font: ui::active_lower_element_uses_unconfirmed_font(element),
+        },
+        ActiveLowerElement::UnconfirmedInput { script, .. } => ActiveLowerTextStyle {
+            color: ui::UNCONFIRMED_COLOR,
+            script: *script,
+            use_unconfirmed_font: true,
+        },
+        ActiveLowerElement::LastIncorrectInput { script, .. } => ActiveLowerTextStyle {
+            color: ui::WRONG_KEY_COLOR,
+            script: *script,
+            use_unconfirmed_font: ui::active_lower_element_uses_unconfirmed_font(element),
+        },
+        ActiveLowerElement::Cursor => ActiveLowerTextStyle {
+            color: ui::CURSOR_COLOR,
+            script: fallback_script,
+            use_unconfirmed_font: false,
+        },
     }
+}
+
+fn active_lower_font_and_size(
+    fonts: &Fonts,
+    style: ActiveLowerTextStyle,
+    pixel_font_size: f32,
+) -> (&FontVec, f32) {
+    if style.use_unconfirmed_font {
+        (
+            fonts.get_unconfirmed_for_script(style.script),
+            fonts.scaled_size_for_unconfirmed_script(style.script, pixel_font_size),
+        )
+    } else {
+        (
+            fonts.get_for_script(style.script),
+            fonts.scaled_size_for_script(style.script, pixel_font_size),
+        )
+    }
+}
+
+fn active_lower_element_char_count(element: &ActiveLowerElement) -> usize {
+    match element {
+        ActiveLowerElement::Typed { .. }
+        | ActiveLowerElement::LastIncorrectInput { .. }
+        | ActiveLowerElement::Cursor => 1,
+        ActiveLowerElement::UnconfirmedInput { text, .. } => text.chars().count(),
+    }
+}
+
+fn append_active_lower_text(text: &mut String, element: &ActiveLowerElement) {
+    match element {
+        ActiveLowerElement::Typed { character, .. }
+        | ActiveLowerElement::LastIncorrectInput { character, .. } => text.push(*character),
+        ActiveLowerElement::Cursor => text.push('|'),
+        ActiveLowerElement::UnconfirmedInput {
+            text: unconfirmed, ..
+        } => text.push_str(unconfirmed),
+    }
+}
+
+struct ActiveLowerTextRun<'a> {
+    pen_x: &'a mut i32,
+    y: i32,
+    pixel_font_size: f32,
+    style: Option<ActiveLowerTextStyle>,
+    text: &'a str,
+}
+
+fn draw_active_lower_text_run(
+    frame: &mut PixelFrame<'_>,
+    fonts: &Fonts,
+    cache: &mut RenderCache,
+    run: ActiveLowerTextRun<'_>,
+) {
+    let Some(style) = run.style else {
+        return;
+    };
+    if run.text.is_empty() {
+        return;
+    }
+
+    let (font, size) = active_lower_font_and_size(fonts, style, run.pixel_font_size);
+    let text_metrics = cache.measure_text(font, run.text, size);
+    let text_width = text_metrics.width as i32;
+    if text_width > 0 {
+        draw_text_if_visible(
+            frame,
+            font,
+            run.text,
+            VisibleTextPlacement {
+                pos: (*run.pen_x as f32, run.y as f32),
+                size,
+                metrics: text_metrics,
+            },
+            style.color,
+            cache,
+        );
+    }
+    *run.pen_x += text_width;
 }
 
 /// GUI/WASMバックエンド用のピクセルベースレンダラ
@@ -2430,6 +2510,16 @@ mod tests {
     use crate::font::{FontBundle, FontScript, FontTarget, Fonts};
     use crate::ui::{Align, Anchor, FontSize, HorizontalAlign, Renderable, Shift, VerticalAlign};
     use ab_glyph::FontVec;
+
+    #[test]
+    fn argb_pixels_are_written_as_rgba_bytes() {
+        let pixels = [0x12_34_56_78, 0xFF_AA_BB_CC];
+        let mut bytes = [0u8; 8];
+
+        write_argb_as_rgba_bytes(&pixels, &mut bytes);
+
+        assert_eq!(bytes, [0x34, 0x56, 0x78, 0x12, 0xAA, 0xBB, 0xCC, 0xFF]);
+    }
 
     fn test_font() -> FontVec {
         FontVec::try_from_vec(include_bytes!("../fonts/YujiSyuku-Regular.ttf").to_vec())

@@ -6,7 +6,7 @@ use crate::io::{
     bundled_font_entries, bundled_font_file_name, embedded_alegreya_font_bytes, BundledFont,
     PersistentStore, ProviderError, ProviderErrorKind,
 };
-use crate::renderer::{ArgbSurface, RenderCache};
+use crate::renderer::{write_argb_as_rgba_bytes, ArgbSurface, RenderCache};
 use crate::screen_keyboard::{
     self, ScreenKeyboardAction, ScreenKeyboardKeyRole, ScreenKeyboardLayoutKind,
 };
@@ -943,13 +943,7 @@ async fn start_async() -> Result<(), JsValue> {
                     if ub.len() != needed_u8 {
                         ub.resize(needed_u8, 0);
                     }
-                    for (i, pixel) in pb.iter().enumerate() {
-                        let base = i * 4;
-                        ub[base] = ((*pixel >> 16) & 0xFF) as u8;
-                        ub[base + 1] = ((*pixel >> 8) & 0xFF) as u8;
-                        ub[base + 2] = (*pixel & 0xFF) as u8;
-                        ub[base + 3] = 255;
-                    }
+                    write_argb_as_rgba_bytes(pb.as_slice(), ub.as_mut_slice());
                     let image_data = match ImageData::new_with_u8_clamped_array_and_sh(
                         Clamped(&ub),
                         width as u32,

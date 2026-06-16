@@ -212,10 +212,14 @@ struct FontSlot {
 
 impl FontSlot {
     fn new(font: FontVec, name: &str) -> Self {
+        Self::with_scale(font, name, FontScale::Percent100)
+    }
+
+    fn with_scale(font: FontVec, name: &str, scale: FontScale) -> Self {
         Self {
             font,
             name: name.to_string(),
-            scale: FontScale::Percent100,
+            scale,
         }
     }
 }
@@ -238,13 +242,15 @@ impl Fonts {
 
         Self {
             ui: FontSlot::new(ui, DEFAULT_UI_FONT_NAME),
-            chinese_simplified_ruby: FontSlot::new(
+            chinese_simplified_ruby: FontSlot::with_scale(
                 chinese_simplified_ruby,
                 DEFAULT_CHINESE_SIMPLIFIED_RUBY_FONT_NAME,
+                FontScale::Percent75,
             ),
-            traditional_chinese_ruby: FontSlot::new(
+            traditional_chinese_ruby: FontSlot::with_scale(
                 traditional_chinese_ruby,
                 DEFAULT_TRADITIONAL_CHINESE_RUBY_FONT_NAME,
+                FontScale::Percent75,
             ),
             japanese: FontSlot::new(japanese, DEFAULT_JAPANESE_FONT_NAME),
             japanese_ruby: FontSlot::new(japanese_ruby, DEFAULT_JAPANESE_RUBY_FONT_NAME),
@@ -252,21 +258,25 @@ impl Fonts {
                 japanese_unconfirmed,
                 DEFAULT_JAPANESE_UNCONFIRMED_FONT_NAME,
             ),
-            chinese_simplified: FontSlot::new(
+            chinese_simplified: FontSlot::with_scale(
                 chinese_simplified,
                 DEFAULT_CHINESE_SIMPLIFIED_FONT_NAME,
+                FontScale::Percent75,
             ),
-            chinese_simplified_unconfirmed: FontSlot::new(
+            chinese_simplified_unconfirmed: FontSlot::with_scale(
                 chinese_simplified_unconfirmed,
                 DEFAULT_CHINESE_SIMPLIFIED_UNCONFIRMED_FONT_NAME,
+                FontScale::Percent75,
             ),
-            traditional_chinese: FontSlot::new(
+            traditional_chinese: FontSlot::with_scale(
                 traditional_chinese,
                 DEFAULT_TRADITIONAL_CHINESE_FONT_NAME,
+                FontScale::Percent75,
             ),
-            traditional_chinese_unconfirmed: FontSlot::new(
+            traditional_chinese_unconfirmed: FontSlot::with_scale(
                 traditional_chinese_unconfirmed,
                 DEFAULT_TRADITIONAL_CHINESE_UNCONFIRMED_FONT_NAME,
+                FontScale::Percent75,
             ),
             english: FontSlot::new(english, DEFAULT_ENGLISH_FONT_NAME),
             generation: 0,
@@ -750,6 +760,53 @@ fn is_japanese_specific_mark(character: char) -> bool {
 mod tests {
     use super::*;
     use crate::model::{Line, Segment, Word};
+
+    fn test_fonts() -> Fonts {
+        fn font() -> FontVec {
+            FontVec::try_from_vec(include_bytes!("../fonts/YujiSyuku-Regular.ttf").to_vec())
+                .expect("test font should parse")
+        }
+
+        Fonts::new(FontBundle {
+            ui: font(),
+            japanese: font(),
+            japanese_ruby: font(),
+            japanese_unconfirmed: font(),
+            chinese_simplified: font(),
+            chinese_simplified_ruby: font(),
+            chinese_simplified_unconfirmed: font(),
+            traditional_chinese: font(),
+            traditional_chinese_ruby: font(),
+            traditional_chinese_unconfirmed: font(),
+            english: font(),
+        })
+    }
+
+    #[test]
+    fn default_font_scales_shrink_chinese_slots_only() {
+        let fonts = test_fonts();
+
+        for target in [
+            FontTarget::Script(FontScript::ChineseSimplified),
+            FontTarget::Ruby(FontScript::ChineseSimplified),
+            FontTarget::Unconfirmed(FontScript::ChineseSimplified),
+            FontTarget::Script(FontScript::TraditionalChinese),
+            FontTarget::Ruby(FontScript::TraditionalChinese),
+            FontTarget::Unconfirmed(FontScript::TraditionalChinese),
+        ] {
+            assert_eq!(fonts.scale_for_target(target), FontScale::Percent75);
+        }
+
+        for target in [
+            FontTarget::Ui,
+            FontTarget::Script(FontScript::Japanese),
+            FontTarget::Ruby(FontScript::Japanese),
+            FontTarget::Unconfirmed(FontScript::Japanese),
+            FontTarget::Script(FontScript::English),
+        ] {
+            assert_eq!(fonts.scale_for_target(target), FontScale::Percent100);
+        }
+    }
 
     #[test]
     fn annotated_reading_detects_kana_as_japanese() {
