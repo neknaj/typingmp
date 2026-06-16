@@ -27,7 +27,8 @@ use crate::font::{
     Fonts,
 };
 use crate::model::{
-    Segment, TypingCorrectnessChar, TypingCorrectnessSegment, TypingCorrectnessWord,
+    Segment, TypingCorrectnessChar, TypingCorrectnessSegment, TypingCorrectnessWord, TypingMetrics,
+    TypingModel,
 };
 use crate::pinyin;
 use crate::renderer::{calculate_pixel_font_size, gui_renderer};
@@ -322,6 +323,7 @@ const TYPING_FLOAT_TOP_MARGIN_RATIO: f32 = 0.035;
 const TYPING_FLOAT_MIN_GAP_RATIO: f32 = 0.012;
 const TYPING_PREVIOUS_CONTEXT_ROUNDING_GUARD_PX: f32 = 12.0;
 const TYPING_STATUS_LEFT_MARGIN_RATIO: f32 = 0.02;
+const TYPING_STATUS_LABEL_VALUE_GAP_RATIO: f32 = 0.012;
 const TYPING_STATUS_NEXT_CONTEXT_GAP_RATIO: f32 = 0.035;
 const TYPING_STATUS_BOTTOM_MARGIN_RATIO: f32 = 0.02;
 const TYPING_STATUS_PROGRESS_BAR_HEIGHT_RATIO: f32 = 0.02;
@@ -340,6 +342,54 @@ struct TypingLineVerticalMetrics {
     base_height: f32,
     top_extra: f32,
     bottom_extra: f32,
+}
+
+struct StatusTableRow {
+    label: &'static str,
+    value: String,
+    value_width_hint: &'static str,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct StatusTableLayout {
+    label_right: f32,
+    value_left: f32,
+    right: f32,
+}
+
+fn typing_status_rows(
+    model: &TypingModel,
+    line_count: usize,
+    metrics: TypingMetrics,
+) -> [StatusTableRow; 5] {
+    let time = metrics.total_time / 1000.0;
+    [
+        StatusTableRow {
+            label: "Progress:",
+            value: format!("{} / {}", model.status.line.get() + 1, line_count),
+            value_width_hint: "999 / 999",
+        },
+        StatusTableRow {
+            label: "Speed:",
+            value: format!("{:.2} KPS", metrics.speed),
+            value_width_hint: "999.99 KPS",
+        },
+        StatusTableRow {
+            label: "Accuracy:",
+            value: format!("{:.1}%", metrics.accuracy * 100.0),
+            value_width_hint: "100.0%",
+        },
+        StatusTableRow {
+            label: "Misses:",
+            value: metrics.miss_count.to_string(),
+            value_width_hint: "999",
+        },
+        StatusTableRow {
+            label: "Time:",
+            value: format!("{:02.0}:{:05.2}", (time / 60.0).floor(), time % 60.0),
+            value_width_hint: "99:59.99",
+        },
+    ]
 }
 
 impl TypingLineVerticalMetrics {
@@ -524,13 +574,13 @@ fn measured_ui_row_step(
     ((measured_height + 6.0) / height.max(1) as f32).max(minimum_ratio)
 }
 
-fn status_float_right_edge(
+fn status_table_layout(
     fonts: &Fonts,
-    status_items: &[String],
+    rows: &[StatusTableRow],
     width: usize,
     height: usize,
     display_scale: f32,
-) -> f32 {
+) -> StatusTableLayout {
     let pixel_font_size = ui_text_pixel_font_size(
         fonts,
         FontSize::WindowHeight(TYPING_STATUS_ITEM_HEIGHT_RATIO),
@@ -538,14 +588,40 @@ fn status_float_right_edge(
         height,
         display_scale,
     );
-    let max_text_width = status_items
+    let label_width = rows
         .iter()
-        .map(|item| gui_renderer::measure_text(fonts.ui(), item, pixel_font_size).0)
+        .map(|row| gui_renderer::measure_text(fonts.ui(), row.label, pixel_font_size).0)
+        .max()
+        .unwrap_or(0) as f32;
+    let value_width = rows
+        .iter()
+        .map(|row| {
+            let value_width = gui_renderer::measure_text(fonts.ui(), &row.value, pixel_font_size).0;
+            let hint_width =
+                gui_renderer::measure_text(fonts.ui(), row.value_width_hint, pixel_font_size).0;
+            value_width.max(hint_width)
+        })
         .max()
         .unwrap_or(0) as f32;
 
-    width.max(1) as f32 * TYPING_STATUS_LEFT_MARGIN_RATIO
-        + max_text_width
+    let viewport_width = width.max(1) as f32;
+    let label_right = viewport_width * TYPING_STATUS_LEFT_MARGIN_RATIO + label_width;
+    let value_left = label_right + viewport_width * TYPING_STATUS_LABEL_VALUE_GAP_RATIO;
+    StatusTableLayout {
+        label_right,
+        value_left,
+        right: value_left + value_width,
+    }
+}
+
+fn status_float_right_edge(
+    fonts: &Fonts,
+    rows: &[StatusTableRow],
+    width: usize,
+    height: usize,
+    display_scale: f32,
+) -> f32 {
+    status_table_layout(fonts, rows, width, height, display_scale).right
         + width.max(1) as f32 * TYPING_STATUS_NEXT_CONTEXT_GAP_RATIO
 }
 
@@ -2518,14 +2594,7 @@ fn build_typing_ui(
         });
 
         let metrics = typing::calculate_total_metrics(model);
-        let time = metrics.total_time / 1000.0;
-        let status_items = [
-            format!("Progress: {} / {}", model.status.line.get() + 1, line_count),
-            format!("Speed: {:.2} KPS", metrics.speed),
-            format!("Accuracy: {:.1}%", metrics.accuracy * 100.0),
-            format!("Misses: {}", metrics.miss_count),
-            format!("Time: {:02.0}:{:05.2}", (time / 60.0).floor(), time % 60.0),
-        ];
+        let status_rows = typing_status_rows(model, line_count, metrics);
         let status_row_step = measured_ui_row_step(
             fonts,
             FontSize::WindowHeight(TYPING_STATUS_ITEM_HEIGHT_RATIO),
@@ -2542,9 +2611,9 @@ fn build_typing_ui(
                 UpperRubyDisplay::Presentation,
             );
             let metrics = upper_typing_vertical_metrics(&segments, fonts, context_pixel_font_size);
-            let left = status_float_right_edge(fonts, &status_items, width, height, display_scale);
+            let left = status_float_right_edge(fonts, &status_rows, width, height, display_scale);
             if left < width.max(1) as f32 {
-                let top = typing_status_text_block_top(height, status_items.len(), status_row_step);
+                let top = typing_status_text_block_top(height, status_rows.len(), status_row_step);
                 render_list.push(Renderable::TypingUpper {
                     segments,
                     anchor: Anchor::TopLeft,
@@ -2566,15 +2635,31 @@ fn build_typing_ui(
             }
         }
 
-        for (i, item) in status_items.iter().enumerate() {
+        let status_layout = status_table_layout(fonts, &status_rows, width, height, display_scale);
+        for (i, row) in status_rows.iter().enumerate() {
+            let row_y = -TYPING_STATUS_BOTTOM_MARGIN_RATIO
+                - TYPING_STATUS_PROGRESS_BAR_HEIGHT_RATIO
+                - ((status_rows.len() - 1 - i) as f32 * status_row_step);
             render_list.push(Renderable::Text {
-                text: item.clone(),
+                text: row.label.to_string(),
                 anchor: Anchor::BottomLeft,
                 shift: Shift {
-                    x: TYPING_STATUS_LEFT_MARGIN_RATIO,
-                    y: -TYPING_STATUS_BOTTOM_MARGIN_RATIO
-                        - TYPING_STATUS_PROGRESS_BAR_HEIGHT_RATIO
-                        - ((status_items.len() - 1 - i) as f32 * status_row_step),
+                    x: status_layout.label_right / width.max(1) as f32,
+                    y: row_y,
+                },
+                align: Align {
+                    horizontal: HorizontalAlign::Right,
+                    vertical: VerticalAlign::Bottom,
+                },
+                font_size: FontSize::WindowHeight(TYPING_STATUS_ITEM_HEIGHT_RATIO),
+                color: 0xFF_AAAAAA,
+            });
+            render_list.push(Renderable::Text {
+                text: row.value.clone(),
+                anchor: Anchor::BottomLeft,
+                shift: Shift {
+                    x: status_layout.value_left / width.max(1) as f32,
+                    y: row_y,
                 },
                 align: Align {
                     horizontal: HorizontalAlign::Left,
@@ -3697,20 +3782,9 @@ mod tests {
         let render_list = build_ui(&app, app.fonts(), width, height);
         let model = app.typing_model().expect("typing model should exist");
         let metrics = typing::calculate_total_metrics(model);
-        let time = metrics.total_time / 1000.0;
-        let status_items = [
-            format!(
-                "Progress: {} / {}",
-                model.status.line.get() + 1,
-                model.content.lines.len()
-            ),
-            format!("Speed: {:.2} KPS", metrics.speed),
-            format!("Accuracy: {:.1}%", metrics.accuracy * 100.0),
-            format!("Misses: {}", metrics.miss_count),
-            format!("Time: {:02.0}:{:05.2}", (time / 60.0).floor(), time % 60.0),
-        ];
+        let status_rows = typing_status_rows(model, model.content.lines.len(), metrics);
         let expected_left =
-            status_float_right_edge(app.fonts(), &status_items, width, height, display_scale);
+            status_float_right_edge(app.fonts(), &status_rows, width, height, display_scale);
 
         let next_context = render_list
             .iter()
@@ -3748,6 +3822,75 @@ mod tests {
             "next context x={} should start at measured status right edge {expected_left}",
             next_context.2.x * width as f32
         );
+    }
+
+    #[test]
+    fn typing_status_uses_two_column_table_layout() {
+        let app =
+            typing_app("#title Test\n[\u{4eca}/\u{3044}\u{307e}]\n[\u{6b21}/\u{3064}\u{304e}]");
+        let width = 800;
+        let height = 500;
+        let render_list = build_ui(&app, app.fonts(), width, height);
+        let model = app.typing_model().expect("typing model should exist");
+        let metrics = typing::calculate_total_metrics(model);
+        let rows = typing_status_rows(model, model.content.lines.len(), metrics);
+        let layout = status_table_layout(
+            app.fonts(),
+            &rows,
+            width,
+            height,
+            app.display_settings.scale.multiplier(),
+        );
+
+        for row in &rows {
+            let label = render_list
+                .iter()
+                .find_map(|item| match item {
+                    Renderable::Text {
+                        text, shift, align, ..
+                    } if text == row.label => Some((*shift, *align)),
+                    _ => None,
+                })
+                .expect("status label should be rendered");
+            let value = render_list
+                .iter()
+                .find_map(|item| match item {
+                    Renderable::Text {
+                        text, shift, align, ..
+                    } if text == &row.value => Some((*shift, *align)),
+                    _ => None,
+                })
+                .expect("status value should be rendered");
+
+            assert!(
+                (label.0.x * width as f32 - layout.label_right).abs() <= 1.0,
+                "label '{}' should align to the label column right edge",
+                row.label
+            );
+            assert!(matches!(
+                label.1,
+                Align {
+                    horizontal: HorizontalAlign::Right,
+                    vertical: VerticalAlign::Bottom,
+                }
+            ));
+            assert!(
+                (value.0.x * width as f32 - layout.value_left).abs() <= 1.0,
+                "value '{}' should align to the value column left edge",
+                row.value
+            );
+            assert!(matches!(
+                value.1,
+                Align {
+                    horizontal: HorizontalAlign::Left,
+                    vertical: VerticalAlign::Bottom,
+                }
+            ));
+            assert!(
+                (label.0.y - value.0.y).abs() <= f32::EPSILON,
+                "label and value should share a row baseline"
+            );
+        }
     }
 
     #[test]

@@ -24,7 +24,7 @@ impl App {
             state: self.state,
             status_text: self.status_text.as_str(),
             instructions_text: self.instructions_text.as_str(),
-            fps: self.fps,
+            fps: self.displayed_fps,
             tui_display_mode: self.tui_display_mode,
             selected_main_menu_item: self.selected_main_menu_item,
             selected_problem_item: self.selected_problem_item,

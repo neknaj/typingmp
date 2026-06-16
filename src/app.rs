@@ -265,6 +265,8 @@ pub enum FontApplyError {
     InvalidFontData,
 }
 
+const FPS_DISPLAY_UPDATE_INTERVAL_MS: f64 = 250.0;
+
 /// アプリケーション全体で共有される状態を保持する構造体
 pub struct App {
     pub(crate) state: AppState,
@@ -291,6 +293,8 @@ pub struct App {
     pub(crate) available_fonts: Vec<FontEntry>,
     requested_font_load: Option<FontLoadRequest>,
     pub(crate) fps: f64,
+    pub(crate) displayed_fps: f64,
+    fps_display_elapsed_ms: f64,
     pub(crate) source_scroll: usize, // ProblemSource でのスクロール行数
     pub(crate) how_to_use_scroll: usize, // HowToUse でのスクロール行数
     scroll_cache: Option<ScrollCache>,
@@ -341,6 +345,8 @@ impl App {
             available_fonts: Vec::new(),
             requested_font_load: None,
             fps: 0.0,
+            displayed_fps: 0.0,
+            fps_display_elapsed_ms: 0.0,
             source_scroll: 0,
             how_to_use_scroll: 0,
             scroll_cache: None,
@@ -545,6 +551,13 @@ impl App {
             } else {
                 self.fps * 0.9 + new_fps * 0.1
             };
+            self.fps_display_elapsed_ms += delta_time;
+            if self.displayed_fps == 0.0
+                || self.fps_display_elapsed_ms >= FPS_DISPLAY_UPDATE_INTERVAL_MS
+            {
+                self.displayed_fps = self.fps;
+                self.fps_display_elapsed_ms = 0.0;
+            }
         }
 
         if self.state != AppState::Typing {
@@ -1266,6 +1279,41 @@ mod tests {
         );
         assert!(!snapshot.should_quit);
         assert!(!snapshot.should_open_file_dialog);
+    }
+
+    #[test]
+    fn snapshot_fps_is_throttled_for_stable_render_lists() {
+        let mut app = App::new(test_fonts());
+        let fps_text = |app: &App| {
+            crate::ui::build_ui(app, app.fonts(), 800, 500)
+                .into_iter()
+                .find_map(|item| match item {
+                    crate::ui::Renderable::Text { text, .. } if text.starts_with("FPS:") => {
+                        Some(text)
+                    }
+                    _ => None,
+                })
+                .expect("FPS renderable should exist")
+        };
+
+        app.update(800, 500, 16.0);
+        let first_displayed_fps = app.snapshot().fps;
+        let first_fps_text = fps_text(&app);
+        assert!(first_displayed_fps > 0.0);
+
+        app.update(800, 500, 10.0);
+        assert_eq!(app.snapshot().fps, first_displayed_fps);
+        assert_eq!(fps_text(&app), first_fps_text);
+        assert!(app.fps > first_displayed_fps);
+
+        for _ in 0..25 {
+            app.update(800, 500, 10.0);
+        }
+        assert!(
+            app.snapshot().fps > first_displayed_fps,
+            "displayed FPS should update after the throttle interval"
+        );
+        assert_ne!(fps_text(&app), first_fps_text);
     }
 
     #[test]
