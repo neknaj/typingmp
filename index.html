@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <title>Neknaj Typing Multi-Platform wasm edition</title>
+    <meta property="og:title" content="Neknaj Typing Multi-Platform wasm edition">
+    <meta property="og:description" content="クロスプラットフォーム対応のタイピング練習アプリケーションです。">
+    <meta property="og:type" content="website">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <style>
+        html {
+            height: 100%;
+        }
+
+        body {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+            background-color: #101010;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        #canvas-wrapper {
+            flex-grow: 1;
+            flex-shrink: 1;
+            width: 100%;
+            min-height: 0;
+            display: flex;
+            align-items: flex-start;
+            overflow-x: hidden;
+            overflow-y: auto;
+        }
+
+        canvas {
+            display: block;
+            flex: 0 0 auto;
+            width: 100%;
+            height: auto;
+            margin: 0;
+            max-height: none;
+        }
+
+        input {
+            position: absolute;
+            top: -100px;
+            left: -100px;
+            opacity: 0;
+            width: fit-content;
+            height: 100px;
+        }
+
+        #controls-container {
+            display: none;
+            flex-shrink: 0;
+            width: 100%;
+            padding: 10px;
+            box-sizing: border-box;
+            background-color: #1a1a1a;
+            justify-content: space-around;
+            align-items: center;
+            gap: 5px;
+        }
+
+        #controls-container button {
+            flex-grow: 1;
+            padding: 15px 5px;
+            font-size: 1.5em;
+            background-color: #444;
+            color: #eee;
+            border: 1px solid #666;
+            border-radius: 8px;
+            touch-action: manipulation;
+        }
+
+        #key-kb-toggle {
+            flex-grow: 0;
+            flex-shrink: 0;
+            padding: 8px 10px;
+            font-size: 0.8em;
+            background-color: #2a3a4a;
+            border-color: #446;
+            white-space: nowrap;
+        }
+
+        @media (orientation: portrait) {
+            #controls-container {
+                display: flex;
+            }
+        }
+
+        .description {
+            opacity: 0;
+        }
+
+        #link-container {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            font-family: sans-serif;
+            font-size: 12px;
+            color: #aaa;
+        }
+
+        #link-container a {
+            color: #6277a5;
+        }
+
+        #link-container a:hover {
+            color: #fff;
+        }
+
+        #link-container p {
+            margin: 5px 0 0 0;
+            padding: 0;
+        }
+
+        #screen-keyboard {
+            display: none;
+            flex-shrink: 0;
+            width: 100%;
+            background-color: #161620;
+            padding: 4px;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .screen-keyboard-row {
+            display: flex;
+            width: 100%;
+            gap: 3px;
+            margin-bottom: 3px;
+        }
+
+        .screen-keyboard-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .screen-keyboard-toolbar {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 3px;
+        }
+
+        .screen-keyboard-source-toggle {
+            min-width: 72px;
+            height: 28px;
+            border: 1px solid #446;
+            border-radius: 6px;
+            background: #1e1e2c;
+            color: #aaa;
+            font-size: 13px;
+            touch-action: manipulation;
+        }
+
+        .screen-keyboard-source-toggle.source-app {
+            border-color: #44aa66;
+            color: #b8f2cc;
+        }
+
+        .screen-key {
+            flex: 1 1 0;
+            position: relative;
+            height: 52px;
+            background-color: #2e2e3e;
+            border: 1px solid #444455;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: clamp(13px, 3.8vw, 20px);
+            color: #eee;
+            touch-action: none;
+            cursor: pointer;
+            transition: background-color 0.05s, border-color 0.1s;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+            min-width: 0;
+        }
+
+        .screen-key.width-wide {
+            flex-grow: 1.6;
+        }
+
+        .screen-key.width-space {
+            flex-grow: 5;
+        }
+
+        .screen-key.pressing {
+            background-color: #445;
+        }
+
+        .screen-key.keyboard-special,
+        .screen-key.keyboard-modifier {
+            background-color: #1e1e2c;
+            border-color: #333344;
+            color: #aaa;
+            font-size: clamp(11px, 3vw, 16px);
+        }
+
+        .screen-key.keyboard-special.pressing,
+        .screen-key.keyboard-modifier.pressing {
+            background-color: #334;
+        }
+
+        .screen-key.keyboard-enter {
+            background-color: #1e304a;
+            border-color: #2255aa;
+            color: #aac4ff;
+        }
+
+        .screen-key.keyboard-enter.pressing {
+            background-color: #2a4a6a;
+        }
+
+        .screen-key.keyboard-backspace {
+            background-color: #2a1e2e;
+            border-color: #553355;
+            color: #cc99cc;
+        }
+
+        .screen-key.keyboard-spacer {
+            background-color: transparent;
+            border-color: transparent;
+            box-shadow: none;
+            pointer-events: none;
+        }
+
+        .screen-key-preview {
+            position: absolute;
+            font-size: 0.6em;
+            color: #8888aa;
+            pointer-events: none;
+            line-height: 1;
+        }
+
+        .screen-key-preview.top {
+            top: 3px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        .screen-key-preview.right {
+            right: 4px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+
+        .screen-key-preview.bottom {
+            bottom: 3px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        .screen-key-preview.left {
+            left: 4px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+
+        .screen-key-label {
+            font-weight: bold;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            padding: 0 2px;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="canvas-wrapper">
+        <!-- Canvas は Rust コードによってここに追加される -->
+    </div>
+
+    <p class="description">
+        クロスプラットフォーム対応のタイピング練習アプリケーションです。
+    </p>
+
+    <div id="controls-container">
+        <button id="key-up">▲</button>
+        <button id="key-down">▼</button>
+        <button id="key-enter">Enter</button>
+        <button id="key-backspace">BS</button>
+        <button id="key-esc">Esc</button>
+        <button id="key-kb-toggle" title="キーボード切替">⌨</button>
+    </div>
+
+    <div id="screen-keyboard"></div>
+
+    <div id="link-container">
+        <a href="https://github.com/neknaj/typingmp" target="_blank" rel="noopener noreferrer">Source Code on GitHub</a>
+        <p>(Desktop versions also available)</p>
+    </div>
+
+    <script type="module">
+        import init, {
+            trigger_event,
+            take_file_open_request,
+            send_char,
+            is_typing_active,
+            has_wrong_input,
+            accepts_ime_input,
+            screen_keyboard_layout,
+            screen_keyboard_resolve,
+            screen_keyboard_next_layout,
+            screen_keyboard_modified_char
+        } from './rust_multibackend_app.js';
+
+        const LS_KB_KEY = 'typingmp_kb_mode';
+        const LS_LAYOUT_KEY = 'typingmp_screen_keyboard_layout';
+
+        const readStorageItem = (key) => {
+            try {
+                return window.localStorage.getItem(key);
+            } catch (_err) {
+                return null;
+            }
+        };
+
+        const writeStorageItem = (key, value) => {
+            try {
+                window.localStorage.setItem(key, value);
+            } catch (_err) {
+            }
+        };
+
+        let useAppKeyboard = (readStorageItem(LS_KB_KEY) ?? 'app') === 'app';
+        let screenKeyboardLayoutKind = readStorageItem(LS_LAYOUT_KEY) ?? 'kana-flick';
+        let hiddenInput = null;
+        let lastScreenKeyboardText = null;
+        let lastScreenKeyboardAccepted = false;
+        let lastAcceptImeInput = null;
+
+        const resetScreenKeyboardState = () => {
+            lastScreenKeyboardText = null;
+            lastScreenKeyboardAccepted = false;
+        };
+
+        const recordScreenKeyboardText = (text) => {
+            const chars = [...text];
+            if (chars.length === 1) {
+                lastScreenKeyboardText = chars[0];
+                lastScreenKeyboardAccepted = !has_wrong_input();
+            } else {
+                resetScreenKeyboardState();
+            }
+        };
+
+        const sendScreenKeyboardText = (text) => {
+            send_char(text);
+            recordScreenKeyboardText(text);
+        };
+
+        const triggerAppCommand = (command) => {
+            resetScreenKeyboardState();
+            trigger_event(command);
+            if (command === 'Enter' && take_file_open_request()) {
+                document.getElementById('problem-file-input').click();
+            }
+        };
+
+        const updateKeyboardSourceButtons = () => {
+            const allowDeviceKeyboard = accepts_ime_input();
+            if (!allowDeviceKeyboard) {
+                useAppKeyboard = true;
+            }
+
+            if (hiddenInput) {
+                const isTouch = navigator.maxTouchPoints > 0;
+                if (!allowDeviceKeyboard || (useAppKeyboard && isTouch)) {
+                    hiddenInput.setAttribute('inputmode', 'none');
+                    hiddenInput.blur();
+                } else {
+                    hiddenInput.setAttribute('inputmode', 'text');
+                }
+            }
+
+            const btnCtrl = document.getElementById('key-kb-toggle');
+            if (btnCtrl) {
+                btnCtrl.textContent = useAppKeyboard ? '⌨アプリ' : '⌨OS';
+                btnCtrl.style.borderColor = useAppKeyboard ? '#44aa66' : '#446';
+                btnCtrl.disabled = !allowDeviceKeyboard;
+                btnCtrl.style.opacity = allowDeviceKeyboard ? '1' : '0.55';
+            }
+
+            const btnScreen = document.getElementById('screen-keyboard-source-toggle');
+            if (btnScreen) {
+                btnScreen.textContent = useAppKeyboard ? '⌨OS' : '⌨アプリ';
+                btnScreen.classList.toggle('source-app', useAppKeyboard);
+                btnScreen.disabled = !allowDeviceKeyboard;
+                btnScreen.style.opacity = allowDeviceKeyboard ? '1' : '0.55';
+            }
+
+            writeStorageItem(LS_KB_KEY, useAppKeyboard ? 'app' : 'device');
+        };
+
+        const toggleKeyboardSource = () => {
+            if (!accepts_ime_input()) {
+                useAppKeyboard = true;
+                updateKeyboardSourceButtons();
+                return;
+            }
+            useAppKeyboard = !useAppKeyboard;
+            updateKeyboardSourceButtons();
+        };
+
+        const syncKeyboardInputPolicy = () => {
+            const acceptImeInput = accepts_ime_input();
+            if (acceptImeInput !== lastAcceptImeInput) {
+                lastAcceptImeInput = acceptImeInput;
+                updateKeyboardSourceButtons();
+            }
+        };
+
+        const createPreview = (direction, value) => {
+            const span = document.createElement('span');
+            span.className = `screen-key-preview ${direction}`;
+            span.textContent = value;
+            return span;
+        };
+
+        const handleScreenKeyboardOutput = (output) => {
+            if (!output || output.kind === 'none') {
+                return;
+            }
+
+            switch (output.kind) {
+                case 'text':
+                    sendScreenKeyboardText(output.value);
+                    break;
+                case 'command':
+                    triggerAppCommand(output.value);
+                    break;
+                case 'transform-last-text': {
+                    if (!lastScreenKeyboardAccepted && lastScreenKeyboardText !== null) {
+                        const nextText = screen_keyboard_modified_char(lastScreenKeyboardText);
+                        if (nextText !== '') {
+                            trigger_event('Backspace');
+                            sendScreenKeyboardText(nextText);
+                        }
+                    }
+                    break;
+                }
+                case 'switch-layout':
+                    resetScreenKeyboardState();
+                    screenKeyboardLayoutKind = screen_keyboard_next_layout(screenKeyboardLayoutKind);
+                    writeStorageItem(LS_LAYOUT_KEY, screenKeyboardLayoutKind);
+                    renderScreenKeyboard();
+                    break;
+                case 'switch-input-source':
+                    resetScreenKeyboardState();
+                    toggleKeyboardSource();
+                    break;
+                default:
+                    resetScreenKeyboardState();
+                    break;
+            }
+        };
+
+        const attachScreenKeyPointer = (element, rowIndex, keyIndex) => {
+            let startX = 0;
+            let startY = 0;
+
+            element.addEventListener('pointerdown', (event) => {
+                event.preventDefault();
+                startX = event.clientX;
+                startY = event.clientY;
+                element.classList.add('pressing');
+                try {
+                    element.setPointerCapture(event.pointerId);
+                } catch (_err) {
+                }
+            });
+
+            element.addEventListener('pointerup', (event) => {
+                event.preventDefault();
+                element.classList.remove('pressing');
+                const dx = event.clientX - startX;
+                const dy = event.clientY - startY;
+                handleScreenKeyboardOutput(screen_keyboard_resolve(
+                    screenKeyboardLayoutKind,
+                    rowIndex,
+                    keyIndex,
+                    dx,
+                    dy
+                ));
+            });
+
+            element.addEventListener('pointercancel', () => {
+                element.classList.remove('pressing');
+            });
+        };
+
+        const renderScreenKeyboard = () => {
+            const keyboard = document.getElementById('screen-keyboard');
+            const layout = screen_keyboard_layout(screenKeyboardLayoutKind);
+            screenKeyboardLayoutKind = layout.kind;
+            keyboard.replaceChildren();
+
+            layout.rows.forEach((row, rowIndex) => {
+                const rowElement = document.createElement('div');
+                rowElement.className = 'screen-keyboard-row';
+
+                row.forEach((key, keyIndex) => {
+                    const keyElement = document.createElement('div');
+                    keyElement.classList.add('screen-key', `keyboard-${key.class}`, `width-${key.width}`);
+                    keyElement.dataset.row = String(rowIndex);
+                    keyElement.dataset.key = String(keyIndex);
+
+                    if (key.up) {
+                        keyElement.appendChild(createPreview('top', key.up));
+                    }
+                    if (key.right) {
+                        keyElement.appendChild(createPreview('right', key.right));
+                    }
+                    if (key.down) {
+                        keyElement.appendChild(createPreview('bottom', key.down));
+                    }
+                    if (key.left) {
+                        keyElement.appendChild(createPreview('left', key.left));
+                    }
+
+                    const label = document.createElement('span');
+                    label.className = 'screen-key-label';
+                    label.textContent = key.label;
+                    keyElement.appendChild(label);
+
+                    if (key.interactive) {
+                        attachScreenKeyPointer(keyElement, rowIndex, keyIndex);
+                    }
+
+                    rowElement.appendChild(keyElement);
+                });
+
+                keyboard.appendChild(rowElement);
+            });
+
+            const toolbar = document.createElement('div');
+            toolbar.className = 'screen-keyboard-toolbar';
+            const sourceButton = document.createElement('button');
+            sourceButton.id = 'screen-keyboard-source-toggle';
+            sourceButton.className = 'screen-keyboard-source-toggle';
+            sourceButton.addEventListener('pointerdown', (event) => {
+                event.preventDefault();
+                resetScreenKeyboardState();
+                toggleKeyboardSource();
+            });
+            toolbar.appendChild(sourceButton);
+            keyboard.appendChild(toolbar);
+
+            updateKeyboardSourceButtons();
+        };
+
+        async function run() {
+            await init();
+            renderScreenKeyboard();
+
+            hiddenInput = document.querySelector('input[type="text"]');
+            if (hiddenInput) {
+                hiddenInput.addEventListener('focus', () => {
+                    if (!accepts_ime_input() || (useAppKeyboard && navigator.maxTouchPoints > 0)) {
+                        setTimeout(() => hiddenInput && hiddenInput.blur(), 0);
+                    }
+                });
+                hiddenInput.addEventListener('input', () => {
+                    resetScreenKeyboardState();
+                }, true);
+            }
+            document.addEventListener('keydown', (event) => {
+                if (!event.target?.closest?.('#screen-keyboard')) {
+                    resetScreenKeyboardState();
+                }
+            }, true);
+            updateKeyboardSourceButtons();
+
+            const adjustHeight = () => {
+                if (window.visualViewport) {
+                    document.body.style.height = `${window.visualViewport.height}px`;
+                }
+            };
+            if (window.visualViewport) {
+                window.visualViewport.addEventListener('resize', adjustHeight);
+                adjustHeight();
+            }
+
+            document.getElementById('key-up').addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                triggerAppCommand('Up');
+            });
+            document.getElementById('key-down').addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                triggerAppCommand('Down');
+            });
+            document.getElementById('key-enter').addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                triggerAppCommand('Enter');
+            });
+            document.getElementById('key-backspace').addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                triggerAppCommand('Backspace');
+            });
+            document.getElementById('key-esc').addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                triggerAppCommand('Escape');
+            });
+            document.getElementById('key-kb-toggle').addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                toggleKeyboardSource();
+            });
+
+            const screenKeyboard = document.getElementById('screen-keyboard');
+            const controlsContainer = document.getElementById('controls-container');
+            const isTouchDevice = navigator.maxTouchPoints > 0;
+
+            const updateKeyboardVisibility = () => {
+                syncKeyboardInputPolicy();
+                if (isTouchDevice) {
+                    const typing = is_typing_active();
+                    const showScreenKeyboard = typing && useAppKeyboard;
+                    screenKeyboard.style.display = showScreenKeyboard ? 'block' : 'none';
+                    controlsContainer.style.display = showScreenKeyboard ? 'none' : '';
+                }
+                requestAnimationFrame(updateKeyboardVisibility);
+            };
+            requestAnimationFrame(updateKeyboardVisibility);
+        }
+
+        run();
+    </script>
+</body>
+
+</html>
