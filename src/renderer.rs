@@ -1808,18 +1808,19 @@ fn draw_typing_lower(
                 for element in elements {
                     let (text, color, element_script) =
                         active_lower_text_and_color(element, *script);
-                    let (font, size) = match element {
-                        ActiveLowerElement::UnconfirmedInput { .. } => (
+                    let (font, size) = if ui::active_lower_element_uses_unconfirmed_font(element) {
+                        (
                             fonts.get_unconfirmed_for_script(element_script),
                             fonts.scaled_size_for_unconfirmed_script(
                                 element_script,
                                 pixel_font_size,
                             ),
-                        ),
-                        _ => (
+                        )
+                    } else {
+                        (
                             fonts.get_for_script(element_script),
                             fonts.scaled_size_for_script(element_script, pixel_font_size),
-                        ),
+                        )
                     };
                     let text_metrics = cache.measure_text(font, &text, size);
                     let text_width = text_metrics.width as i32;
@@ -1881,12 +1882,21 @@ fn lower_typing_total_height(
                             character, script, ..
                         }
                         | ActiveLowerElement::LastIncorrectInput { character, script } => {
-                            let size = fonts.scaled_size_for_script(*script, pixel_font_size);
+                            let use_unconfirmed =
+                                ui::active_lower_element_uses_unconfirmed_font(element);
+                            let size = if use_unconfirmed {
+                                fonts.scaled_size_for_unconfirmed_script(*script, pixel_font_size)
+                            } else {
+                                fonts.scaled_size_for_script(*script, pixel_font_size)
+                            };
                             let mut text = String::new();
                             text.push(*character);
-                            let height = cache
-                                .measure_text(fonts.get_for_script(*script), &text, size)
-                                .height as f32;
+                            let font = if use_unconfirmed {
+                                fonts.get_unconfirmed_for_script(*script)
+                            } else {
+                                fonts.get_for_script(*script)
+                            };
+                            let height = cache.measure_text(font, &text, size).height as f32;
                             base_height = base_height.max(height);
                         }
                         ActiveLowerElement::Cursor => {
@@ -2485,6 +2495,35 @@ mod tests {
         ]
     }
 
+    fn lower_active_typed_render_list(script: FontScript, character: char) -> Vec<Renderable> {
+        vec![
+            Renderable::Background {
+                gradient: crate::ui::Gradient {
+                    start_color: 0xFF_000000,
+                    end_color: 0xFF_000000,
+                },
+            },
+            Renderable::TypingLower {
+                segments: vec![LowerTypingSegment::Active {
+                    elements: vec![ActiveLowerElement::Typed {
+                        character,
+                        is_correct: true,
+                        script,
+                    }],
+                    script,
+                }],
+                anchor: Anchor::Center,
+                shift: Shift { x: 0.0, y: 0.0 },
+                align: Align {
+                    horizontal: HorizontalAlign::Center,
+                    vertical: VerticalAlign::Center,
+                },
+                font_size: FontSize::WindowHeight(0.28),
+                line_alignment: crate::ui::TypingLineAlignment::full_line(0),
+            },
+        ]
+    }
+
     fn upper_ruby_render_list(script: FontScript) -> Vec<Renderable> {
         vec![
             Renderable::Background {
@@ -2608,6 +2647,71 @@ mod tests {
                 FontTarget::Unconfirmed(script),
                 &render_list,
                 "changing the unconfirmed font must affect GUI lower unconfirmed rendering",
+            );
+        }
+    }
+
+    #[test]
+    fn lower_unconfirmed_rendering_ignores_base_font_slots() {
+        for script in [
+            FontScript::Japanese,
+            FontScript::ChineseSimplified,
+            FontScript::TraditionalChinese,
+        ] {
+            let render_list = lower_unconfirmed_render_list(script);
+            let mut fonts = test_fonts();
+            fonts.set_for_target(
+                FontTarget::Unconfirmed(script),
+                "Kalam-Regular".to_string(),
+                kalam_font(),
+            );
+            let base_pixels = render_test_pixels(&fonts, &render_list);
+
+            fonts.set_for_target(
+                FontTarget::Script(script),
+                "Kalam-Regular".to_string(),
+                kalam_font(),
+            );
+            let changed_base_pixels = render_test_pixels(&fonts, &render_list);
+
+            assert_eq!(
+                changed_base_pixels, base_pixels,
+                "changing the base font must not affect lower unconfirmed rendering for {script:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn lower_active_chinese_typed_pinyin_uses_unconfirmed_font_slots() {
+        for script in [
+            FontScript::ChineseSimplified,
+            FontScript::TraditionalChinese,
+        ] {
+            let render_list = lower_active_typed_render_list(script, 'y');
+            assert_render_changes_when_target_font_changes(
+                FontTarget::Unconfirmed(script),
+                &render_list,
+                "changing the Chinese unconfirmed font must affect active typed pinyin rendering",
+            );
+
+            let mut fonts = test_fonts();
+            fonts.set_for_target(
+                FontTarget::Unconfirmed(script),
+                "Kalam-Regular".to_string(),
+                kalam_font(),
+            );
+            let base_pixels = render_test_pixels(&fonts, &render_list);
+            fonts.set_for_target(
+                FontTarget::Script(script),
+                "Kalam-Regular".to_string(),
+                kalam_font(),
+            );
+            let changed_base_pixels = render_test_pixels(&fonts, &render_list);
+
+            assert_eq!(
+                changed_base_pixels,
+                base_pixels,
+                "changing the Chinese base font must not affect active typed pinyin rendering for {script:?}"
             );
         }
     }

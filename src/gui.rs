@@ -1,17 +1,15 @@
 #[cfg(not(feature = "uefi"))]
-use crate::app::{App, AppEvent, FontBundle, Fonts};
+use crate::app::{App, AppEvent};
 #[cfg(not(feature = "uefi"))]
-use crate::backend::BackendError;
+use crate::font_loading::load_desktop_fonts;
 #[cfg(all(not(feature = "uefi"), feature = "gui-file"))]
 use crate::io::DesktopProblemSourceProvider;
 #[cfg(not(feature = "uefi"))]
-use crate::io::{AssetProvider, BundledFont, DesktopAssetProvider};
+use crate::io::{AssetProvider, DesktopAssetProvider};
 #[cfg(not(feature = "uefi"))]
 use crate::renderer::{ArgbSurface, RenderCache};
 #[cfg(not(feature = "uefi"))]
 use crate::ui;
-#[cfg(not(feature = "uefi"))]
-use ab_glyph::FontVec;
 #[cfg(not(feature = "uefi"))]
 use pixels::{Pixels, SurfaceTexture};
 #[cfg(not(feature = "uefi"))]
@@ -38,53 +36,7 @@ const FRAME_DURATION: Duration = Duration::from_millis(16);
 #[cfg(not(feature = "uefi"))]
 pub fn run() -> Result<(), Box<dyn Error>> {
     let asset_provider = DesktopAssetProvider::discover();
-    let ui_font =
-        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::NotoSerifJpRegular)?)
-            .map_err(|_| BackendError::asset("failed to parse Noto Serif JP font"))?;
-    let japanese_font =
-        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::YujiSyukuRegular)?)
-            .map_err(|_| BackendError::asset("failed to parse Yuji Syuku font"))?;
-    let japanese_ruby_font =
-        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::YujiSyukuRegular)?)
-            .map_err(|_| BackendError::asset("failed to parse Yuji Syuku font"))?;
-    let japanese_unconfirmed_font =
-        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::YujiSyukuRegular)?)
-            .map_err(|_| BackendError::asset("failed to parse Yuji Syuku font"))?;
-    let simplified_chinese_font =
-        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::LongCangRegular)?)
-            .map_err(|_| BackendError::asset("failed to parse Long Cang font"))?;
-    let simplified_chinese_ruby_font =
-        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::AlegreyaRegular)?)
-            .map_err(|_| BackendError::asset("failed to parse Alegreya font"))?;
-    let simplified_chinese_unconfirmed_font =
-        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::AlegreyaRegular)?)
-            .map_err(|_| BackendError::asset("failed to parse Alegreya font"))?;
-    let traditional_chinese_font =
-        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::LongCangRegular)?)
-            .map_err(|_| BackendError::asset("failed to parse Long Cang font"))?;
-    let traditional_chinese_ruby_font =
-        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::AlegreyaRegular)?)
-            .map_err(|_| BackendError::asset("failed to parse Alegreya font"))?;
-    let traditional_chinese_unconfirmed_font =
-        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::AlegreyaRegular)?)
-            .map_err(|_| BackendError::asset("failed to parse Alegreya font"))?;
-    let english_font =
-        FontVec::try_from_vec(asset_provider.load_bundled_font(BundledFont::KalamRegular)?)
-            .map_err(|_| BackendError::asset("failed to parse Kalam font"))?;
-
-    let fonts = Fonts::new(FontBundle {
-        ui: ui_font,
-        japanese: japanese_font,
-        japanese_ruby: japanese_ruby_font,
-        japanese_unconfirmed: japanese_unconfirmed_font,
-        chinese_simplified: simplified_chinese_font,
-        chinese_simplified_ruby: simplified_chinese_ruby_font,
-        chinese_simplified_unconfirmed: simplified_chinese_unconfirmed_font,
-        traditional_chinese: traditional_chinese_font,
-        traditional_chinese_ruby: traditional_chinese_ruby_font,
-        traditional_chinese_unconfirmed: traditional_chinese_unconfirmed_font,
-        english: english_font,
-    });
+    let fonts = load_desktop_fonts(&asset_provider)?;
 
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()

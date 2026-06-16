@@ -14,12 +14,14 @@ default = []
 gui = [
     "dep:winit",
     "dep:pixels",
+    "desktop-font-fetch",
 ]
 gui-file = [
     "gui",
     "dep:rfd",              # native file dialog
 ]
-tui = ["dep:crossterm"]
+tui = ["dep:crossterm", "desktop-font-fetch"]
+desktop-font-fetch = ["dep:directories", "dep:ureq"]
 wasi-tui = []
 wasm = [
     "dep:js-sys",
@@ -30,7 +32,7 @@ wasm = [
     "getrandom/js"
 ]
 uefi = ["dep:uefi", "dep:log", "dep:core_maths"]
-mobile = ["dep:slint"]
+mobile = ["dep:slint", "desktop-font-fetch"]
 
 [dependencies]
 ab_glyph = { version = "0.2.31", default-features = false, features = ["libm"] }
@@ -42,6 +44,8 @@ spin = { version = "0.9.8", default-features = false, features = ["once"] }
 rfd = { version = "0.15", optional = true, default-features = false, features = ["xdg-portal", "async-std"] }
 crossterm = { version = "0.29.0", optional = true }
 core_maths = { version = "0.1.1", optional = true }
+directories = { version = "5", optional = true }
+ureq = { version = "2", optional = true }
 
 
 # GUI backend

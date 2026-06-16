@@ -20,6 +20,8 @@ pub mod app;
 pub mod backend;
 pub mod display;
 pub mod font;
+#[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
+pub mod font_loading;
 pub mod io;
 pub mod layout_data;
 pub mod model;

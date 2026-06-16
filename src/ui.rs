@@ -131,6 +131,15 @@ pub enum ActiveLowerElement {
     },
 }
 
+pub fn active_lower_element_uses_unconfirmed_font(element: &ActiveLowerElement) -> bool {
+    match element {
+        ActiveLowerElement::UnconfirmedInput { .. } => true,
+        ActiveLowerElement::Typed { script, .. } => script.is_chinese(),
+        ActiveLowerElement::LastIncorrectInput { script, .. } => script.is_cjk(),
+        ActiveLowerElement::Cursor => false,
+    }
+}
+
 pub enum LowerTypingSegment {
     Completed {
         base_text: String,
@@ -273,7 +282,8 @@ const TYPING_CORE_MIN_GAP_RATIO: f32 = 0.012;
 const TYPING_FLOAT_TOP_MARGIN_RATIO: f32 = 0.035;
 const TYPING_FLOAT_MIN_GAP_RATIO: f32 = 0.012;
 const TYPING_PREVIOUS_CONTEXT_ROUNDING_GUARD_PX: f32 = 12.0;
-const TYPING_NEXT_CONTEXT_BOTTOM_LIMIT_RATIO: f32 = 0.9;
+const TYPING_STATUS_LEFT_MARGIN_RATIO: f32 = 0.02;
+const TYPING_STATUS_NEXT_CONTEXT_GAP_RATIO: f32 = 0.035;
 const TYPING_STATUS_BOTTOM_MARGIN_RATIO: f32 = 0.02;
 const TYPING_STATUS_PROGRESS_BAR_HEIGHT_RATIO: f32 = 0.02;
 const TYPING_STATUS_ITEM_HEIGHT_RATIO: f32 = 0.04;
@@ -304,7 +314,6 @@ struct TypingCoreVerticalLayout {
     upper_shift_y: f32,
     lower_shift_y: f32,
     top: f32,
-    bottom: f32,
 }
 
 fn typing_core_vertical_layout(
@@ -331,7 +340,6 @@ fn typing_core_vertical_layout(
         upper_shift_y: (upper_anchor_y - viewport_height * 0.5) / viewport_height,
         lower_shift_y: (lower_anchor_y - viewport_height * 0.5) / viewport_height,
         top,
-        bottom: lower_top + lower_height,
     }
 }
 
@@ -423,8 +431,17 @@ fn lower_typing_vertical_metrics(
                         character, script, ..
                     }
                     | ActiveLowerElement::LastIncorrectInput { character, script } => {
-                        let size = fonts.scaled_size_for_script(*script, pixel_font_size);
-                        let font = fonts.get_for_script(*script);
+                        let use_unconfirmed = active_lower_element_uses_unconfirmed_font(element);
+                        let size = if use_unconfirmed {
+                            fonts.scaled_size_for_unconfirmed_script(*script, pixel_font_size)
+                        } else {
+                            fonts.scaled_size_for_script(*script, pixel_font_size)
+                        };
+                        let font = if use_unconfirmed {
+                            fonts.get_unconfirmed_for_script(*script)
+                        } else {
+                            fonts.get_for_script(*script)
+                        };
                         let mut text = String::new();
                         text.push(*character);
                         let height = gui_renderer::measure_text(font, &text, size).1 as f32;
@@ -463,16 +480,13 @@ fn typing_status_region_top(height: usize, status_item_count: usize, status_row_
     height.max(1) as f32 * (1.0 - reserved_ratio).max(0.0)
 }
 
-fn typing_next_context_bottom_limit(
+fn typing_status_text_block_top(
     height: usize,
     status_item_count: usize,
     status_row_step: f32,
 ) -> f32 {
-    (height.max(1) as f32 * TYPING_NEXT_CONTEXT_BOTTOM_LIMIT_RATIO).min(typing_status_region_top(
-        height,
-        status_item_count,
-        status_row_step,
-    ))
+    typing_status_region_top(height, status_item_count, status_row_step)
+        + height.max(1) as f32 * TYPING_FLOAT_MIN_GAP_RATIO
 }
 
 fn ui_text_pixel_font_size(
@@ -496,6 +510,31 @@ fn measured_ui_row_step(
     let pixel_font_size = ui_text_pixel_font_size(fonts, font_size, width, height, display_scale);
     let measured_height = gui_renderer::measure_text(fonts.ui(), "Hg", pixel_font_size).1 as f32;
     ((measured_height + 6.0) / height.max(1) as f32).max(minimum_ratio)
+}
+
+fn status_float_right_edge(
+    fonts: &Fonts,
+    status_items: &[String],
+    width: usize,
+    height: usize,
+    display_scale: f32,
+) -> f32 {
+    let pixel_font_size = ui_text_pixel_font_size(
+        fonts,
+        FontSize::WindowHeight(TYPING_STATUS_ITEM_HEIGHT_RATIO),
+        width,
+        height,
+        display_scale,
+    );
+    let max_text_width = status_items
+        .iter()
+        .map(|item| gui_renderer::measure_text(fonts.ui(), item, pixel_font_size).0)
+        .max()
+        .unwrap_or(0) as f32;
+
+    width.max(1) as f32 * TYPING_STATUS_LEFT_MARGIN_RATIO
+        + max_text_width
+        + width.max(1) as f32 * TYPING_STATUS_NEXT_CONTEXT_GAP_RATIO
 }
 
 fn top_anchor_shift_y_for_box_top(
@@ -2491,19 +2530,18 @@ fn build_typing_ui(
                 UpperRubyDisplay::Presentation,
             );
             let metrics = upper_typing_vertical_metrics(&segments, fonts, context_pixel_font_size);
-            let top = core_layout.bottom + float_gap;
-            let bottom_limit =
-                typing_next_context_bottom_limit(height, status_items.len(), status_row_step);
-            if top + metrics.total_height() <= bottom_limit {
+            let left = status_float_right_edge(fonts, &status_items, width, height, display_scale);
+            if left < width.max(1) as f32 {
+                let top = typing_status_text_block_top(height, status_items.len(), status_row_step);
                 render_list.push(Renderable::TypingUpper {
                     segments,
-                    anchor: Anchor::Center,
+                    anchor: Anchor::TopLeft,
                     shift: Shift {
-                        x: 0.0,
-                        y: center_anchor_top_shift_y_for_box_top(top, metrics, height),
+                        x: left / width.max(1) as f32,
+                        y: top_anchor_shift_y_for_box_top(top, metrics, height),
                     },
                     align: Align {
-                        horizontal: HorizontalAlign::Center,
+                        horizontal: HorizontalAlign::Left,
                         vertical: VerticalAlign::Top,
                     },
                     font_size: context_font_size,
@@ -2521,7 +2559,7 @@ fn build_typing_ui(
                 text: item.clone(),
                 anchor: Anchor::BottomLeft,
                 shift: Shift {
-                    x: 0.02,
+                    x: TYPING_STATUS_LEFT_MARGIN_RATIO,
                     y: -TYPING_STATUS_BOTTOM_MARGIN_RATIO
                         - TYPING_STATUS_PROGRESS_BAR_HEIGHT_RATIO
                         - ((status_items.len() - 1 - i) as f32 * status_row_step),
@@ -2910,16 +2948,13 @@ mod tests {
         render_list
             .iter()
             .filter_map(|item| match item {
-                Renderable::TypingUpper {
-                    segments,
-                    anchor: Anchor::Center,
-                    align:
-                        Align {
-                            horizontal: HorizontalAlign::Center,
-                            ..
-                        },
-                    ..
-                } => Some(segments.as_slice()),
+                Renderable::TypingUpper { segments, .. }
+                    if segments
+                        .iter()
+                        .all(|segment| segment.state == UpperSegmentState::Muted) =>
+                {
+                    Some(segments.as_slice())
+                }
                 _ => None,
             })
             .collect()
@@ -3079,6 +3114,23 @@ mod tests {
                     "next_context",
                 ),
                 Renderable::TypingUpper {
+                    anchor: Anchor::TopLeft,
+                    segments,
+                    ..
+                } if segments
+                    .iter()
+                    .all(|segment| segment.state == UpperSegmentState::Muted) =>
+                {
+                    upper_renderable_vertical_box(
+                        item,
+                        fonts,
+                        width,
+                        height,
+                        display_scale,
+                        "next_context",
+                    )
+                }
+                Renderable::TypingUpper {
                     anchor: Anchor::Center,
                     align:
                         Align {
@@ -3122,7 +3174,10 @@ mod tests {
     }
 
     fn assert_no_vertical_text_collisions(boxes: &[VerticalTextBox], min_gap: f32) {
-        let mut sorted: Vec<&VerticalTextBox> = boxes.iter().collect();
+        let mut sorted: Vec<&VerticalTextBox> = boxes
+            .iter()
+            .filter(|box_| box_.name != "next_context")
+            .collect();
         sorted.sort_by(|a, b| a.top.total_cmp(&b.top));
 
         for pair in sorted.windows(2) {
@@ -3294,6 +3349,32 @@ mod tests {
                 assert_eq!(*script, FontScript::ChineseSimplified);
             }
             _ => panic!("Chinese unconfirmed feedback should be a tone-marked Chinese run"),
+        }
+    }
+
+    #[test]
+    fn active_chinese_pinyin_typed_feedback_uses_unconfirmed_font_role() {
+        let mut app = typing_app("#title Test\n[\u{6709}/you3]");
+        app.on_event(AppEvent::Char {
+            c: 'y',
+            timestamp: 1.0,
+        });
+
+        let render_list = build_ui(&app, app.fonts(), 800, 500);
+        let (_, lower_segments) = typing_rows(&render_list);
+        let LowerTypingSegment::Active { elements, .. } = &lower_segments[0] else {
+            panic!("lower row should contain the active Chinese pinyin segment");
+        };
+
+        match elements.as_slice() {
+            [ActiveLowerElement::Typed {
+                character: 'y',
+                script: FontScript::ChineseSimplified,
+                ..
+            }, ActiveLowerElement::Cursor] => {
+                assert!(active_lower_element_uses_unconfirmed_font(&elements[0]));
+            }
+            _ => panic!("typed Chinese pinyin feedback should remain visible before the cursor"),
         }
     }
 
@@ -3595,15 +3676,66 @@ mod tests {
     }
 
     #[test]
-    fn next_context_bottom_limit_reserves_status_region() {
+    fn next_context_is_left_aligned_next_to_status_float() {
+        let app =
+            typing_app("#title Test\n[\u{4eca}/\u{3044}\u{307e}]\n[\u{6b21}/\u{3064}\u{304e}]");
+        let width = 800;
         let height = 500;
-        let status_count = 5;
-        let status_row_step = TYPING_STATUS_ITEM_HEIGHT_RATIO;
-        let status_top = typing_status_region_top(height, status_count, status_row_step);
-        let next_limit = typing_next_context_bottom_limit(height, status_count, status_row_step);
+        let display_scale = app.display_settings.scale.multiplier();
+        let render_list = build_ui(&app, app.fonts(), width, height);
+        let model = app.typing_model().expect("typing model should exist");
+        let metrics = typing::calculate_total_metrics(model);
+        let time = metrics.total_time / 1000.0;
+        let status_items = [
+            format!(
+                "Progress: {} / {}",
+                model.status.line.get() + 1,
+                model.content.lines.len()
+            ),
+            format!("Speed: {:.2} KPS", metrics.speed),
+            format!("Accuracy: {:.1}%", metrics.accuracy * 100.0),
+            format!("Misses: {}", metrics.miss_count),
+            format!("Time: {:02.0}:{:05.2}", (time / 60.0).floor(), time % 60.0),
+        ];
+        let expected_left =
+            status_float_right_edge(app.fonts(), &status_items, width, height, display_scale);
 
-        assert_eq!(next_limit, status_top);
-        assert!(next_limit < height as f32 * TYPING_NEXT_CONTEXT_BOTTOM_LIMIT_RATIO);
+        let next_context = render_list
+            .iter()
+            .find_map(|item| match item {
+                Renderable::TypingUpper {
+                    segments,
+                    anchor,
+                    shift,
+                    align,
+                    ..
+                } if segments
+                    .iter()
+                    .any(|segment| segment.base_text == "\u{6b21}") =>
+                {
+                    Some((segments.as_slice(), *anchor, *shift, *align))
+                }
+                _ => None,
+            })
+            .expect("next context line should be rendered next to the status float");
+
+        assert!(next_context
+            .0
+            .iter()
+            .all(|segment| segment.state == UpperSegmentState::Muted));
+        assert!(matches!(next_context.1, Anchor::TopLeft));
+        assert!(matches!(
+            next_context.3,
+            Align {
+                horizontal: HorizontalAlign::Left,
+                vertical: VerticalAlign::Top,
+            }
+        ));
+        assert!(
+            ((next_context.2.x * width as f32) - expected_left).abs() <= 1.0,
+            "next context x={} should start at measured status right edge {expected_left}",
+            next_context.2.x * width as f32
+        );
     }
 
     #[test]

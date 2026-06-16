@@ -1,7 +1,7 @@
 use crate::app::{App, AppEvent, FontBundle, Fonts};
 use crate::backend::BackendError;
 use crate::display::DisplayViewport;
-use crate::io::{bundled_font_data, bundled_font_entries};
+use crate::io::{bundled_font_data, bundled_font_entries, embedded_alegreya_font_bytes};
 use crate::model::Segment;
 use crate::terminal_width;
 use crate::ui::{self, ActiveLowerElement, Align, Anchor, LowerTypingSegment, Renderable, Shift};
@@ -252,9 +252,8 @@ impl Drop for AnsiTerminalGuard {
 }
 
 fn bundled_fonts() -> Result<Fonts, BackendError> {
-    let ui_font =
-        FontVec::try_from_vec(include_bytes!("../fonts/NotoSerifJP-Regular.ttf").to_vec())
-            .map_err(|_| BackendError::asset("failed to parse Noto Serif JP font"))?;
+    let ui_font = FontVec::try_from_vec(embedded_alegreya_font_bytes().to_vec())
+        .map_err(|_| BackendError::asset("failed to parse Alegreya font"))?;
     let japanese_font =
         FontVec::try_from_vec(include_bytes!("../fonts/YujiSyuku-Regular.ttf").to_vec())
             .map_err(|_| BackendError::asset("failed to parse Yuji Syuku font"))?;
@@ -268,19 +267,19 @@ fn bundled_fonts() -> Result<Fonts, BackendError> {
         FontVec::try_from_vec(include_bytes!("../fonts/LongCang-Regular.ttf").to_vec())
             .map_err(|_| BackendError::asset("failed to parse Long Cang font"))?;
     let simplified_chinese_ruby_font =
-        FontVec::try_from_vec(include_bytes!("../fonts/Alegreya-VariableFont_wght.ttf").to_vec())
+        FontVec::try_from_vec(embedded_alegreya_font_bytes().to_vec())
             .map_err(|_| BackendError::asset("failed to parse Alegreya font"))?;
     let simplified_chinese_unconfirmed_font =
-        FontVec::try_from_vec(include_bytes!("../fonts/Alegreya-VariableFont_wght.ttf").to_vec())
+        FontVec::try_from_vec(embedded_alegreya_font_bytes().to_vec())
             .map_err(|_| BackendError::asset("failed to parse Alegreya font"))?;
     let traditional_chinese_font =
         FontVec::try_from_vec(include_bytes!("../fonts/LongCang-Regular.ttf").to_vec())
             .map_err(|_| BackendError::asset("failed to parse Long Cang font"))?;
     let traditional_chinese_ruby_font =
-        FontVec::try_from_vec(include_bytes!("../fonts/Alegreya-VariableFont_wght.ttf").to_vec())
+        FontVec::try_from_vec(embedded_alegreya_font_bytes().to_vec())
             .map_err(|_| BackendError::asset("failed to parse Alegreya font"))?;
     let traditional_chinese_unconfirmed_font =
-        FontVec::try_from_vec(include_bytes!("../fonts/Alegreya-VariableFont_wght.ttf").to_vec())
+        FontVec::try_from_vec(embedded_alegreya_font_bytes().to_vec())
             .map_err(|_| BackendError::asset("failed to parse Alegreya font"))?;
     let english_font = FontVec::try_from_vec(include_bytes!("../fonts/Kalam-Regular.ttf").to_vec())
         .map_err(|_| BackendError::asset("failed to parse Kalam font"))?;

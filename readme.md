@@ -27,7 +27,7 @@ It serves as both a functional typing tutor for Japanese Romaji input and a tech
 
 -   **Configurable WASM IME Handling**: The web version defaults to direct `keydown` typing for low-latency input, and can optionally enable IME input from Settings when an OS IME or screen keyboard is needed.
 
--   **Script-Aware Font Selection**: Users can choose UI, Japanese, Simplified Chinese, Traditional Chinese, English, Japanese/Chinese Ruby, and Japanese/Chinese unconfirmed-input fonts and scales independently from the bundled `fonts/` assets. Defaults are `YujiSyuku` for Japanese base/ruby/unconfirmed, `LongCang` for Chinese base, `Alegreya` for Chinese ruby/unconfirmed, `Kalam` for English, and `NotoSerifJP` for UI text.
+-   **Script-Aware Font Selection**: Users can choose UI, Japanese, Simplified Chinese, Traditional Chinese, English, Japanese/Chinese Ruby, and Japanese/Chinese unconfirmed-input fonts and scales independently. GUI/TUI builds cache non-embedded fonts from GitHub Pages under the local project data `fonts/` directory. Defaults are `YujiSyuku` for Japanese base/ruby/unconfirmed, `LongCang` for Chinese base, `Alegreya` for UI and Chinese ruby/unconfirmed, and `Kalam` for English.
 
 ## 🏛️ Architecture
 

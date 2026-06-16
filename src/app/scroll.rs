@@ -196,8 +196,16 @@ fn build_reading_width_prefix(
         }
         Segment::Anno { .. } => {
             for run in segment_script_runs(segment, script) {
-                let font = fonts.get_for_script(run.script);
-                let run_font_size = fonts.scaled_size_for_script(run.script, font_pixel_size);
+                let font = if run.script.is_chinese() {
+                    fonts.get_unconfirmed_for_script(run.script)
+                } else {
+                    fonts.get_for_script(run.script)
+                };
+                let run_font_size = if run.script.is_chinese() {
+                    fonts.scaled_size_for_unconfirmed_script(run.script, font_pixel_size)
+                } else {
+                    fonts.scaled_size_for_script(run.script, font_pixel_size)
+                };
                 for character in run.reading_text.chars() {
                     let mut buf = [0u8; 4];
                     let ch = character.encode_utf8(&mut buf);
@@ -207,8 +215,16 @@ fn build_reading_width_prefix(
             }
         }
         Segment::Annotated { .. } => {
-            let font = fonts.get_for_script(script);
-            let run_font_size = fonts.scaled_size_for_script(script, font_pixel_size);
+            let font = if script.is_chinese() {
+                fonts.get_unconfirmed_for_script(script)
+            } else {
+                fonts.get_for_script(script)
+            };
+            let run_font_size = if script.is_chinese() {
+                fonts.scaled_size_for_unconfirmed_script(script, font_pixel_size)
+            } else {
+                fonts.scaled_size_for_script(script, font_pixel_size)
+            };
             for character in text.chars() {
                 let mut buf = [0u8; 4];
                 let ch = character.encode_utf8(&mut buf);

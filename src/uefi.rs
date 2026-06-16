@@ -3,7 +3,7 @@
 extern crate alloc;
 
 use crate::app::{App, AppEvent, FontBundle, Fonts};
-use crate::io::{bundled_font_data, bundled_font_entries};
+use crate::io::{bundled_font_data, bundled_font_entries, embedded_alegreya_font_bytes};
 use crate::renderer::{ArgbSurface, RenderCache};
 use crate::ui;
 use ab_glyph::FontVec;
@@ -39,12 +39,11 @@ fn run_inner() -> core::result::Result<(), Status> {
     let yuji_font = load_embedded_font(yuji_font_data)?;
     let yuji_ruby_font = load_embedded_font(yuji_font_data)?;
     let yuji_unconfirmed_font = load_embedded_font(yuji_font_data)?;
-    let ui_font_data: &[u8] = include_bytes!("../fonts/NotoSerifJP-Regular.ttf");
-    let ui_font = load_embedded_font(ui_font_data)?;
+    let ui_font = load_embedded_font(embedded_alegreya_font_bytes())?;
 
     let simplified_chinese_font_data: &[u8] = include_bytes!("../fonts/LongCang-Regular.ttf");
     let simplified_chinese_font = load_embedded_font(simplified_chinese_font_data)?;
-    let chinese_ruby_font_data: &[u8] = include_bytes!("../fonts/Alegreya-VariableFont_wght.ttf");
+    let chinese_ruby_font_data: &[u8] = embedded_alegreya_font_bytes();
     let simplified_chinese_ruby_font = load_embedded_font(chinese_ruby_font_data)?;
     let simplified_chinese_unconfirmed_font = load_embedded_font(chinese_ruby_font_data)?;
     let traditional_chinese_font_data: &[u8] = include_bytes!("../fonts/LongCang-Regular.ttf");

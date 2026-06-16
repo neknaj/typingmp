@@ -152,6 +152,16 @@ impl DisplaySettings {
             scale: self.scale.multiplier(),
         }
     }
+
+    pub fn canvas_layout(self, frame_width: usize, frame_height: usize) -> DisplayCanvasLayout {
+        let viewport = self.viewport(frame_width, frame_height);
+        DisplayCanvasLayout {
+            width: viewport.width,
+            height: viewport.height,
+            scroll_x: 0i32.saturating_sub(viewport.x).max(0),
+            scroll_y: 0i32.saturating_sub(viewport.y).max(0),
+        }
+    }
 }
 
 impl Default for DisplaySettings {
@@ -170,6 +180,14 @@ pub struct DisplayViewport {
     pub width: usize,
     pub height: usize,
     pub scale: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DisplayCanvasLayout {
+    pub width: usize,
+    pub height: usize,
+    pub scroll_x: i32,
+    pub scroll_y: i32,
 }
 
 #[cfg(test)]
@@ -211,6 +229,24 @@ mod tests {
     }
 
     #[test]
+    fn canvas_layout_expands_backing_store_and_preserves_center_view() {
+        let settings = DisplaySettings {
+            aspect_ratio: DisplayAspectRatio::Ratio9x16,
+            scale: DisplayScale::Percent125,
+        };
+
+        assert_eq!(
+            settings.canvas_layout(1920, 1080),
+            DisplayCanvasLayout {
+                width: 1920,
+                height: 3414,
+                scroll_x: 0,
+                scroll_y: 1167
+            }
+        );
+    }
+
+    #[test]
     fn viewport_keeps_full_frame_when_ratio_would_shrink_height() {
         let settings = DisplaySettings {
             aspect_ratio: DisplayAspectRatio::Ratio16x9,
@@ -225,6 +261,24 @@ mod tests {
                 width: 1080,
                 height: 1920,
                 scale: 0.75
+            }
+        );
+    }
+
+    #[test]
+    fn canvas_layout_keeps_native_frame_when_ratio_would_shrink_height() {
+        let settings = DisplaySettings {
+            aspect_ratio: DisplayAspectRatio::Ratio16x9,
+            scale: DisplayScale::Percent75,
+        };
+
+        assert_eq!(
+            settings.canvas_layout(1080, 1920),
+            DisplayCanvasLayout {
+                width: 1080,
+                height: 1920,
+                scroll_x: 0,
+                scroll_y: 0
             }
         );
     }

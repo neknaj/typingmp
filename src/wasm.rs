@@ -3,7 +3,8 @@
 use crate::app::{App, AppEvent, CustomProblem, FontBundle, Fonts, UiCommand};
 use crate::backend::BackendError;
 use crate::io::{
-    bundled_font_entries, bundled_font_file_name, PersistentStore, ProviderError, ProviderErrorKind,
+    bundled_font_entries, bundled_font_file_name, embedded_alegreya_font_bytes, BundledFont,
+    PersistentStore, ProviderError, ProviderErrorKind,
 };
 use crate::renderer::{ArgbSurface, RenderCache};
 use crate::screen_keyboard::{
@@ -23,6 +24,16 @@ use web_sys::{
 
 const LS_KEY: &str = "typingmp_custom_problems";
 type AnimationFrameCallback = Rc<RefCell<Option<Closure<dyn FnMut()>>>>;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct CanvasSyncState {
+    base_width: usize,
+    base_height: usize,
+    width: usize,
+    height: usize,
+    scroll_x: i32,
+    scroll_y: i32,
+}
 
 #[derive(Debug, Clone, Copy, Default)]
 struct WebCustomProblemStore;
@@ -400,6 +411,11 @@ async fn fetch_font_bytes(url: &str) -> Result<Vec<u8>, JsValue> {
     Ok(bytes)
 }
 
+fn embedded_alegreya_font() -> Result<FontVec, JsValue> {
+    FontVec::try_from_vec(embedded_alegreya_font_bytes().to_vec())
+        .map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
 #[wasm_bindgen(start)]
 #[cfg(feature = "wasm")]
 pub fn start() {
@@ -468,8 +484,7 @@ async fn start_async() -> Result<(), JsValue> {
         .dyn_into::<CanvasRenderingContext2d>()?;
 
     // フォントをサーバーから非同期 fetch する（WASM バイナリへの埋め込みを回避）
-    let ui_font = FontVec::try_from_vec(fetch_font_bytes("./fonts/NotoSerifJP-Regular.ttf").await?)
-        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let ui_font = embedded_alegreya_font()?;
     let japanese_font =
         FontVec::try_from_vec(fetch_font_bytes("./fonts/YujiSyuku-Regular.ttf").await?)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
@@ -482,21 +497,13 @@ async fn start_async() -> Result<(), JsValue> {
     let simplified_chinese_font =
         FontVec::try_from_vec(fetch_font_bytes("./fonts/LongCang-Regular.ttf").await?)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let simplified_chinese_ruby_font =
-        FontVec::try_from_vec(fetch_font_bytes("./fonts/Alegreya-VariableFont_wght.ttf").await?)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let simplified_chinese_unconfirmed_font =
-        FontVec::try_from_vec(fetch_font_bytes("./fonts/Alegreya-VariableFont_wght.ttf").await?)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let simplified_chinese_ruby_font = embedded_alegreya_font()?;
+    let simplified_chinese_unconfirmed_font = embedded_alegreya_font()?;
     let traditional_chinese_font =
         FontVec::try_from_vec(fetch_font_bytes("./fonts/LongCang-Regular.ttf").await?)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let traditional_chinese_ruby_font =
-        FontVec::try_from_vec(fetch_font_bytes("./fonts/Alegreya-VariableFont_wght.ttf").await?)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let traditional_chinese_unconfirmed_font =
-        FontVec::try_from_vec(fetch_font_bytes("./fonts/Alegreya-VariableFont_wght.ttf").await?)
-            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let traditional_chinese_ruby_font = embedded_alegreya_font()?;
+    let traditional_chinese_unconfirmed_font = embedded_alegreya_font()?;
     let english_font = FontVec::try_from_vec(fetch_font_bytes("./fonts/Kalam-Regular.ttf").await?)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
@@ -534,7 +541,7 @@ async fn start_async() -> Result<(), JsValue> {
         *instance.borrow_mut() = Some(app.clone());
     });
 
-    let size = Rc::new(RefCell::new((0, 0)));
+    let canvas_sync_state = Rc::new(RefCell::new(CanvasSyncState::default()));
     let last_time = Rc::new(RefCell::new(0.0));
 
     // ファイル選択時の処理: FileReader で読み込み → App に追加 → localStorage 保存
@@ -701,26 +708,6 @@ async fn start_async() -> Result<(), JsValue> {
         closure.forget();
     }
 
-    // ウィンドウリサイズ時の処理
-    {
-        let canvas_clone = canvas.clone();
-        let size_clone = size.clone();
-        let resize_closure = Closure::<dyn FnMut()>::new(move || {
-            let width = canvas_clone.client_width() as u32;
-            let height = canvas_clone.client_height() as u32;
-            canvas_clone.set_width(width);
-            canvas_clone.set_height(height);
-            *size_clone.borrow_mut() = (width as usize, height as usize);
-        });
-        window
-            .add_event_listener_with_callback("resize", resize_closure.as_ref().unchecked_ref())?;
-        resize_closure
-            .as_ref()
-            .unchecked_ref::<js_sys::Function>()
-            .call0(&JsValue::NULL)?;
-        resize_closure.forget();
-    }
-
     // キー入力イベント（特殊キー用）
     {
         let app_clone = app.clone();
@@ -834,10 +821,25 @@ async fn start_async() -> Result<(), JsValue> {
     let f = Rc::new(RefCell::new(None));
     let g = f.clone();
     let ime_input_element = input_element.clone();
+    let canvas_for_frame = canvas.clone();
+    let wrapper_for_frame = wrapper.clone();
 
     // メインループ（アニメーションフレーム）
     *g.borrow_mut() = Some(Closure::<dyn FnMut()>::new(move || {
-        let (width, height) = *size.borrow();
+        let display_settings_for_canvas = app.borrow().display_settings();
+        let (width, height) = match sync_canvas_layout(
+            &canvas_for_frame,
+            &wrapper_for_frame,
+            display_settings_for_canvas,
+            &canvas_sync_state,
+        ) {
+            Ok(size) => size,
+            Err(err) => {
+                web_sys::console::error_1(&err);
+                schedule_next_frame(&f);
+                return;
+            }
+        };
 
         if width == 0 || height == 0 {
             schedule_next_frame(&f);
@@ -869,6 +871,18 @@ async fn start_async() -> Result<(), JsValue> {
                     return;
                 };
                 let app_for_font = app.clone();
+                if file_name == BundledFont::AlegreyaRegular.file_name() {
+                    let mut app_mut = app_for_font.borrow_mut();
+                    if let Err(err) = app_mut.apply_font_bytes(
+                        request.target,
+                        request.font_name,
+                        embedded_alegreya_font_bytes().to_vec(),
+                    ) {
+                        app_mut.report_visible_error(format!("failed to apply font: {err:?}"));
+                    }
+                    schedule_next_frame(&f);
+                    return;
+                }
                 let path = format!("./fonts/{file_name}");
                 spawn_local(async move {
                     match fetch_font_bytes(&path).await {
@@ -976,6 +990,56 @@ async fn start_async() -> Result<(), JsValue> {
     }
 
     Ok(())
+}
+
+fn sync_canvas_layout(
+    canvas: &web_sys::HtmlCanvasElement,
+    wrapper: &web_sys::Element,
+    display_settings: crate::display::DisplaySettings,
+    state: &Rc<RefCell<CanvasSyncState>>,
+) -> Result<(usize, usize), JsValue> {
+    let base_width = wrapper.client_width().max(0) as usize;
+    let base_height = wrapper.client_height().max(0) as usize;
+    if base_width == 0 || base_height == 0 {
+        *state.borrow_mut() = CanvasSyncState::default();
+        return Ok((0, 0));
+    }
+
+    let layout = display_settings.canvas_layout(base_width, base_height);
+    let width = layout.width.max(1).min(u32::MAX as usize);
+    let height = layout.height.max(1).min(u32::MAX as usize);
+    let next_state = CanvasSyncState {
+        base_width,
+        base_height,
+        width,
+        height,
+        scroll_x: layout.scroll_x,
+        scroll_y: layout.scroll_y,
+    };
+
+    let mut state_mut = state.borrow_mut();
+    if *state_mut == next_state {
+        return Ok((width, height));
+    }
+
+    let width_u32 = width as u32;
+    let height_u32 = height as u32;
+    if canvas.width() != width_u32 {
+        canvas.set_width(width_u32);
+    }
+    if canvas.height() != height_u32 {
+        canvas.set_height(height_u32);
+    }
+
+    let style = canvas.style();
+    style.set_property("width", &format!("{width}px"))?;
+    style.set_property("height", &format!("{height}px"))?;
+
+    wrapper.set_scroll_left(layout.scroll_x);
+    wrapper.set_scroll_top(layout.scroll_y);
+    *state_mut = next_state;
+
+    Ok((width, height))
 }
 
 fn js_backend_error(error: BackendError) -> JsValue {

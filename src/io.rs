@@ -323,6 +323,12 @@ impl BundledFont {
     }
 }
 
+pub const FONT_DOWNLOAD_BASE_URL: &str = "https://neknaj.github.io/typingmp/fonts";
+
+pub fn embedded_alegreya_font_bytes() -> &'static [u8] {
+    include_bytes!("../fonts/Alegreya-VariableFont_wght.ttf")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FontAssetId(pub usize);
 
@@ -378,7 +384,14 @@ pub struct ImportedProblem {
 #[derive(Debug, Clone)]
 struct DesktopFontAsset {
     entry: FontEntry,
-    path: std::path::PathBuf,
+    kind: DesktopFontAssetKind,
+}
+
+#[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
+#[derive(Debug, Clone)]
+enum DesktopFontAssetKind {
+    Bundled(FontAssetId),
+    LocalPath(std::path::PathBuf),
 }
 
 #[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
@@ -398,8 +411,13 @@ impl DesktopAssetProvider {
     fn discover_fonts(&mut self) {
         let mut search_dirs: Vec<(std::path::PathBuf, FontSource)> = Vec::new();
 
-        for dir in bundled_font_dirs() {
-            search_dirs.push((dir, FontSource::Bundled));
+        let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for entry in bundled_font_entries() {
+            seen_names.insert(entry.name.clone());
+            self.fonts.push(DesktopFontAsset {
+                kind: DesktopFontAssetKind::Bundled(entry.id),
+                entry,
+            });
         }
 
         #[cfg(target_os = "windows")]
@@ -444,7 +462,6 @@ impl DesktopAssetProvider {
             }
         }
 
-        let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
         for (dir, source) in search_dirs {
             let Ok(read_dir) = std::fs::read_dir(&dir) else {
                 continue;
@@ -469,7 +486,7 @@ impl DesktopAssetProvider {
                 let id = FontAssetId(self.fonts.len());
                 self.fonts.push(DesktopFontAsset {
                     entry: FontEntry { id, name, source },
-                    path,
+                    kind: DesktopFontAssetKind::LocalPath(path),
                 });
             }
         }
@@ -479,18 +496,7 @@ impl DesktopAssetProvider {
 #[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
 impl AssetProvider for DesktopAssetProvider {
     fn load_bundled_font(&self, font: BundledFont) -> Result<Vec<u8>, ProviderError> {
-        let file_name = font.file_name();
-        for dir in bundled_font_dirs() {
-            let path = dir.join(file_name);
-            if let Ok(bytes) = std::fs::read(&path) {
-                return Ok(bytes);
-            }
-        }
-
-        Err(ProviderError::new(
-            ProviderErrorKind::NotFound,
-            format!("bundled font not found: {file_name}"),
-        ))
+        load_bundled_font_file(font.file_name())
     }
 
     fn list_fonts(&self) -> Vec<FontEntry> {
@@ -504,13 +510,201 @@ impl AssetProvider for DesktopAssetProvider {
                 format!("unknown font asset id: {}", id.0),
             ));
         };
-        std::fs::read(&asset.path).map_err(|error| {
+        match &asset.kind {
+            DesktopFontAssetKind::Bundled(id) => {
+                let Some(file_name) = bundled_font_file_name(*id) else {
+                    return Err(ProviderError::new(
+                        ProviderErrorKind::InvalidId,
+                        format!("unknown bundled font asset id: {}", id.0),
+                    ));
+                };
+                load_bundled_font_file(file_name)
+            }
+            DesktopFontAssetKind::LocalPath(path) => std::fs::read(path).map_err(|error| {
+                ProviderError::new(
+                    ProviderErrorKind::Io,
+                    format!("failed to read font '{}': {error}", asset.entry.name),
+                )
+            }),
+        }
+    }
+}
+
+#[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
+fn load_bundled_font_file(file_name: &str) -> Result<Vec<u8>, ProviderError> {
+    if file_name == BundledFont::AlegreyaRegular.file_name() {
+        return Ok(embedded_alegreya_font_bytes().to_vec());
+    }
+
+    let mut cache_error = None;
+    match read_cached_font(file_name) {
+        Ok(Some(bytes)) => match validate_font_bytes(file_name, &bytes) {
+            Ok(()) => return Ok(bytes),
+            Err(error) => {
+                cache_error = Some(error);
+                remove_cached_font(file_name);
+            }
+        },
+        Ok(None) => {}
+        Err(error) => cache_error = Some(error),
+    }
+
+    match fetch_and_cache_font(file_name) {
+        Ok(bytes) => Ok(bytes),
+        Err(fetch_error) => match read_local_bundled_font(file_name) {
+            Ok(bytes) => Ok(bytes),
+            Err(local_error) => Err(ProviderError::new(
+                ProviderErrorKind::NotFound,
+                format_bundled_font_load_error(file_name, cache_error, fetch_error, local_error),
+            )),
+        },
+    }
+}
+
+#[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
+fn read_local_bundled_font(file_name: &str) -> Result<Vec<u8>, ProviderError> {
+    let mut decode_error = None;
+    for dir in bundled_font_dirs() {
+        let path = dir.join(file_name);
+        if let Ok(bytes) = std::fs::read(&path) {
+            match validate_font_bytes(file_name, &bytes) {
+                Ok(()) => return Ok(bytes),
+                Err(error) => decode_error = Some(error),
+            }
+        }
+    }
+
+    if let Some(error) = decode_error {
+        return Err(error);
+    }
+
+    Err(ProviderError::new(
+        ProviderErrorKind::NotFound,
+        format!("local bundled font not found: {file_name}"),
+    ))
+}
+
+#[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
+fn read_cached_font(file_name: &str) -> Result<Option<Vec<u8>>, ProviderError> {
+    let Some(path) = desktop_cached_font_path(file_name) else {
+        return Ok(None);
+    };
+    match std::fs::read(&path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(ProviderError::new(
+            ProviderErrorKind::Io,
+            format!("failed to read cached font '{}': {error}", path.display()),
+        )),
+    }
+}
+
+#[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
+fn validate_font_bytes(file_name: &str, bytes: &[u8]) -> Result<(), ProviderError> {
+    ab_glyph::FontVec::try_from_vec(bytes.to_vec())
+        .map(|_| ())
+        .map_err(|_| {
             ProviderError::new(
-                ProviderErrorKind::Io,
-                format!("failed to read font '{}': {error}", asset.entry.name),
+                ProviderErrorKind::Decode,
+                format!("font data could not be parsed: {file_name}"),
             )
         })
+}
+
+#[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
+fn remove_cached_font(file_name: &str) {
+    if let Some(path) = desktop_cached_font_path(file_name) {
+        let _ = std::fs::remove_file(path);
     }
+}
+
+#[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
+fn format_bundled_font_load_error(
+    file_name: &str,
+    cache_error: Option<ProviderError>,
+    fetch_error: ProviderError,
+    local_error: ProviderError,
+) -> String {
+    match cache_error {
+        Some(cache_error) => format!(
+            "failed to load bundled font {file_name}: cache: {cache_error}; fetch: {fetch_error}; local fallback: {local_error}"
+        ),
+        None => format!(
+            "failed to load bundled font {file_name}: fetch: {fetch_error}; local fallback: {local_error}"
+        ),
+    }
+}
+
+#[cfg(all(
+    not(any(target_arch = "wasm32", feature = "uefi")),
+    feature = "desktop-font-fetch"
+))]
+fn fetch_and_cache_font(file_name: &str) -> Result<Vec<u8>, ProviderError> {
+    let url = format!("{FONT_DOWNLOAD_BASE_URL}/{file_name}");
+    let response = ureq::get(&url).call().map_err(|error| {
+        ProviderError::new(
+            ProviderErrorKind::Io,
+            format!("failed to fetch font from {url}: {error}"),
+        )
+    })?;
+
+    let mut bytes = Vec::new();
+    let mut reader = response.into_reader();
+    std::io::Read::read_to_end(&mut reader, &mut bytes).map_err(|error| {
+        ProviderError::new(
+            ProviderErrorKind::Io,
+            format!("failed to read font response from {url}: {error}"),
+        )
+    })?;
+    if bytes.is_empty() {
+        return Err(ProviderError::new(
+            ProviderErrorKind::Decode,
+            format!("fetched font was empty: {url}"),
+        ));
+    }
+    validate_font_bytes(file_name, &bytes)?;
+
+    if let Some(path) = desktop_cached_font_path(file_name) {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(path, &bytes);
+    }
+
+    Ok(bytes)
+}
+
+#[cfg(all(
+    not(any(target_arch = "wasm32", feature = "uefi")),
+    not(feature = "desktop-font-fetch")
+))]
+fn fetch_and_cache_font(file_name: &str) -> Result<Vec<u8>, ProviderError> {
+    Err(ProviderError::new(
+        ProviderErrorKind::Unsupported,
+        format!("font fetching is disabled: {file_name}"),
+    ))
+}
+
+#[cfg(all(
+    not(any(target_arch = "wasm32", feature = "uefi")),
+    feature = "desktop-font-fetch"
+))]
+pub fn desktop_font_cache_dir() -> Option<std::path::PathBuf> {
+    directories::ProjectDirs::from("io.github", "neknaj", "typingmp")
+        .map(|dirs| dirs.data_local_dir().join("fonts"))
+}
+
+#[cfg(all(
+    not(any(target_arch = "wasm32", feature = "uefi")),
+    not(feature = "desktop-font-fetch")
+))]
+pub fn desktop_font_cache_dir() -> Option<std::path::PathBuf> {
+    None
+}
+
+#[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
+fn desktop_cached_font_path(file_name: &str) -> Option<std::path::PathBuf> {
+    desktop_font_cache_dir().map(|dir| dir.join(file_name))
 }
 
 #[cfg(not(any(target_arch = "wasm32", feature = "uefi")))]
@@ -552,5 +746,53 @@ impl DesktopProblemSourceProvider {
             content,
             timestamp_ms,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn desktop_font_list_always_includes_bundled_font_entries() {
+        let provider = DesktopAssetProvider::discover();
+        let entries = provider.list_fonts();
+
+        for bundled in bundled_font_entries() {
+            assert!(
+                entries.iter().any(|entry| entry.id == bundled.id
+                    && entry.name == bundled.name
+                    && entry.source == FontSource::Bundled),
+                "missing bundled font entry: {}",
+                bundled.name
+            );
+        }
+    }
+
+    #[test]
+    fn desktop_loads_alegreya_from_embedded_bytes() {
+        let provider = DesktopAssetProvider::discover();
+
+        let bytes = provider
+            .load_bundled_font(BundledFont::AlegreyaRegular)
+            .expect("embedded Alegreya should load");
+
+        assert_eq!(bytes.as_slice(), embedded_alegreya_font_bytes());
+    }
+
+    #[test]
+    fn desktop_font_validation_rejects_corrupt_bytes() {
+        assert!(validate_font_bytes("broken.ttf", b"not a font").is_err());
+    }
+
+    #[cfg(feature = "desktop-font-fetch")]
+    #[test]
+    fn desktop_font_cache_dir_points_under_project_fonts() {
+        let path = desktop_font_cache_dir().expect("ProjectDirs should resolve on desktop");
+
+        assert_eq!(
+            path.file_name().and_then(|name| name.to_str()),
+            Some("fonts")
+        );
     }
 }
